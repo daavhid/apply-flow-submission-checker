@@ -236,10 +236,16 @@ window.SubmissionHUD = (function () {
       `;
     }
 
+    const hasTailored = typeof sessionStorage !== 'undefined' && Boolean(sessionStorage.getItem('sqc_tailored_resume'));
+    const isDotNet = (p.targetStack || '').toLowerCase().includes('.net') || (p.targetStack || '').toLowerCase().includes('c#');
+    const resumeStatusText = hasTailored
+      ? '✨ Tailored Resume Active (Dynamic Track)'
+      : (extractedData?.resume_uploaded || (p.resumeText ? '📄 Fixed Base Resume Ready' : 'None detected'));
+
     checksTabHtml += `
       <div class="sqc-checklist">
         ${renderCheckItem("1. Identity & Name/Email Match", errs.find(e => e.rule.includes('IDENTITY') || e.rule.includes('EMAIL')), warns.find(w => w.rule.includes('EMAIL')), "Candidate identity matches active profile")}
-        ${renderCheckItem("2. Resume Attachment & Stack", errs.find(e => e.rule.includes('RESUME')), null, `Uploaded: ${extractedData?.resume_uploaded || 'None detected'}`)}
+        ${renderCheckItem("2. Resume Attachment & Stack", errs.find(e => e.rule.includes('RESUME')), null, resumeStatusText)}
         ${renderCheckItem("3. Screening Questions & Compliance", errs.find(e => e.rule.includes('SCREENING') || e.rule.includes('WORK_AUTH') || e.rule.includes('PROFILE_RECORD') || e.rule.includes('ELIGIBILITY')), null, "17-Category Profile Questions verified")}
         ${renderCheckItem(
           "4. Compensation & Salary Floor",
@@ -442,6 +448,9 @@ window.SubmissionHUD = (function () {
           </button>
         </div>
         <div class="sqc-actions-secondary">
+          <button class="sqc-btn sqc-btn-tool" id="sqc-btn-open-resume" title="Resume Manager: fixed for C# or dynamic tailored for Python/PHP">
+            <span>📄</span> Resume
+          </button>
           <button class="sqc-btn sqc-btn-tool" id="sqc-btn-paste-ai-footer" title="Paste JSON/answers from ChatGPT to auto-fill form">
             <span>📥</span> Paste AI
           </button>
@@ -465,6 +474,9 @@ window.SubmissionHUD = (function () {
 
     drawerEl.querySelector('#sqc-drawer-close')?.addEventListener('click', () => toggleDrawer(false));
     drawerEl.querySelector('#sqc-open-options')?.addEventListener('click', () => chrome.runtime.sendMessage({ type: "OPEN_OPTIONS" }));
+
+    // Resume Manager Modal Handlers
+    drawerEl.querySelector('#sqc-btn-open-resume')?.addEventListener('click', () => openResumeModal());
 
     // AI Prompt Copy Handlers
     const handleCopyAiPrompt = () => {
@@ -821,6 +833,155 @@ window.SubmissionHUD = (function () {
   }
 
   
+  let resumeModalEl = null;
+  function openResumeModal() {
+    if (resumeModalEl) resumeModalEl.remove();
+
+    const p = currentProfile || {};
+    const isDotNet = (p.targetStack || '').toLowerCase().includes('.net') || (p.targetStack || '').toLowerCase().includes('c#');
+    const existingTailored = (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('sqc_tailored_resume') : null) || '';
+    const existingBase = p.resumeText || p.baseResumeText || '';
+    const currentText = existingTailored || existingBase;
+
+    resumeModalEl = document.createElement('div');
+    resumeModalEl.className = 'sqc-ai-modal-overlay';
+    resumeModalEl.innerHTML = `
+      <div class="sqc-ai-modal-card" style="max-width: 540px;">
+        <div class="sqc-ai-modal-header" style="background: linear-gradient(135deg, rgba(30, 58, 138, 0.7), rgba(15, 23, 42, 0.95)); border-bottom: 1px solid rgba(59, 130, 246, 0.3);">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:20px;">📄</span>
+            <div>
+              <div style="font-weight:700; color:#fff; font-size:14px;">Resume Manager & Autofill</div>
+              <div style="font-size:11px; color:#93c5fd;">
+                ${isDotNet ? '🔷 Fixed Resume Track (C# / .NET) • Uploaded once in profile' : '⚡ Dynamic Tailored Track (Python / PHP) • Tailored per job'}
+              </div>
+            </div>
+          </div>
+          <button class="sqc-close-btn" id="sqc-resume-modal-close" style="background:none; border:none; color:#cbd5e1; font-size:16px; cursor:pointer;">✕</button>
+        </div>
+        <div class="sqc-ai-modal-body">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <span style="font-size:11.5px; color:#cbd5e1;">
+              ${existingTailored ? '<strong style="color:#34d399;">✨ Active Tailored Resume Loaded (This Job)</strong>' : (existingBase ? '<strong style="color:#60a5fa;">📄 Default Base Resume Loaded</strong>' : '<span>Paste candidate resume text below:</span>')}
+            </span>
+            <button class="sqc-btn-tool" id="sqc-btn-paste-clip-resume" style="padding:3px 8px; font-size:11px; border-radius:4px; background:rgba(59, 130, 246, 0.2); border-color:rgba(59, 130, 246, 0.4); color:#93c5fd;" title="Paste directly from your clipboard">
+              📋 Paste Clipboard
+            </button>
+          </div>
+          
+          <textarea id="sqc-resume-paste-textarea" class="sqc-ai-modal-textarea" style="height:170px; font-size:11px; font-family:monospace; line-height:1.4;" placeholder="Paste plain text / markdown resume here...">${escapeHtml(currentText)}</textarea>
+          
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px;">
+            <span id="sqc-resume-char-count" style="font-size:10.5px; color:#94a3b8;">${currentText ? `${currentText.length} chars (~${currentText.split(/\s+/).filter(Boolean).length} words)` : '0 characters'}</span>
+            ${existingTailored ? '<button id="sqc-btn-clear-tailored" style="background:none; border:none; color:#f87171; font-size:11px; cursor:pointer; text-decoration:underline;">Revert to Base Resume</button>' : ''}
+          </div>
+          <div id="sqc-resume-modal-status" style="font-size:11px; display:none; margin-top:6px;"></div>
+        </div>
+        <div class="sqc-ai-modal-actions" style="justify-content:space-between;">
+          <button class="sqc-btn sqc-btn-secondary" id="sqc-resume-modal-cancel" style="max-width:90px;">Close</button>
+          <div style="display:flex; gap:8px;">
+            ${isDotNet ? `
+              <button class="sqc-btn sqc-btn-tool" id="sqc-btn-save-profile-resume" title="Save this resume permanently to candidate profile">
+                💾 Save as Default
+              </button>
+            ` : ''}
+            <button class="sqc-btn sqc-btn-autofill" id="sqc-resume-modal-apply" style="max-width:210px;">
+              ⚡ Set & Autofill Form
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(resumeModalEl);
+
+    const textarea = resumeModalEl.querySelector('#sqc-resume-paste-textarea');
+    const charSpan = resumeModalEl.querySelector('#sqc-resume-char-count');
+    const statusDiv = resumeModalEl.querySelector('#sqc-resume-modal-status');
+
+    textarea?.addEventListener('input', () => {
+      const len = textarea.value.length;
+      const words = textarea.value.split(/\s+/).filter(Boolean).length;
+      if (charSpan) charSpan.innerText = `${len} chars (~${words} words)`;
+    });
+
+    resumeModalEl.querySelector('#sqc-btn-paste-clip-resume')?.addEventListener('click', async () => {
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text && textarea) {
+          textarea.value = text;
+          textarea.dispatchEvent(new Event('input'));
+          showToast("📋 Pasted resume text from clipboard!");
+        }
+      } catch (_) {
+        showToast("⚠️ Please paste manually (Ctrl+V) into textarea.");
+      }
+    });
+
+    resumeModalEl.querySelector('#sqc-btn-clear-tailored')?.addEventListener('click', () => {
+      sessionStorage.removeItem('sqc_tailored_resume');
+      showToast("🔄 Reverted to base profile resume.");
+      resumeModalEl?.remove();
+      if (window.SubmissionCheckerCore) {
+        window.SubmissionCheckerCore.runLiveCheck();
+      }
+    });
+
+    resumeModalEl.querySelector('#sqc-resume-modal-close')?.addEventListener('click', () => resumeModalEl?.remove());
+    resumeModalEl.querySelector('#sqc-resume-modal-cancel')?.addEventListener('click', () => resumeModalEl?.remove());
+
+    resumeModalEl.querySelector('#sqc-btn-save-profile-resume')?.addEventListener('click', () => {
+      const val = textarea?.value?.trim();
+      if (!val) return;
+      if (currentProfile) {
+        const updated = { ...currentProfile, resumeText: val };
+        chrome.runtime.sendMessage({ type: "SAVE_PROFILE", profile: updated }, (res) => {
+          if (res && res.success) {
+            showToast("💾 Fixed resume saved permanently to candidate profile!");
+          }
+        });
+      }
+    });
+
+    resumeModalEl.querySelector('#sqc-resume-modal-apply')?.addEventListener('click', () => {
+      const val = textarea?.value?.trim();
+      if (!val) {
+        if (statusDiv) {
+          statusDiv.style.display = 'block';
+          statusDiv.style.color = '#f87171';
+          statusDiv.innerText = 'Please enter or paste resume text.';
+        }
+        return;
+      }
+
+      // Store in session for this job application
+      sessionStorage.setItem('sqc_tailored_resume', val);
+
+      // Autofill any matching resume textareas on the page
+      let filledAny = false;
+      const textareas = document.querySelectorAll('textarea');
+      textareas.forEach(ta => {
+        if (ta.closest('#sqc-hud-container, #sqc-modal-overlay, .sqc-ai-modal-overlay')) return;
+        const lbl = (ta.getAttribute('aria-label') || ta.placeholder || ta.name || ta.id || '').toLowerCase();
+        if (lbl.includes('resume') || lbl.includes('cv') || lbl.includes('paste')) {
+          ta.value = val;
+          ta.dispatchEvent(new Event('input', { bubbles: true }));
+          ta.dispatchEvent(new Event('change', { bubbles: true }));
+          filledAny = true;
+        }
+      });
+
+      showToast(filledAny 
+        ? "⚡ Tailored resume active & autofilled into page form!" 
+        : "⚡ Tailored resume active! Ready for AI Prompts & Autofill.");
+      
+      resumeModalEl?.remove();
+      if (window.SubmissionCheckerCore) {
+        window.SubmissionCheckerCore.runLiveCheck();
+      }
+    });
+  }
+
   let aiModalEl = null;
   function openAiPasteModal() {
     if (aiModalEl) aiModalEl.remove();

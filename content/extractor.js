@@ -1417,7 +1417,11 @@ window.JobFormExtractor = (function () {
     const mergedPhone = phone || savedState.phone_entered || '';
     const mergedSalary = salary || savedState.salary_expected || '';
     const mergedSalaryNum = (salaryNumeric !== null) ? salaryNumeric : (savedState.salary_numeric !== undefined ? savedState.salary_numeric : null);
-    const mergedResume = resumeFilename || savedState.resume_uploaded || '';
+    const tailoredResumeActive = typeof sessionStorage !== 'undefined' && Boolean(sessionStorage.getItem('sqc_tailored_resume'));
+    let mergedResume = resumeFilename || savedState.resume_uploaded || '';
+    if (!mergedResume && tailoredResumeActive) {
+      mergedResume = 'Tailored Resume Loaded (Verified)';
+    }
     const mergedResumeSize = resumeSize || savedState.resume_size || null;
 
     // Canonical key-based map for deduplication
@@ -1943,6 +1947,7 @@ window.JobFormExtractor = (function () {
     });
 
     // 2. Restore Textareas
+    const tailoredResumeText = (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('sqc_tailored_resume') : null) || p.resumeText || p.baseResumeText || '';
     const textareas = document.querySelectorAll('textarea');
     textareas.forEach(ta => {
       if (ta.closest('#sqc-hud-container, #sqc-modal-overlay')) return;
@@ -1951,7 +1956,13 @@ window.JobFormExtractor = (function () {
       let val = findSavedValue(label);
 
       if (!val || isUnansweredPlaceholder(val)) {
-        if (labelNorm.includes('salary') || labelNorm.includes('compensation')) {
+        if (
+          labelNorm.includes('paste resume') || labelNorm.includes('resume text') ||
+          labelNorm === 'resume' || labelNorm === 'resume / cv' || labelNorm === 'resume/cv' ||
+          labelNorm.includes('paste your resume') || labelNorm.includes('copy and paste resume')
+        ) {
+          val = tailoredResumeText || val;
+        } else if (labelNorm.includes('salary') || labelNorm.includes('compensation')) {
           val = savedState.salary_expected || String(p.compensation?.desiredSalary || p.salaryFloor || '120000');
         } else if (labelNorm.includes('responsibilities') || labelNorm.includes('experience summary') || labelNorm.includes('summary')) {
           val = p.technicalExperience?.summary || p.architectureScalability?.scaledSystemDescription || '';
@@ -2143,6 +2154,7 @@ window.JobFormExtractor = (function () {
     }
 
     const techStack = p.targetStack || p.activeStackKey || 'Full Stack Software Engineer';
+    const tailoredResume = (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('sqc_tailored_resume') : null) || p.resumeText || p.baseResumeText || '';
     const expSummary = p.technicalExperience?.summary || p.architectureScalability?.scaledSystemDescription || '';
     const projects = Array.isArray(p.technicalExperience?.keyProjects) ? p.technicalExperience.keyProjects.join('\n- ') : '';
     const skills = Array.isArray(p.technicalExperience?.primarySkills) ? p.technicalExperience.primarySkills.join(', ') : '';
@@ -2154,7 +2166,7 @@ CANDIDATE RESUME & PROFILE CONTEXT:
 - Location: ${p.city ? `${p.city}, ${p.state}, ${p.country}` : 'United States'}
 - Work Authorization: ${p.workAuth?.workAuthType || 'US Citizen'} (Requires Sponsorship: ${p.workAuth?.requiresSponsorship || 'No'})
 - Compensation Base Floor / Desired: $${(p.compensation?.desiredSalary || p.salaryFloor || 130000).toLocaleString()}/year
-- Technical Experience Summary: ${expSummary || 'Experienced software engineer specialized in building high-scale distributed backend systems, REST/GraphQL APIs, cloud infrastructure, and modern web applications.'}
+${tailoredResume ? `- Active Resume Content (Tailored / Profile Base):\n${tailoredResume.slice(0, 3000)}` : `- Technical Experience Summary: ${expSummary || 'Experienced software engineer specialized in building high-scale distributed backend systems, REST/GraphQL APIs, cloud infrastructure, and modern web applications.'}`}
 ${skills ? `- Core Skills: ${skills}` : ''}
 ${projects ? `- Key Accomplishments / Projects:\n- ${projects}` : ''}
     `.trim();

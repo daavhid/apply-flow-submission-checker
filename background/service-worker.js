@@ -198,6 +198,10 @@ const DEFAULT_PROFILES = [
     "country": "United States",
     "dob": "08/18/1988",
     "graduationDate": "5/18/2011",
+    "defaultHiringPassword": "qweQWE123!@#",
+    "school": "University of Notre Dame",
+    "degree": "Bachelor of Science in Computer Science",
+    "degreeLevel": "Bachelor's degree",
     "linkedin": "linkedin.com/in/adam-myers-6ab405428",
     "smsOrWhatsApp": "No",
 
@@ -546,15 +550,49 @@ const DEFAULT_SETTINGS = {
   autoFillCustomQuestions: true // Auto-populate dynamic custom screening Q&A
 };
 
+// Helper: Merge default profiles into existing storage preserving user custom additions & fields
+function syncProfilesWithDefaults(existingProfiles = []) {
+  const result = [...existingProfiles];
+  DEFAULT_PROFILES.forEach(defProf => {
+    const idx = result.findIndex(p => p.id === defProf.id);
+    if (idx >= 0) {
+      result[idx] = {
+        ...defProf,
+        ...result[idx],
+        fullName: result[idx].fullName || defProf.fullName,
+        preferredName: result[idx].preferredName || defProf.preferredName,
+        targetStack: (result[idx].id === "candidate-2" && (!result[idx].targetStack || result[idx].targetStack.includes(".NET") || result[idx].targetStack.includes("C#")))
+          ? defProf.targetStack
+          : (result[idx].targetStack || defProf.targetStack),
+        defaultHiringPassword: result[idx].defaultHiringPassword || defProf.defaultHiringPassword,
+        dob: result[idx].dob || defProf.dob,
+        graduationDate: result[idx].graduationDate || defProf.graduationDate,
+        school: result[idx].school || defProf.school,
+        degree: result[idx].degree || defProf.degree,
+        degreeLevel: result[idx].degreeLevel || defProf.degreeLevel,
+        languagesFrameworks: { ...defProf.languagesFrameworks, ...(result[idx].languagesFrameworks || {}) },
+        primaryStackKeywords: (result[idx].primaryStackKeywords && result[idx].primaryStackKeywords.length > 0) ? result[idx].primaryStackKeywords : defProf.primaryStackKeywords,
+        backgroundAndEducation: { ...defProf.backgroundAndEducation, ...(result[idx].backgroundAndEducation || {}) }
+      };
+    } else {
+      result.push(defProf);
+    }
+  });
+  return result;
+}
+
 // Initialize Storage on install / update
 chrome.runtime.onInstalled.addListener(async () => {
   console.log("[Submission Checker] Extension installed/updated.");
   
   const existing = await chrome.storage.local.get(["profiles", "settings", "submissionsHistory", "duplicateCache"]);
   
-  // Only set default profiles if no profiles exist in storage
   if (!existing.profiles || existing.profiles.length === 0) {
     await chrome.storage.local.set({ profiles: DEFAULT_PROFILES });
+  } else {
+    // Auto-sync existing profiles with standard updates (e.g. Nicholas Adam Myers Python track & Notre Dame)
+    const synced = syncProfilesWithDefaults(existing.profiles);
+    await chrome.storage.local.set({ profiles: synced });
   }
   
   if (!existing.settings) {
@@ -685,6 +723,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         await chrome.storage.local.set({ profiles, settings });
         notifyTabsAboutStateChange();
         return { success: true, profiles };
+      }
+
+      case "SYNC_DEFAULT_PROFILES": {
+        const data = await chrome.storage.local.get(["profiles"]);
+        const synced = syncProfilesWithDefaults(data.profiles || []);
+        await chrome.storage.local.set({ profiles: synced });
+        notifyTabsAboutStateChange();
+        return { success: true, profiles: synced };
       }
 
       case "SAVE_SETTINGS": {
