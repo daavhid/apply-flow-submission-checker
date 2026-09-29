@@ -576,8 +576,13 @@ chrome.runtime.onInstalled.addListener(async () => {
   }
 });
 
-// In-Memory Tab Sessions Map
+// In-Memory Tab-Isolated Sessions Map (tabId -> SessionData)
 const tabApplyFlowSessions = new Map();
+
+// Clean up tab tracking when a tab is closed
+chrome.tabs.onRemoved.addListener((tabId) => {
+  tabApplyFlowSessions.delete(tabId);
+});
 
 // Message Bus Handler
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
