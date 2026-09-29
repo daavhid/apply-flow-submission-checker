@@ -217,10 +217,10 @@ window.JobFormExtractor = (function () {
   function isUnansweredPlaceholder(text) {
     if (!text) return true;
     const s = String(text).trim().toLowerCase();
-    if (['', 'unanswered', 'no file chosen', 'unselected', '(empty)', '(blank)', 'null', 'undefined', 'no answer', '-- no answer --', '- no answer -', 'not specified', '-- not specified --', 'please select', '-- select --', '- select -', 'select one', '-- select one --', 'select an option', '-- select an option --', 'select...', 'choose...', 'choose an option', 'select a gender...', 'select a race...', 'select state', 'select country', '--', '---'].includes(s)) {
+    if (['', 'unanswered', 'no file chosen', 'unselected', '(empty)', '(blank)', 'null', 'undefined', 'no answer', '-- no answer --', '- no answer -', 'not specified', '-- not specified --', 'please select', '-- select --', '- select -', 'select one', '-- select one --', 'select an option', '-- select an option --', 'select...', 'choose...', 'choose an option', 'select a gender...', 'select a race...', 'select state', 'select country', '--', '---', 'required', '(required)', '[required]', 'optional', '(optional)', '[optional]', 'required field', '*required', '*req', '*'].includes(s)) {
       return true;
     }
-    if (/^(--|-)?\s*(select|choose|please select|select one|select an option|no answer|not specified)\s*(--|-)?$/i.test(s)) {
+    if (/^(--|-)?\s*(select|choose|please select|select one|select an option|no answer|not specified|required|optional)\s*(--|-)?$/i.test(s)) {
       return true;
     }
     return false;
@@ -291,15 +291,21 @@ window.JobFormExtractor = (function () {
     // 2. Remove selection confirmations (e.g. "3780 Northwest 22nd Avenue selected.")
     txt = txt.replace(/\s*[A-Za-z0-9\s,#.-]+selected\.?$/i, '');
 
-    // 3. Remove trailing concatenated Yes/No/Options on question headers: e.g. "(required)YesNo", "?YesNo", "?--", "(optional)--"
+    // 3. Remove trailing/concatenated "Required" / "Optional" markers: e.g. "Email Required", "Please ExplainRequired", "(Required)"
+    txt = txt.replace(/\s*\(\s*(?:required|optional|req)\s*\)\s*$/i, '');
+    txt = txt.replace(/\s*\[\s*(?:required|optional|req)\s*\]\s*$/i, '');
+    txt = txt.replace(/\s*\b(?:Required|Optional|Req)\b\s*$/i, '');
+    txt = txt.replace(/([a-z0-9])(?:Required|Optional|Req)\b/i, '$1');
+
+    // 4. Remove trailing concatenated Yes/No/Options on question headers: e.g. "(required)YesNo", "?YesNo", "?--", "(optional)--"
     txt = txt.replace(/(\(\s*required\s*\)|\(\s*optional\s*\)|\?)\s*(?:Yes\s*No|No\s*Yes|Yes\*?\s*No|--\s*Yes\s*No|--|Yes|No)$/i, '$1');
     txt = txt.replace(/(\?)\s*(?:Yes|No|--|Prefer not to say|Hourly|Yearly)+$/i, '$1');
 
-    // 4. Remove dropdown option list cascades (e.g. "----YesNo", "No--YesNo", "----HourlyYearly", "Yearly--HourlyYearly", "Male--MaleFemale...")
+    // 5. Remove dropdown option list cascades (e.g. "----YesNo", "No--YesNo", "----HourlyYearly", "Yearly--HourlyYearly", "Male--MaleFemale...")
     txt = txt.replace(/^(?:--+|[A-Za-z0-9*]+\s*--+)\s*(?:Yes\*?|No|Hourly|Yearly|Male|Female|Prefer|Unspecified|Specialized|Other|High School|College|University|Graduate).*$/i, '');
     txt = txt.replace(/^(?:--+|----)[A-Za-z0-9\s,*_-]+$/i, '');
 
-    // 5. Remove concatenated dropdown placeholders & selected option suffixes:
+    // 6. Remove concatenated dropdown placeholders & selected option suffixes:
     // e.g. "CountrySelect a country", "CountryUnited States", "StateSelect a state", "StateFL"
     txt = txt.replace(/^(Country)\s*(?:Select\s+(?:a\s+)?country|[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*|United States|Federated States.*)$/i, '$1');
     txt = txt.replace(/^(State)\s*(?:Select\s+(?:a\s+)?state|[A-Z]{2}|[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)$/i, '$1');
@@ -310,10 +316,10 @@ window.JobFormExtractor = (function () {
     txt = txt.replace(/([a-zA-Z])\s*Select\s+(?:a|an|one|from|item|apt)?\s*[a-zA-Z.]*/gi, '$1');
     txt = txt.replace(/\b(Select\s+(?:a|an|one|from|item|apt)\s+[a-zA-Z.]+)\b/gi, '').trim();
 
-    // 6. Remove trailing option values attached to optional/custom questions:
+    // 7. Remove trailing option values attached to optional/custom questions:
     txt = txt.replace(/(\(\s*optional\s*\))\s*[A-Za-z0-9\s/_-]+$/i, '$1');
 
-    // 7. Strip leading/trailing junk symbols like '--', ':', '*'
+    // 8. Strip leading/trailing junk symbols like '--', ':', '*'
     txt = txt.replace(/^[-–—:\s*#]+|[-–—:\s*#]+$/g, '').trim();
 
     return clean(txt) || clean(str);
@@ -324,7 +330,7 @@ window.JobFormExtractor = (function () {
     if (!label) return true;
     const l = label.trim().toLowerCase();
     if (l.length < 2) return true;
-    if (['--', 'pre', 'select an item', 'checkbox label', '6 results are available.', 'performance cookies'].includes(l)) return true;
+    if (['--', 'pre', 'select an item', 'checkbox label', '6 results are available.', 'performance cookies', 'required', 'optional'].includes(l)) return true;
     if (/^(--|----)/.test(l)) return true;
     if (/^\d+\s+results?\s+are\s+available/i.test(l)) return true;
     return false;
@@ -334,10 +340,10 @@ window.JobFormExtractor = (function () {
   function extractCustomSelectValue(input) {
     if (!input) return '';
 
+    // Only search combobox/listbox/custom select containers, never generic form-groups of standard text inputs
     const container = input.closest(
       '[role="combobox"], [role="listbox"], [data-automation-id*="select"], [data-automation-id*="dropdown"], ' +
-      '.k-dropdown, [data-role="dropdownlist"], [class*="k-widget"], [class*="select"], [class*="combobox"], [class*="dropdown"], ' +
-      '.bootstrap-select, .form-group, .field, .jv-form-field, div'
+      '.k-dropdown, [data-role="dropdownlist"], [class*="k-widget"], .select2-container, .bootstrap-select, mat-select'
     );
 
     if (container) {
@@ -361,22 +367,6 @@ window.JobFormExtractor = (function () {
         if (titleVal && !isUnansweredPlaceholder(titleVal) && !isCodeOrJunk(titleVal)) return titleVal;
         const btnTxt = clean(btn.innerText || btn.textContent);
         if (btnTxt && !isUnansweredPlaceholder(btnTxt) && !isCodeOrJunk(btnTxt)) return btnTxt;
-      }
-
-      // 3. Check for visible text inside the container that represents the chosen option
-      const spans = container.querySelectorAll('span, div, p');
-      for (const sp of spans) {
-        if (sp === input || sp.contains(input)) continue;
-        const txt = clean(sp.innerText || sp.textContent);
-        if (!txt || txt.length > 60) continue;
-        if (['x', '✕', '×', 'v', '▼', '▲', '▾', 'arrow'].includes(txt.toLowerCase())) continue;
-        if (/^select (a |an |one )?[a-z]*$/i.test(txt) || /^choose/i.test(txt) || /^--/i.test(txt)) continue;
-        if (isUnansweredPlaceholder(txt) || isCodeOrJunk(txt) || isDisclaimerOrInstruction(txt)) continue;
-
-        const lbl = getElementLabel(input).toLowerCase();
-        if (txt.toLowerCase() !== lbl && !lbl.startsWith(txt.toLowerCase())) {
-          return txt;
-        }
       }
     }
 
@@ -1235,7 +1225,10 @@ window.JobFormExtractor = (function () {
       const autoId = (input.getAttribute('data-automation-id') || '').toLowerCase();
       
       let val = clean(input.value);
-      if (!val || isUnansweredPlaceholder(val)) {
+      if (isUnansweredPlaceholder(val)) val = '';
+      
+      const isComboboxWidget = input.getAttribute('role') === 'combobox' || input.getAttribute('role') === 'listbox' || input.hasAttribute('data-role') || input.classList.contains('select') || input.classList.contains('dropdown');
+      if (isComboboxWidget && !val) {
         const customVal = extractCustomSelectValue(input);
         if (customVal && !isUnansweredPlaceholder(customVal)) {
           val = customVal;
