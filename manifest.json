@@ -1,0 +1,56 @@
+{
+  "manifest_version": 3,
+  "name": "Submission Quality Checker & Live Gatekeeper",
+  "version": "1.0.0",
+  "description": "Real-time ATS form extractor, submission quality validator, live HUD, and duplicate prevention gatekeeper.",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "tabs",
+    "scripting",
+    "notifications"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "Submission Quality Checker",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "options_page": "options/options.html",
+  "background": {
+    "service_worker": "background/service-worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "all_frames": true,
+      "match_about_blank": true,
+      "js": [
+        "content/extractor.js",
+        "content/validator.js",
+        "content/hud.js",
+        "content/content.js"
+      ],
+      "css": [
+        "content/hud.css",
+        "content/injector.css"
+      ],
+      "run_at": "document_end"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "icons/*",
+        "content/*"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

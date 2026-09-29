@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ATS Simulator & Test Bench - Submission Quality Checker</title>
+  <link rel="stylesheet" href="test-bench.css">
+</head>
+<body>
+  <div class="testbench-wrapper">
+    <!-- Navigation Banner -->
+    <header class="testbench-header">
+      <div class="header-left">
+        <span class="badge-env">🧪 Interactive ATS Simulator</span>
+        <h1>ATS Portal Testing Ground</h1>
+        <p>Test real-time form extraction, live field validation, floating HUD, and submit capture interception.</p>
+      </div>
+      <div class="header-right">
+        <button class="btn btn-secondary" id="reset-all-forms">🔄 Reset Forms</button>
+      </div>
+    </header>
+
+    <!-- Preset Scenarios Trigger Bar -->
+    <section class="scenario-bar">
+      <div class="scenario-title">⚡ Quick Scenario Presets:</div>
+      <div class="scenario-chips">
+        <button class="chip chip-success" id="preset-valid">
+          ✅ 1. Perfect Valid Submission
+        </button>
+        <button class="chip chip-danger" id="preset-identity-mismatch">
+          🚫 2. Identity Mismatch (Adams vs Andre)
+        </button>
+        <button class="chip chip-danger" id="preset-stack-mismatch">
+          📄 3. Resume Stack Mismatch (Python on C#)
+        </button>
+        <button class="chip chip-danger" id="preset-dirty-answers">
+          ✍️ 4. Dirty Screening Answers ('.', 'na')
+        </button>
+        <button class="chip chip-warning" id="preset-salary-trap">
+          💰 5. Salary Floor Trap ($0 or Below Floor)
+        </button>
+        <button class="chip chip-danger" id="preset-work-auth">
+          🛂 6. Inverted Work Auth / Sponsorship
+        </button>
+        <button class="chip" style="background:rgba(59,130,246,0.25); color:#93c5fd; border:1px solid rgba(59,130,246,0.4);" id="preset-af-hash">
+          ⚡ 7. Inject Apply-Flow Hash (#job_id=cmub9842...)
+        </button>
+        <button class="chip" style="background:rgba(245,158,11,0.2); color:#fde68a; border:1px solid rgba(245,158,11,0.4);" id="preset-clear-hash">
+          🟠 8. Clear Apply-Flow Hash (Untracked)
+        </button>
+        <button class="chip" style="background:rgba(124,58,237,0.25); color:#c4b5fd; border:1px solid rgba(124,58,237,0.4);" id="preset-ai-prompt">
+          🤖 9. Test AI Prompt & Answers
+        </button>
+        <button class="chip" style="background:rgba(16,185,129,0.25); color:#86efac; border:1px solid rgba(16,185,129,0.4);" id="preset-jd-salary">
+          💰 10. Test Context Salary ($145k-$175k)
+        </button>
+      </div>
+    </section>
+
+    <!-- ATS Simulator Tabs -->
+    <div class="ats-container">
+      <div class="portal-selector">
+        <button class="portal-tab active" data-portal="workday">Workday Simulator (HealthStream)</button>
+        <button class="portal-tab" data-portal="greenhouse">Greenhouse Simulator (TechCraft Labs)</button>
+        <button class="portal-tab" data-portal="lever">Lever Simulator (CloudCore Systems)</button>
+      </div>
+
+      <!-- PORTAL 1: WORKDAY SIMULATOR -->
+      <div class="portal-view active" id="portal-workday">
+        <div class="workday-frame">
+          <div class="workday-nav">
+            <div class="workday-logo">Workday Careers • HealthStream</div>
+            <div class="workday-user">Job Application Portal</div>
+          </div>
+
+          <div class="workday-body">
+            <div class="job-meta-card">
+              <h2 data-automation-id="jobPostingHeader">Senior Full Stack C# .NET Engineer</h2>
+              <div class="job-meta-row">
+                <span data-automation-id="companyName">HealthStream</span> • 
+                <span data-automation-id="jobPostingId">Req ID: R-84920</span> • 
+                <span>Nashville, TN (Hybrid)</span> •
+                <span class="salary-range" style="color:#86efac; font-weight:600;">$145,000 - $175,000 / year</span>
+              </div>
+            </div>
+
+            <div class="job-description" style="margin:12px 0 16px 0; padding:12px; background:rgba(15,23,42,0.6); border-radius:8px; border:1px solid rgba(255,255,255,0.08); font-size:12px; color:#cbd5e1; line-height:1.5;">
+              <p><strong>About the Role:</strong> We are looking for a Senior Full Stack Engineer to scale our distributed healthcare APIs and microservices. The candidate will design high-throughput .NET 8 backend systems and collaborate across cross-functional engineering teams.</p>
+              <p style="margin-top:6px;"><strong>Requirements:</strong> 5+ years experience with C#/.NET Core, Azure cloud architecture, relational databases (PostgreSQL/SQL Server), and event-driven messaging (Kafka/RabbitMQ).</p>
+            </div>
+
+            <form id="form-workday" class="workday-form" onsubmit="return false;">
+              <div class="form-section">
+                <h3>1. Contact & Identity Information</h3>
+                <div class="form-row-2">
+                  <div class="form-group">
+                    <label for="wd-first-name">First Name *</label>
+                    <input type="text" id="wd-first-name" data-automation-id="legalNameSection_firstName" placeholder="Adams" />
+                  </div>
+                  <div class="form-group">
+                    <label for="wd-last-name">Last Name *</label>
+                    <input type="text" id="wd-last-name" data-automation-id="legalNameSection_lastName" placeholder="Myers" />
+                  </div>
+                </div>
+
+                <div class="form-row-2">
+                  <div class="form-group">
+                    <label for="wd-email">Email Address *</label>
+                    <input type="email" id="wd-email" data-automation-id="email" placeholder="adams.myers@techcraft.dev" />
+                  </div>
+                  <div class="form-group">
+                    <label for="wd-phone">Phone Number *</label>
+                    <input type="tel" id="wd-phone" data-automation-id="phone" placeholder="+1 (555) 234-8901" />
+                  </div>
+                </div>
+              </div>
+
+              <div class="form-section">
+                <h3>2. Resume Attachment</h3>
+                <div class="form-group">
+                  <label for="wd-resume">Upload Candidate Resume (PDF / DOCX) *</label>
+                  <input type="file" id="wd-resume" accept=".pdf,.doc,.docx" />
+                  <div class="file-preview-chip" id="wd-file-preview" style="display:none;"></div>
+                </div>
+              </div>
+
+              <div class="form-section">
+                <h3>3. Compensation & Expectations</h3>
+                <div class="form-group">
+                  <label for="wd-salary">Desired Annual Base Salary ($ USD) *</label>
+                  <input type="text" id="wd-salary" data-automation-id="salary" placeholder="130,000" />
+                </div>
+              </div>
+
+              <div class="form-section">
+                <h3>4. Screening & Compliance Questions</h3>
+                <div class="form-group">
+                  <label for="wd-q-experience">Describe your production experience with C# .NET Core and Azure microservices: *</label>
+                  <textarea id="wd-q-experience" rows="3" placeholder="I have 6+ years designing high-throughput .NET 8 APIs on Azure..."></textarea>
+                </div>
+
+                <div class="form-group">
+                  <label>Are you legally authorized to work in the United States? *</label>
+                  <div class="radio-options">
+                    <label><input type="radio" name="wd-auth" value="Yes" checked /> Yes</label>
+                    <label><input type="radio" name="wd-auth" value="No" /> No</label>
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label>Will you now or in the future require sponsorship for employment visa status? *</label>
+                  <div class="radio-options">
+                    <label><input type="radio" name="wd-sponsor" value="No" checked /> No</label>
+                    <label><input type="radio" name="wd-sponsor" value="Yes" /> Yes</label>
+                  </div>
+                </div>
+              </div>
+
+              <div class="form-footer">
+                <button type="submit" class="btn-workday-submit" data-automation-id="submit-button">
+                  Submit Application
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+
+      <!-- PORTAL 2: GREENHOUSE SIMULATOR -->
+      <div class="portal-view" id="portal-greenhouse">
+        <div class="greenhouse-frame" id="grnhse_app">
+          <div class="greenhouse-header">
+            <h1 class="app-title">Lead Backend Engineer (Python / Distributed Systems)</h1>
+            <div class="company-name">TechCraft Labs • Austin, TX</div>
+          </div>
+
+          <form id="form-greenhouse" onsubmit="return false;">
+            <div class="field">
+              <label for="gh-name">Full Name *</label>
+              <input type="text" id="gh-name" name="name" data-qa="name" />
+            </div>
+
+            <div class="field">
+              <label for="gh-email">Email *</label>
+              <input type="email" id="gh-email" name="email" data-qa="email" />
+            </div>
+
+            <div class="field">
+              <label for="gh-resume">Resume / CV *</label>
+              <input type="file" id="gh-resume" name="resume" data-qa="resume" />
+            </div>
+
+            <div class="field">
+              <label for="gh-salary">Desired Salary (USD) *</label>
+              <input type="text" id="gh-salary" name="salary" />
+            </div>
+
+            <div class="field">
+              <label for="gh-q1">Why are you interested in joining TechCraft Labs? *</label>
+              <textarea id="gh-q1" rows="3"></textarea>
+            </div>
+
+            <div class="field">
+              <label for="gh-work-auth">Work Authorization Status *</label>
+              <select id="gh-work-auth">
+                <option value="">-- Please select --</option>
+                <option value="US Citizen">US Citizen</option>
+                <option value="Permanent Resident">Permanent Resident / Green Card</option>
+                <option value="Need Sponsorship">Requires Visa Sponsorship</option>
+              </select>
+            </div>
+
+            <div class="actions">
+              <input type="submit" id="submit_app" value="Submit Application" class="btn-greenhouse-submit" />
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- PORTAL 3: LEVER SIMULATOR -->
+      <div class="portal-view" id="portal-lever">
+        <div class="lever-frame lever-form">
+          <div class="posting-headline">
+            <h2>Senior Cloud Platform Architect</h2>
+            <div class="company">CloudCore Systems</div>
+          </div>
+
+          <form id="form-lever" onsubmit="return false;">
+            <div class="application-question">
+              <label>Full Name *</label>
+              <input type="text" name="name" id="lev-name" />
+            </div>
+
+            <div class="application-question">
+              <label>Email *</label>
+              <input type="email" name="email" id="lev-email" />
+            </div>
+
+            <div class="application-question">
+              <label>Resume *</label>
+              <input type="file" name="resume" id="lev-resume" />
+            </div>
+
+            <div class="application-question">
+              <label>Expected Compensation / Base Salary *</label>
+              <input type="text" name="salary" id="lev-salary" />
+            </div>
+
+            <div class="application-question">
+              <label>Describe your experience with multi-region Kubernetes deployments: *</label>
+              <textarea name="comments" id="lev-q1"></textarea>
+            </div>
+
+            <div class="actions">
+              <button type="submit" class="btn-lever-submit">Apply Now</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="test-bench.js"></script>
+</body>
+</html>

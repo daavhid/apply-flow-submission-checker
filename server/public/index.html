@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Submission Quality Checker - Live Command Center</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Top Header -->
+    <header class="app-header">
+      <div class="header-brand">
+        <div class="logo-shield">🛡️</div>
+        <div>
+          <h1>Submission Quality Command Center</h1>
+          <p>Real-time ATS Form Extraction, Live Typing Tracker & Submission Interception Gatekeeper</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <a href="/simulator" target="_blank" class="btn btn-primary" id="open-sim-btn">
+          🧪 Open ATS Simulator (Live Test Form) ↗
+        </a>
+        <button class="btn btn-secondary" id="clear-btn">🗑️ Clear Logs</button>
+      </div>
+    </header>
+
+    <!-- Top Stats Row -->
+    <section class="stats-row">
+      <div class="stat-card">
+        <div class="stat-title">Total Submissions Logged</div>
+        <div class="stat-num" id="stat-total">0</div>
+      </div>
+      <div class="stat-card success">
+        <div class="stat-title">Clean Submissions Passed</div>
+        <div class="stat-num text-success" id="stat-passed">0</div>
+      </div>
+      <div class="stat-card danger">
+        <div class="stat-title">Blocked / Fatal Mismatches</div>
+        <div class="stat-num text-danger" id="stat-blocked">0</div>
+      </div>
+      <div class="stat-card info">
+        <div class="stat-title">Live SSE Connection</div>
+        <div class="stat-num text-info" style="font-size:16px; display:flex; align-items:center; gap:8px;">
+          <span class="pulse-dot"></span>
+          <span id="sse-status">Connected</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Main Two-Column Layout -->
+    <div class="grid-layout">
+      <!-- LEFT COLUMN: LIVE REAL-TIME FORM TRACKER -->
+      <section class="card-panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            <span class="live-tag">LIVE STREAM</span>
+            <h2>Real-Time Form Typing & Extraction</h2>
+          </div>
+          <span class="timestamp-badge" id="live-time">Waiting for input...</span>
+        </div>
+
+        <div id="live-idle-state" class="empty-state">
+          <div style="font-size:32px; margin-bottom:8px;">✍️</div>
+          <h3>No Form Active Right Now</h3>
+          <p>Open any job application page or click <a href="/simulator" target="_blank" style="color:#818cf8; font-weight:bold;">Open ATS Simulator</a> and type to see real-time extraction here!</p>
+        </div>
+
+        <div id="live-active-state" style="display:none;" class="live-details">
+          <!-- Active Candidate & Job Header -->
+          <div class="live-summary-card" id="live-summary-card">
+            <div class="summary-top">
+              <div>
+                <div class="meta-label">Active Candidate Assignment</div>
+                <div class="candidate-highlight" id="live-candidate-name">-</div>
+              </div>
+              <div id="live-status-pill" class="status-pill pass">✅ Ready</div>
+            </div>
+            <div class="summary-grid">
+              <div><span class="meta-label">Job Title:</span> <strong id="live-job-title">-</strong></div>
+              <div><span class="meta-label">Company:</span> <strong id="live-company">-</strong></div>
+              <div><span class="meta-label">ATS Portal:</span> <strong id="live-ats">-</strong></div>
+              <div><span class="meta-label">Req ID:</span> <strong id="live-req-id">-</strong></div>
+            </div>
+          </div>
+
+          <!-- Extracted Fields Table -->
+          <h3 class="section-heading">Extracted Candidate Fields</h3>
+          <div class="fields-table">
+            <div class="field-row">
+              <span class="field-key">Entered Full Name</span>
+              <span class="field-val" id="live-entered-name">-</span>
+            </div>
+            <div class="field-row">
+              <span class="field-key">Entered Email</span>
+              <span class="field-val" id="live-entered-email">-</span>
+            </div>
+            <div class="field-row">
+              <span class="field-key">Entered Phone</span>
+              <span class="field-val" id="live-entered-phone">-</span>
+            </div>
+            <div class="field-row">
+              <span class="field-key">Uploaded Resume File</span>
+              <span class="field-val text-info" id="live-entered-resume">-</span>
+            </div>
+            <div class="field-row">
+              <span class="field-key">Entered Salary</span>
+              <span class="field-val" id="live-entered-salary">-</span>
+            </div>
+          </div>
+
+          <!-- Screening Questions & Answers -->
+          <h3 class="section-heading">Screening Q&A & Compliance Fields (<span id="live-qa-count">0</span>)</h3>
+          <div class="qa-scroll-area" id="live-qa-list">
+            <!-- Dynamically populated Q&A items -->
+          </div>
+        </div>
+      </section>
+
+      <!-- RIGHT COLUMN: FINAL SUBMISSION HISTORY LOG -->
+      <section class="card-panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            <span class="history-tag">AUDIT LOG</span>
+            <h2>Ingested Submissions</h2>
+          </div>
+          <span class="count-badge" id="history-count">0 Records</span>
+        </div>
+
+        <div class="submissions-list" id="submissions-container">
+          <div class="empty-state">
+            <div style="font-size:32px; margin-bottom:8px;">📥</div>
+            <h3>No Submissions Logged Yet</h3>
+            <p>Click "Submit Application" on any job form or the ATS Simulator to test the capture gatekeeper!</p>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- JSON Payload Inspection Modal -->
+  <div class="modal-overlay" id="json-modal" style="display:none;">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 id="modal-title">Submission Payload JSON</h3>
+        <button class="close-btn" id="close-modal-btn">✕</button>
+      </div>
+      <div class="modal-body">
+        <pre class="json-code" id="modal-json-content"></pre>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="modal-copy-btn">📋 Copy JSON</button>
+        <button class="btn btn-primary" id="modal-close-btn-2">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

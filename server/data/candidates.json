@@ -1,0 +1,389 @@
+[
+  {
+    "id": "candidate-1",
+    "fullName": "Carlton Johnson",
+    "legalName": "Carlton Johnson",
+    "firstName": "Carlton",
+    "lastName": "Johnson",
+    "preferredName": "Carlton Johnson",
+    "primaryEmail": "carlton.johnson.dev@gmail.com",
+    "emailAliases": [
+      "carlton.johnson.dev@gmail.com",
+      "carlton.j@techcraft.dev",
+      "carlton.johnson@workmail.io"
+    ],
+    "phone": "7276010870",
+    "formattedPhone": "(727) 601 0870",
+    "address": "32520 Midsummer Night Ln",
+    "city": "Wesley Chapel",
+    "state": "Florida",
+    "zip": "33543",
+    "country": "United States",
+    "linkedin": "linkedin.com/in/carl-j-108bb127/",
+    "smsOrWhatsApp": "No",
+
+    "workAuth": {
+      "authorizedInUS": "Yes",
+      "workAuthType": "US Citizen",
+      "requiresSponsorship": "No",
+      "expirationDate": "N/A"
+    },
+
+    "eligibility": {
+      "age18OrOlder": "Yes",
+      "meetMinimumQualifications": "Yes",
+      "performEssentialFunctions": "Yes"
+    },
+
+    "location": {
+      "resideState": "Florida",
+      "country": "United States",
+      "willingToRelocate": "No",
+      "onsiteTwoDaysWeek": "Yes",
+      "hybridCompliance": "Yes",
+      "occasionalTravel": "Yes",
+      "onsiteFinalInterview": "Yes",
+      "performOvertime": "Yes"
+    },
+
+    "compensation": {
+      "salaryFloor": 120000,
+      "desiredSalary": 130000,
+      "noticePeriod": "2 weeks",
+      "availabilityStart": "Immediate",
+      "employmentContract": "Full-time W2",
+      "yearsExperience": "9+ years",
+      "preferredCurrency": "USD"
+    },
+
+    "formerEmployment": {
+      "workedForCompanyBefore": "No",
+      "previousEmployee": "No",
+      "currentEmployee": "No",
+      "affiliatedCompany": "No"
+    },
+
+    "referralsAndConflicts": {
+      "referredByEmployee": "No",
+      "employeeName": "N/A",
+      "relativesAtCompany": "No",
+      "inRelationshipWithEmployee": "No",
+      "conflictsOfInterest": "No"
+    },
+
+    "restrictiveAgreements": {
+      "restrictiveCovenant": "No",
+      "nonCompeteOrNDA": "No",
+      "nonSolicitation": "No",
+      "confidentialityObligations": "No"
+    },
+
+    "backgroundAndEducation": {
+      "terminatedOrSuspended": "No",
+      "terminatedForMisconduct": "No",
+      "governmentEmployee": "No",
+      "finraRegistered": "No",
+      "education": "Bachelor's Degree (B.S.) in Computer Science – Texas Tech University",
+      "degreeLevel": "Bachelor's degree",
+      "schoolsAttended": "Texas Tech University"
+    },
+
+    "eeoc": {
+      "disability": "No",
+      "raceEthnicity": "Two or More Races",
+      "hispanicLatino": "No",
+      "veteranStatus": "I AM NOT A PROTECTED VETERAN",
+      "identifyAsMilitaryVeteran": "No"
+    },
+
+    "howHeard": {
+      "howHeard": "Job platform",
+      "referred": "No"
+    },
+
+    "credentials": {
+      "securityClearance": "No",
+      "validDriverLicense": "Yes",
+      "professionalLicenses": "No",
+      "languagesOtherThanEnglish": "No"
+    },
+
+    "industryExperience": {
+      "saasExperience": "No",
+      "wmsExperience": "No",
+      "wcsExperience": "No",
+      "logisticsDistribution": "No"
+    },
+
+    "activeStackKey": "dotnet",
+    "stacks": {
+      "dotnet": {
+        "stackKey": "dotnet",
+        "stackTitle": "Full Stack C# / .NET / Cloud",
+        "keywords": [".net", "c#", "csharp", "dotnet", "asp.net", "azure", "sql server", "cloud", "react", "angular"],
+        "resumeFilename": "Carlton_Johnson_DotNet_CV.pdf",
+        "preferredBackend": "C# with .NET",
+        "preferredFrontend": "React, Angular",
+        "preferredDatabase": "SQL Server (including Azure SQL)",
+        "comfortableLanguages": "C# and the .NET ecosystem",
+        "yearsExperience": "9+ years",
+        "skillYears": {
+          "c#": "5+ years",
+          ".net": "8+ years",
+          "react": "4+ years",
+          "angular": "3+ years",
+          "sql server": "7+ years",
+          "azure": "5+ years"
+        },
+        "scaledSystemDescription": "At Microsoft, architected modular .NET 8 microservices and ASP.NET Core APIs on Azure using DDD, CQRS, and Azure Service Bus.",
+        "testingTools": "xUnit, NUnit, MSTest, Moq, Jest, Playwright",
+        "workflowTools": "Technical design reviews, Architecture discussions, DDD, CQRS"
+      },
+      "python": {
+        "stackKey": "python",
+        "stackTitle": "Full Stack Python / AI / Cloud",
+        "keywords": ["python", "django", "fastapi", "flask", "aws", "postgresql", "react", "ai", "machine learning"],
+        "resumeFilename": "Carlton_Johnson_Python_CV.pdf",
+        "preferredBackend": "Python with FastAPI and Django",
+        "preferredFrontend": "React, TypeScript",
+        "preferredDatabase": "PostgreSQL (including AWS RDS)",
+        "comfortableLanguages": "Python and modern web frameworks",
+        "yearsExperience": "9+ years",
+        "skillYears": {
+          "python": "6+ years",
+          "django": "5+ years",
+          "fastapi": "4+ years",
+          "react": "4+ years",
+          "postgresql": "6+ years",
+          "aws": "5+ years"
+        },
+        "scaledSystemDescription": "Architected distributed asynchronous Python services with FastAPI, Celery, and PostgreSQL on AWS.",
+        "testingTools": "PyTest, Unittest, Mock, Playwright, Jest",
+        "workflowTools": "Technical design reviews, DDD, Microservices design"
+      },
+      "php": {
+        "stackKey": "php",
+        "stackTitle": "Full Stack PHP / Laravel / Vue",
+        "keywords": ["php", "laravel", "symfony", "vue", "vue.js", "mysql", "redis", "docker", "gcp"],
+        "resumeFilename": "Carlton_Johnson_PHP_CV.pdf",
+        "preferredBackend": "PHP with Laravel",
+        "preferredFrontend": "Vue.js, Tailwind CSS",
+        "preferredDatabase": "MySQL (including AWS Aurora / GCP Cloud SQL)",
+        "comfortableLanguages": "PHP and modern JavaScript/Vue",
+        "yearsExperience": "9+ years",
+        "skillYears": {
+          "php": "7+ years",
+          "laravel": "6+ years",
+          "vue": "4+ years",
+          "mysql": "7+ years",
+          "docker": "4+ years"
+        },
+        "scaledSystemDescription": "Architected high-throughput Laravel microservices handling queue workers, caching layers, and decoupled REST APIs.",
+        "testingTools": "PHPUnit, Pest, Mockery, Playwright",
+        "workflowTools": "Technical design reviews, Architecture discussions"
+      }
+    },
+
+    "targetStack": "Full Stack C# / .NET / Cloud",
+    "primaryStackKeywords": [".net", "c#", "csharp", "dotnet", "asp.net", "azure", "sql server", "cloud", "react"]
+  },
+  {
+    "id": "candidate-2",
+    "fullName": "Nicholas Adam Myers",
+    "legalName": "Nicholas Adam Myers",
+    "legalFirstName": "Nicholas",
+    "legalMiddleName": "Adam",
+    "legalLastName": "Myers",
+    "preferredName": "Adam Myers",
+    "firstName": "Nicholas",
+    "lastName": "Myers",
+    "nameAliases": [
+      "Nicholas Adam Myers",
+      "Nicholas Myers",
+      "Adam Myers",
+      "Adams Myers",
+      "Nicholas A. Myers"
+    ],
+    "primaryEmail": "adam.r.myers02@gmail.com",
+    "emailAliases": [
+      "adam.r.myers02@gmail.com",
+      "adams.myers@techcraft.dev",
+      "adamsmyers.work@gmail.com",
+      "nicholas.myers@techcraft.dev"
+    ],
+    "phone": "6452417687",
+    "formattedPhone": "(645) 241-7687",
+    "address": "3780 Northwest 22nd Avenue",
+    "city": "Miami",
+    "state": "Florida",
+    "zip": "33142",
+    "country": "United States",
+    "dob": "08/18/1988",
+    "graduationDate": "5/18/2011",
+    "linkedin": "linkedin.com/in/adam-myers-6ab405428",
+    "smsOrWhatsApp": "No",
+
+    "workAuth": {
+      "authorizedInUS": "Yes",
+      "workAuthType": "US Citizen",
+      "requiresSponsorship": "No",
+      "expirationDate": "N/A"
+    },
+
+    "eligibility": {
+      "age18OrOlder": "Yes",
+      "meetMinimumQualifications": "Yes",
+      "performEssentialFunctions": "Yes"
+    },
+
+    "location": {
+      "resideState": "Florida",
+      "country": "United States",
+      "willingToRelocate": "No",
+      "onsiteTwoDaysWeek": "Yes",
+      "hybridCompliance": "Yes",
+      "occasionalTravel": "Yes",
+      "onsiteFinalInterview": "Yes",
+      "performOvertime": "Yes"
+    },
+
+    "compensation": {
+      "salaryFloor": 120000,
+      "desiredSalary": 125000,
+      "noticePeriod": "2 weeks",
+      "availabilityStart": "Immediate",
+      "employmentContract": "Full-time W2",
+      "yearsExperience": "8+ years",
+      "preferredCurrency": "USD"
+    },
+
+    "formerEmployment": {
+      "workedForCompanyBefore": "No",
+      "previousEmployee": "No",
+      "currentEmployee": "No",
+      "affiliatedCompany": "No"
+    },
+
+    "referralsAndConflicts": {
+      "referredByEmployee": "No",
+      "employeeName": "N/A",
+      "relativesAtCompany": "No",
+      "inRelationshipWithEmployee": "No",
+      "conflictsOfInterest": "No"
+    },
+
+    "restrictiveAgreements": {
+      "restrictiveCovenant": "No",
+      "nonCompeteOrNDA": "No",
+      "nonSolicitation": "No",
+      "confidentialityObligations": "No"
+    },
+
+    "backgroundAndEducation": {
+      "terminatedOrSuspended": "No",
+      "terminatedForMisconduct": "No",
+      "governmentEmployee": "No",
+      "finraRegistered": "No",
+      "education": "Bachelor of Science in Computer Science – University of Notre Dame",
+      "degreeLevel": "Bachelor's degree",
+      "schoolsAttended": "University of Notre Dame"
+    },
+
+    "eeoc": {
+      "disability": "No",
+      "raceEthnicity": "Two or More Races",
+      "hispanicLatino": "No",
+      "veteranStatus": "I AM NOT A PROTECTED VETERAN",
+      "identifyAsMilitaryVeteran": "No"
+    },
+
+    "howHeard": {
+      "howHeard": "Job platform",
+      "referred": "No"
+    },
+
+    "credentials": {
+      "securityClearance": "No",
+      "validDriverLicense": "Yes",
+      "professionalLicenses": "No",
+      "languagesOtherThanEnglish": "No"
+    },
+
+    "industryExperience": {
+      "saasExperience": "No",
+      "wmsExperience": "No",
+      "wcsExperience": "No",
+      "logisticsDistribution": "No"
+    },
+
+    "activeStackKey": "python",
+    "stacks": {
+      "python": {
+        "stackKey": "python",
+        "stackTitle": "Full Stack Python / AI / Cloud",
+        "keywords": ["python", "django", "fastapi", "flask", "aws", "postgresql", "react", "ai", "machine learning"],
+        "resumeFilename": "Adam_Myers_Python_CV.pdf",
+        "preferredBackend": "Python with FastAPI and Django",
+        "preferredFrontend": "React, TypeScript",
+        "preferredDatabase": "PostgreSQL (including AWS RDS)",
+        "comfortableLanguages": "Python and modern web frameworks",
+        "yearsExperience": "8+ years",
+        "skillYears": {
+          "python": "6+ years",
+          "django": "5+ years",
+          "fastapi": "4+ years",
+          "react": "4+ years",
+          "postgresql": "6+ years",
+          "aws": "5+ years"
+        },
+        "scaledSystemDescription": "Architected distributed asynchronous Python services with FastAPI, Celery, and PostgreSQL on AWS.",
+        "testingTools": "PyTest, Unittest, Mock, Playwright, Cypress",
+        "workflowTools": "Technical design reviews, DDD, Microservices design"
+      },
+      "dotnet": {
+        "stackKey": "dotnet",
+        "stackTitle": "Full Stack C# / .NET / Azure",
+        "keywords": [".net", "c#", "csharp", "dotnet", "asp.net", "azure", "sql server", "react"],
+        "resumeFilename": "Adam_Myers_DotNet_CV.pdf",
+        "preferredBackend": "C# with .NET",
+        "preferredFrontend": "React",
+        "preferredDatabase": "SQL Server",
+        "comfortableLanguages": "C# and .NET",
+        "yearsExperience": "8+ years",
+        "skillYears": {
+          "c#": "5+ years",
+          ".net": "7+ years",
+          "react": "4+ years",
+          "sql server": "6+ years",
+          "azure": "4+ years"
+        },
+        "scaledSystemDescription": "Architected distributed .NET APIs on Azure cloud.",
+        "testingTools": "xUnit, NUnit, Moq, Playwright",
+        "workflowTools": "Technical design reviews, DDD, CQRS"
+      },
+      "php": {
+        "stackKey": "php",
+        "stackTitle": "Full Stack PHP / Laravel",
+        "keywords": ["php", "laravel", "vue", "mysql", "docker"],
+        "resumeFilename": "Adam_Myers_PHP_CV.pdf",
+        "preferredBackend": "PHP with Laravel",
+        "preferredFrontend": "Vue.js",
+        "preferredDatabase": "MySQL",
+        "comfortableLanguages": "PHP and JavaScript",
+        "yearsExperience": "8+ years",
+        "skillYears": {
+          "php": "6+ years",
+          "laravel": "5+ years",
+          "vue": "3+ years",
+          "mysql": "6+ years"
+        },
+        "scaledSystemDescription": "Architected decoupled Laravel APIs with Redis queues.",
+        "testingTools": "PHPUnit, Mockery, Playwright",
+        "workflowTools": "Technical design reviews"
+      }
+    },
+
+    "targetStack": "Full Stack Python / AI / Cloud",
+    "primaryStackKeywords": ["python", "django", "fastapi", "aws", "postgresql", "react", "ai"]
+  }
+]

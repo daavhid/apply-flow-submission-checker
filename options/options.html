@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Submission Quality Checker - Command Dashboard</title>
+  <link rel="stylesheet" href="options.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="dashboard-layout">
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-logo">🛡️</div>
+        <div>
+          <h2>Quality Gatekeeper</h2>
+          <p>Submission Checker v1.2</p>
+        </div>
+      </div>
+
+      <nav class="nav-menu">
+        <button class="nav-item active" data-tab="candidates">
+          <span class="nav-icon">👤</span>
+          <span>Candidate Profiles</span>
+        </button>
+        <button class="nav-item" data-tab="webhooks">
+          <span class="nav-icon">⚡</span>
+          <span>Webhooks & Endpoints</span>
+        </button>
+        <button class="nav-item" data-tab="rules">
+          <span class="nav-icon">⚖️</span>
+          <span>Validation Rules</span>
+        </button>
+        <button class="nav-item" data-tab="history">
+          <span class="nav-icon">📜</span>
+          <span>Submissions Audit Log</span>
+        </button>
+        <button class="nav-item" data-tab="testbench" id="nav-open-simulator">
+          <span class="nav-icon">🧪</span>
+          <span>ATS Simulator</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="status-indicator">
+          <span class="status-dot"></span>
+          <span>Gatekeeper Active</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      <!-- Top Bar -->
+      <header class="top-bar">
+        <div class="page-title-area">
+          <h1 id="tab-title">Candidate Profiles</h1>
+          <p id="tab-subtitle">Manage candidate assignment profiles, verified identities, tech stacks, and custom screening answers.</p>
+        </div>
+        <div class="top-actions">
+          <button class="btn btn-primary" id="save-all-btn">💾 Save All Changes</button>
+        </div>
+      </header>
+
+      <!-- TAB 1: Candidates Profile Manager -->
+      <section class="tab-pane active" id="tab-candidates">
+        <!-- Admin Profile Lock & Security Card -->
+        <div class="card form-card lock-card">
+          <div class="lock-header">
+            <div>
+              <h3 class="card-title">
+                <span>🔒</span> Admin Assignment & Security Lock
+              </h3>
+              <p class="card-desc">
+                Locks candidate assignment to this applier station. Requires Master Passkey to reassign candidate profile or switch tracks.
+              </p>
+            </div>
+            <span class="badge-status" id="admin-lock-status-badge">🔒 Locked</span>
+          </div>
+
+          <div class="grid-3">
+            <div class="form-group">
+              <label for="admin-passkey-setting">Admin Master Passkey / Token *</label>
+              <input type="password" id="admin-passkey-setting" placeholder="admin-unlock-2026" />
+              <span class="hint">Passkey required to switch profiles in HUD.</span>
+            </div>
+
+            <div class="form-group">
+              <label for="admin-active-assignment">Assigned Candidate Profile</label>
+              <select id="admin-active-assignment" class="custom-input"></select>
+              <span class="hint">Active profile locked for this applier.</span>
+            </div>
+
+            <div class="form-group">
+              <label for="admin-active-stack">Assigned Stack Track</label>
+              <select id="admin-active-stack" class="custom-input">
+                <option value="dotnet">Full Stack C# / .NET Track</option>
+                <option value="python">Full Stack Python / FastAPI Track</option>
+                <option value="php">Full Stack PHP / Laravel Track</option>
+                <option value="auto">Auto-Detect Stack per Job</option>
+              </select>
+              <span class="hint">Tech stack track preference.</span>
+            </div>
+          </div>
+
+          <div class="form-group toggle-group" style="margin-top:12px; margin-bottom:0;">
+            <label class="switch-label">
+              <input type="checkbox" id="profile-lock-toggle" checked />
+              <span class="switch-custom"></span>
+              <span><strong>Enforce Profile Lock</strong> (Disables unauthorized profile switcher in HUD/Popup)</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="section-actions">
+          <div class="section-heading">
+            <h3>Candidate Records Database</h3>
+            <span class="counter-chip" id="candidate-count-chip">0 Profiles</span>
+          </div>
+          <button class="btn btn-primary" id="add-candidate-btn">+ Add New Candidate Profile</button>
+        </div>
+
+        <div class="candidates-grid" id="candidates-grid">
+          <!-- Dynamically populated candidate profile cards -->
+        </div>
+      </section>
+
+      <!-- TAB 2: Webhooks & Endpoints -->
+      <section class="tab-pane" id="tab-webhooks">
+        <div class="card form-card">
+          <div class="section-actions" style="margin-bottom: 12px;">
+            <div>
+              <h3>Configured Webhook Endpoints</h3>
+              <p class="card-desc">When an application passes validation and submits, the payload is immediately broadcast to all active webhooks.</p>
+            </div>
+            <button class="btn btn-primary" id="add-webhook-btn">+ Add Webhook Endpoint</button>
+          </div>
+
+          <div class="webhooks-list" id="webhooks-list">
+            <!-- Dynamically populated webhook endpoint cards -->
+          </div>
+
+          <hr class="card-divider" />
+
+          <h3>Global Applier & Live Typing Stream</h3>
+          <div class="grid-2">
+            <div class="form-group">
+              <label for="applier-id">Applier Identifier / Name</label>
+              <input type="text" id="applier-id" placeholder="Applier-Primary" />
+              <span class="hint">Identifies which team member submitted this application in audit logs.</span>
+            </div>
+
+            <div class="form-group toggle-group" style="padding-top:24px;">
+              <label class="switch-label">
+                <input type="checkbox" id="stream-live-toggle" checked />
+                <span class="switch-custom"></span>
+                <span><strong>Stream Live Typing Events</strong> (Sends live DOM snapshots as candidate fields are filled)</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="form-group toggle-group" style="margin-top:8px;">
+            <label class="switch-label">
+              <input type="checkbox" id="mock-backend-toggle" checked />
+              <span class="switch-custom"></span>
+              <span><strong>Simulate Backend if Offline</strong> (Safely stores logs locally without throwing network errors if backend is starting up)</span>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 3: Rules & Sensitivity -->
+      <section class="tab-pane" id="tab-rules">
+        <div class="card form-card">
+          <h3>Gatekeeper Sensitivity & Enforcement Policy</h3>
+          <p class="card-desc">Configure the strictness of quality validation checks before final submission.</p>
+
+          <div class="grid-2">
+            <div class="form-group">
+              <label for="default-mode">Default Interception Mode</label>
+              <select id="default-mode" class="custom-input">
+                <option value="active">Active Gatekeeper (Hard Block on Validation Errors)</option>
+                <option value="audit">Passive Shadow Mode (Audit and Log Silently)</option>
+              </select>
+              <span class="hint">Active mode prevents accidental submission of mismatched profiles.</span>
+            </div>
+
+            <div class="form-group">
+              <label for="min-screening-len">Min Qualitative Screening Answer Length (Chars)</label>
+              <input type="number" id="min-screening-len" min="1" max="500" value="15" />
+              <span class="hint">Enforces meaningful answers on open-ended technical prompts.</span>
+            </div>
+          </div>
+
+          <div class="grid-2">
+            <div class="form-group">
+              <label for="duplicate-days">Duplicate Submission Warning Window (Days)</label>
+              <input type="number" id="duplicate-days" min="1" max="90" value="14" />
+              <span class="hint">Days to remember previous job submissions to flag duplicate attempts.</span>
+            </div>
+
+            <div class="form-group toggle-group" style="padding-top:24px;">
+              <label class="switch-label">
+                <input type="checkbox" id="allow-override-toggle" checked />
+                <span class="switch-custom"></span>
+                <span><strong>Allow Emergency Override</strong> (Permits appliers to override blocks if intentional)</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Automation & Form Autofill Configuration -->
+        <div class="card form-card" style="margin-top:20px;">
+          <h3>⚡ Automation & Form Pre-Filling ("Automate Everything Else")</h3>
+          <p class="card-desc">Control automated form completion and human verification / CAPTCHA assistance.</p>
+
+          <div class="form-group toggle-group">
+            <label class="switch-label">
+              <input type="checkbox" id="auto-autofill-toggle" checked />
+              <span class="switch-custom"></span>
+              <span><strong>Auto-Fill Candidate Forms on Page Load</strong> (Automatically populates identity, contact, address, and answers when opening application forms)</span>
+            </label>
+          </div>
+
+          <div class="form-group toggle-group" style="margin-top:12px;">
+            <label class="switch-label">
+              <input type="checkbox" id="detect-captcha-toggle" checked />
+              <span class="switch-custom"></span>
+              <span><strong>Detect & Highlight CAPTCHAs / Human Verification</strong> (Glows CAPTCHA puzzles and alerts applier to complete human checks manually)</span>
+            </label>
+          </div>
+
+          <div class="grid-3" style="margin-top:16px;">
+            <div class="form-group toggle-group">
+              <label class="switch-label">
+                <input type="checkbox" id="autofill-eeoc-toggle" checked />
+                <span class="switch-custom"></span>
+                <span><strong>Auto-Fill EEOC Surveys</strong> (Gender, race, veteran, disability)</span>
+              </label>
+            </div>
+
+            <div class="form-group toggle-group">
+              <label class="switch-label">
+                <input type="checkbox" id="autofill-salary-toggle" checked />
+                <span class="switch-custom"></span>
+                <span><strong>Auto-Fill Compensation</strong> (Desired salary floor)</span>
+              </label>
+            </div>
+
+            <div class="form-group toggle-group">
+              <label class="switch-label">
+                <input type="checkbox" id="autofill-custom-qa-toggle" checked />
+                <span class="switch-custom"></span>
+                <span><strong>Auto-Fill Custom Q&A</strong> (Profile question bank)</span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 4: History & Audit Log -->
+      <section class="tab-pane" id="tab-history">
+        <div class="history-controls">
+          <input type="text" id="history-search" placeholder="Search by Candidate, Company, Job Title, or Status..." class="search-input" />
+          <div class="history-btn-group">
+            <button class="btn btn-secondary" id="export-json-btn">📥 Export JSON</button>
+            <button class="btn btn-secondary" id="export-csv-btn">📊 Export CSV</button>
+            <button class="btn btn-danger" id="clear-history-btn">🗑️ Clear History</button>
+          </div>
+        </div>
+
+        <div class="table-container">
+          <table class="audit-table">
+            <thead>
+              <tr>
+                <th>Timestamp</th>
+                <th>Candidate Profile</th>
+                <th>Job Title</th>
+                <th>Company / ATS</th>
+                <th>Resume</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="audit-table-body">
+              <!-- Dynamically populated rows -->
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Profile Edit Modal with Rich Tabs & Dynamic Custom Fields -->
+  <div class="modal-overlay" id="profile-modal" style="display:none;">
+    <div class="modal-box modal-xl">
+      <div class="modal-header">
+        <div>
+          <h2 id="profile-modal-title">Edit Candidate Profile</h2>
+          <p class="modal-subtitle">Configure contact details, stack keywords, compliance, and custom screening questions for autofill.</p>
+        </div>
+        <button class="close-btn" id="close-profile-modal">✕</button>
+      </div>
+
+      <!-- Profile Modal Segmented Tabs -->
+      <div class="modal-tab-bar">
+        <button class="modal-tab-btn active" data-ptab="p-contact">👤 Identity & Contact</button>
+        <button class="modal-tab-btn" data-ptab="p-stack">💻 Tech Stack & Skills</button>
+        <button class="modal-tab-btn" data-ptab="p-compliance">🛂 Work Auth & EEOC</button>
+        <button class="modal-tab-btn" data-ptab="p-comp">💰 Compensation & Edu</button>
+        <button class="modal-tab-btn" data-ptab="p-custom">⚡ Custom Fields & Q&A</button>
+      </div>
+
+      <div class="modal-body">
+        <input type="hidden" id="edit-profile-id" />
+
+        <!-- 1. Identity & Contact -->
+        <div class="modal-ptab active" id="ptab-p-contact">
+          <div class="grid-2">
+            <div class="form-group">
+              <label for="edit-full-name">Full Name *</label>
+              <input type="text" id="edit-full-name" required placeholder="Carlton Johnson" />
+            </div>
+            <div class="form-group">
+              <label for="edit-primary-email">Primary Email *</label>
+              <input type="email" id="edit-primary-email" required placeholder="carlton.johnson.dev@gmail.com" />
+            </div>
+          </div>
+
+          <div class="grid-3">
+            <div class="form-group">
+              <label for="edit-first-name">First Name</label>
+              <input type="text" id="edit-first-name" placeholder="Carlton" />
+            </div>
+            <div class="form-group">
+              <label for="edit-last-name">Last Name</label>
+              <input type="text" id="edit-last-name" placeholder="Johnson" />
+            </div>
+            <div class="form-group">
+              <label for="edit-phone">Phone / Mobile</label>
+              <input type="text" id="edit-phone" placeholder="7276010870" />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="edit-email-aliases">Verified Email Aliases (comma-separated)</label>
+            <input type="text" id="edit-email-aliases" placeholder="carlton.johnson.dev@gmail.com, carlton.j@techcraft.dev" />
+            <span class="hint">Allowed email variations the applier can safely use.</span>
+          </div>
+
+          <div class="grid-2">
+            <div class="form-group">
+              <label for="edit-address">Street Address</label>
+              <input type="text" id="edit-address" placeholder="32520 Midsummer Night Ln" />
+            </div>
+            <div class="form-group">
+              <label for="edit-city">City</label>
+              <input type="text" id="edit-city" placeholder="Wesley Chapel" />
+            </div>
+          </div>
+
+          <div class="grid-3">
+            <div class="form-group">
+              <label for="edit-state">State / Province</label>
+              <input type="text" id="edit-state" placeholder="Florida" />
+            </div>
+            <div class="form-group">
+              <label for="edit-zip">Zip / Postal Code</label>
+              <input type="text" id="edit-zip" placeholder="33543" />
+            </div>
+            <div class="form-group">
+              <label for="edit-country">Country</label>
+              <input type="text" id="edit-country" placeholder="United States" />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="edit-linkedin">LinkedIn Profile URL</label>
+            <input type="text" id="edit-linkedin" placeholder="linkedin.com/in/carl-j-108bb127/" />
+          </div>
+        </div>
+
+        <!-- 2. Tech Stack & Skills -->
+        <div class="modal-ptab" id="ptab-p-stack">
+          <div class="grid-2">
+            <div class="form-group">
+              <label for="edit-target-stack">Target Tech Stack Role</label>
+              <input type="text" id="edit-target-stack" placeholder="Full Stack C# / .NET / Cloud" />
+            </div>
+            <div class="form-group">
+              <label for="edit-years-exp">Years of Experience</label>
+              <input type="text" id="edit-years-exp" placeholder="9+ years" />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="edit-stack-keywords">Stack Keywords (comma-separated)</label>
+            <input type="text" id="edit-stack-keywords" placeholder=".net, c#, csharp, dotnet, asp.net, sql server, azure" />
+            <span class="hint">Keywords used by the validator to match job postings to candidate resumes.</span>
+          </div>
+
+          <div class="form-group">
+            <label for="edit-backend-lang">Primary Backend Languages & Frameworks</label>
+            <input type="text" id="edit-backend-lang" placeholder="C#, ASP.NET Core, .NET 8, Web API, Entity Framework" />
+          </div>
+
+          <div class="form-group">
+            <label for="edit-frontend-lang">Primary Frontend Frameworks & Libraries</label>
+            <input type="text" id="edit-frontend-lang" placeholder="React, TypeScript, Next.js, Tailwind CSS, Angular" />
+          </div>
+
+          <div class="form-group">
+            <label for="edit-db-cloud">Databases & Cloud Infrastructure</label>
+            <input type="text" id="edit-db-cloud" placeholder="SQL Server, PostgreSQL, Redis, Azure (App Services, APIM), Docker" />
+          </div>
+        </div>
+
+        <!-- 3. Work Auth & Compliance -->
+        <div class="modal-ptab" id="ptab-p-compliance">
+          <div class="grid-2">
+            <div class="form-group">
+              <label for="edit-work-auth">Work Authorization Status</label>
+              <select id="edit-work-auth" class="custom-input">
+                <option value="US Citizen">US Citizen</option>
+                <option value="Green Card">Green Card / Permanent Resident</option>
+                <option value="EAD / OPT">EAD / OPT</option>
+                <option value="H-1B">H-1B Visa</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="edit-auth-us">Authorized to Work in US?</label>
+              <select id="edit-auth-us" class="custom-input">
+                <option value="Yes">Yes</option>
+                <option value="No">No</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="grid-2">
+            <div class="form-group">
+              <label for="edit-requires-sponsorship">Requires Sponsorship?</label>
+              <select id="edit-requires-sponsorship" class="custom-input">
+                <option value="No">No (Does Not Require)</option>
+                <option value="Yes">Yes (Requires Sponsorship)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="edit-clearance">Security Clearance</label>
+              <select id="edit-clearance" class="custom-input">
+                <option value="No">No / None</option>
+                <option value="Yes">Yes (Active / Eligible)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="grid-3">
+            <div class="form-group">
+              <label for="edit-gender">Gender</label>
+              <select id="edit-gender" class="custom-input">
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+                <option value="I choose not to self-identify">Decline to State</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="edit-race">Race / Ethnicity</label>
+              <select id="edit-race" class="custom-input">
+                <option value="Two or More Races">Two or More Races</option>
+                <option value="White">White</option>
+                <option value="Black or African American">Black or African American</option>
+                <option value="Asian">Asian</option>
+                <option value="Hispanic or Latino">Hispanic or Latino</option>
+                <option value="Decline to identify">Decline to identify</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="edit-veteran">Veteran Status</label>
+              <select id="edit-veteran" class="custom-input">
+                <option value="I am not a protected veteran">I am not a protected veteran</option>
+                <option value="I identify as one or more protected veteran categories">Protected Veteran</option>
+                <option value="I choose not to self-identify">Decline to identify</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="edit-disability">Disability Status</label>
+            <select id="edit-disability" class="custom-input">
+              <option value="No, I do not have a disability and have not had one in the past">No, I do not have a disability</option>
+              <option value="Yes, I have a disability, or have had one in the past">Yes, I have a disability</option>
+              <option value="I do not want to answer">Decline to state</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- 4. Compensation & Education -->
+        <div class="modal-ptab" id="ptab-p-comp">
+          <div class="grid-2">
+            <div class="form-group">
+              <label for="edit-salary-floor">Salary Floor ($ / Year) *</label>
+              <input type="number" id="edit-salary-floor" required placeholder="120000" />
+              <span class="hint">Minimum acceptable rate. Lower entries trigger hard validation block.</span>
+            </div>
+            <div class="form-group">
+              <label for="edit-desired-salary">Desired Target Salary ($ / Year)</label>
+              <input type="number" id="edit-desired-salary" placeholder="130000" />
+            </div>
+          </div>
+
+          <div class="grid-2">
+            <div class="form-group">
+              <label for="edit-school">University / School Name</label>
+              <input type="text" id="edit-school" placeholder="Texas Tech University" />
+            </div>
+            <div class="form-group">
+              <label for="edit-degree">Degree & Major / Field of Study</label>
+              <input type="text" id="edit-degree" placeholder="B.S. in Computer Science" />
+            </div>
+          </div>
+
+          <div class="grid-2">
+            <div class="form-group">
+              <label for="edit-availability">Availability to Start</label>
+              <input type="text" id="edit-availability" placeholder="Immediate / 2 weeks notice" />
+            </div>
+            <div class="form-group">
+              <label for="edit-relocate">Willing to Relocate?</label>
+              <select id="edit-relocate" class="custom-input">
+                <option value="No">No</option>
+                <option value="Yes">Yes</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- 5. Dynamic Custom Fields & Q&A -->
+        <div class="modal-ptab" id="ptab-p-custom">
+          <div class="custom-fields-header">
+            <div>
+              <h4 style="margin:0; color:#93c5fd;">⚡ Extensible Portal Q&A & Custom Fields</h4>
+              <p class="card-desc" style="margin:2px 0 0 0;">Add new question prompts and values here. The form restorer will automatically match and fill any new questions asked by ATS portals!</p>
+            </div>
+            <button class="btn btn-secondary btn-sm" id="add-custom-field-btn">+ Add Custom Field</button>
+          </div>
+
+          <div class="custom-fields-table-container">
+            <table class="custom-fields-table">
+              <thead>
+                <tr>
+                  <th style="width: 48%;">Question Prompt / Field Label</th>
+                  <th style="width: 44%;">Answer / Value to Fill</th>
+                  <th style="width: 8%;"></th>
+                </tr>
+              </thead>
+              <tbody id="custom-fields-tbody">
+                <!-- Dynamically populated custom field rows -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="cancel-profile-btn">Cancel</button>
+        <button class="btn btn-primary" id="save-profile-btn">💾 Save Candidate Profile</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Webhook Edit Modal -->
+  <div class="modal-overlay" id="webhook-modal" style="display:none;">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h2 id="webhook-modal-title">Configure Webhook Endpoint</h2>
+        <button class="close-btn" id="close-webhook-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="edit-webhook-id" />
+
+        <div class="form-group">
+          <label for="webhook-name">Webhook Endpoint Name *</label>
+          <input type="text" id="webhook-name" placeholder="Apply-Flow Backend" required />
+        </div>
+
+        <div class="form-group">
+          <label for="webhook-url">Endpoint URL (POST) *</label>
+          <input type="url" id="webhook-url" placeholder="http://localhost:3001/api/submissions/log" required />
+          <span class="hint">The HTTP REST endpoint receiving finalized submission payloads.</span>
+        </div>
+
+        <div class="form-group">
+          <label for="webhook-key">API Key / Bearer Token (Optional)</label>
+          <input type="password" id="webhook-key" placeholder="Bearer eyJhbGciOiJIUzI1NiIsIn..." />
+          <span class="hint">Sent in Authorization and X-API-Key request headers.</span>
+        </div>
+
+        <div class="grid-2" style="margin-top:8px;">
+          <div class="form-group toggle-group">
+            <label class="switch-label">
+              <input type="checkbox" id="webhook-active" checked />
+              <span class="switch-custom"></span>
+              <span><strong>Active</strong> (Receive submissions)</span>
+            </label>
+          </div>
+          <div class="form-group toggle-group">
+            <label class="switch-label">
+              <input type="checkbox" id="webhook-live" checked />
+              <span class="switch-custom"></span>
+              <span><strong>Live Typing</strong> (Receive live typing streams)</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="ping-status" id="webhook-ping-status" style="display:none; margin-top:10px;"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="test-webhook-btn">⚡ Test Ping</button>
+        <div style="display:flex; gap:8px;">
+          <button class="btn btn-secondary" id="cancel-webhook-btn">Cancel</button>
+          <button class="btn btn-primary" id="save-webhook-btn">💾 Save Webhook</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- JSON Payload Viewer Modal -->
+  <div class="modal-overlay" id="payload-modal" style="display:none;">
+    <div class="modal-box modal-lg">
+      <div class="modal-header">
+        <h2>Submission Payload Inspection</h2>
+        <button class="close-btn" id="close-payload-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <pre class="json-code-box" id="payload-json-code"></pre>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="copy-json-btn">📋 Copy JSON</button>
+        <button class="btn btn-primary" id="close-payload-btn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>

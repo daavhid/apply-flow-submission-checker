@@ -1,0 +1,375 @@
+/* ATS Simulator & Test Bench Styles */
+:root {
+  --primary: #6366f1;
+  --bg-dark: #090d16;
+  --bg-card: #131d35;
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+body {
+  background-color: var(--bg-dark);
+  color: var(--text-main);
+  padding: 24px;
+  min-height: 100vh;
+}
+
+.testbench-wrapper {
+  max-width: 1040px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* Header */
+.testbench-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: 16px;
+}
+
+.badge-env {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #a5b4fc;
+  background: rgba(99, 102, 241, 0.2);
+  padding: 3px 8px;
+  border-radius: 6px;
+  display: inline-block;
+  margin-bottom: 6px;
+}
+
+.testbench-header h1 {
+  font-size: 24px;
+  color: #fff;
+}
+
+.testbench-header p {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* Scenario Presets Bar */
+.scenario-bar {
+  background: #111827;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.scenario-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #94a3b8;
+}
+
+.scenario-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip {
+  padding: 7px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.15s;
+}
+
+.chip:hover {
+  transform: translateY(-1px);
+}
+
+.chip-success {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+.chip-danger {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.chip-warning {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+/* ATS Container & Tabs */
+.ats-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.portal-selector {
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: 8px;
+}
+
+.portal-tab {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  padding: 8px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.portal-tab.active {
+  background: rgba(99, 102, 241, 0.15);
+  color: #a5b4fc;
+}
+
+.portal-view {
+  display: none;
+}
+
+.portal-view.active {
+  display: block;
+}
+
+/* Simulator Frames (Workday / Greenhouse / Lever Authentic look) */
+.workday-frame {
+  background: #ffffff;
+  color: #1e293b;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+}
+
+.workday-nav {
+  background: #0875e1;
+  color: #ffffff;
+  padding: 14px 24px;
+  display: flex;
+  justify-content: space-between;
+  font-weight: 700;
+}
+
+.workday-body {
+  padding: 24px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.job-meta-card {
+  border-bottom: 2px solid #e2e8f0;
+  padding-bottom: 16px;
+}
+
+.job-meta-card h2 {
+  font-size: 22px;
+  color: #0f172a;
+}
+
+.job-meta-row {
+  font-size: 13px;
+  color: #64748b;
+  margin-top: 4px;
+}
+
+.form-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  border-bottom: 1px solid #f1f5f9;
+  padding-bottom: 18px;
+}
+
+.form-section h3 {
+  font-size: 15px;
+  color: #334155;
+}
+
+.form-row-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.workday-frame label, .greenhouse-frame label, .lever-frame label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.workday-frame input[type="text"],
+.workday-frame input[type="email"],
+.workday-frame input[type="tel"],
+.workday-frame textarea,
+.workday-frame select {
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  color: #0f172a;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.radio-options {
+  display: flex;
+  gap: 18px;
+  padding-top: 4px;
+}
+
+.radio-options label {
+  font-weight: normal;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.btn-workday-submit {
+  background: #0875e1;
+  color: #fff;
+  border: none;
+  padding: 12px 28px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.btn-workday-submit:hover {
+  background: #065cb3;
+}
+
+/* Greenhouse Frame */
+.greenhouse-frame {
+  background: #ffffff;
+  color: #1e293b;
+  border-radius: 12px;
+  padding: 32px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+}
+
+.greenhouse-header {
+  border-bottom: 2px solid #00b22d;
+  padding-bottom: 16px;
+  margin-bottom: 20px;
+}
+
+.greenhouse-header h1 {
+  font-size: 22px;
+  color: #1a1a1a;
+}
+
+.greenhouse-frame .field {
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.greenhouse-frame input[type="text"],
+.greenhouse-frame input[type="email"],
+.greenhouse-frame textarea,
+.greenhouse-frame select {
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: #111;
+}
+
+.btn-greenhouse-submit {
+  background: #00b22d;
+  color: #fff;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 4px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* Lever Frame */
+.lever-frame {
+  background: #fbfbfb;
+  color: #222;
+  border-radius: 12px;
+  padding: 32px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+}
+
+.posting-headline {
+  margin-bottom: 24px;
+  border-bottom: 1px solid #e0e0e0;
+  padding-bottom: 14px;
+}
+
+.application-question {
+  margin-bottom: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lever-frame input[type="text"],
+.lever-frame input[type="email"],
+.lever-frame textarea {
+  background: #fff;
+  border: 1px solid #dcdcdc;
+  border-radius: 4px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.btn-lever-submit {
+  background: #111;
+  color: #fff;
+  border: none;
+  padding: 12px 28px;
+  border-radius: 4px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.btn {
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+}
+
+.btn-secondary {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
