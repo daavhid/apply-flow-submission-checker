@@ -576,6 +576,9 @@ chrome.runtime.onInstalled.addListener(async () => {
   }
 });
 
+// In-Memory Tab Sessions Map
+const tabApplyFlowSessions = new Map();
+
 // Message Bus Handler
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const handler = async () => {
@@ -589,10 +592,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const profiles = data.profiles || [];
         const activeProfile = profiles.find(p => p.id === settings.activeProfileId) || profiles[0] || null;
         
-        // Filter out expired sessions (older than 30 mins)
+        // Check active session for this tab or opener tab, fallback to latest global session
         let activeSession = null;
-        if (data.latestApplyFlowSession && (Date.now() - (data.latestApplyFlowSession.savedAt || 0) < 30 * 60 * 1000)) {
+        const tabId = sender.tab?.id;
+        const openerTabId = sender.tab?.openerTabId;
+
+        if (tabId && tabApplyFlowSessions.has(tabId)) {
+          activeSession = tabApplyFlowSessions.get(tabId);
+        } else if (openerTabId && tabApplyFlowSessions.has(openerTabId)) {
+          activeSession = tabApplyFlowSessions.get(openerTabId);
+          if (tabId) tabApplyFlowSessions.set(tabId, activeSession);
+        } else if (data.latestApplyFlowSession && (Date.now() - (data.latestApplyFlowSession.savedAt || 0) < 2 * 60 * 60 * 1000)) {
+          // Within 2 hours
           activeSession = data.latestApplyFlowSession;
+          if (tabId) tabApplyFlowSessions.set(tabId, activeSession);
         }
 
         return {
@@ -612,6 +625,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             ...sessionData,
             savedAt: Date.now()
           };
+          const tabId = sender.tab?.id;
+          if (tabId) {
+            tabApplyFlowSessions.set(tabId, sessionToSave);
+          }
           await chrome.storage.local.set({ latestApplyFlowSession: sessionToSave });
           return { success: true, session: sessionToSave };
         }

@@ -120,8 +120,25 @@ window.SubmissionCheckerCore = (function () {
 
   function syncApplyFlowContext() {
     const params = JobFormExtractor.extractApplyFlowParams();
-    const jobId = params.jobId || sessionStorage.getItem('applyflow_job_id') || '';
-    const profileId = params.profileId || sessionStorage.getItem('applyflow_profile_id') || '';
+    const jobId = params.jobId || sessionStorage.getItem('applyflow_job_id') || window.__SQC_PERSISTED_AF_SESSION?.jobId || '';
+    const profileId = params.profileId || sessionStorage.getItem('applyflow_profile_id') || window.__SQC_PERSISTED_AF_SESSION?.profileId || '';
+    const profileName = params.profileName || sessionStorage.getItem('applyflow_profile_name') || window.__SQC_PERSISTED_AF_SESSION?.profileName || '';
+    const applierId = params.applierId || sessionStorage.getItem('applyflow_applier_id') || window.__SQC_PERSISTED_AF_SESSION?.applierId || '';
+
+    // If active params are detected on this page, immediately persist them to background storage
+    if (jobId || profileId) {
+      chrome.runtime.sendMessage({
+        type: "PERSIST_REDIRECT_TRACKING",
+        data: {
+          jobId,
+          profileId,
+          profileName,
+          applierId,
+          sourceUrl: window.location.href,
+          timestamp: Date.now()
+        }
+      }).catch(() => {});
+    }
 
     SubmissionHUD.updateApplyFlowInfo(params, applyFlowContext);
 
@@ -143,9 +160,48 @@ window.SubmissionCheckerCore = (function () {
     });
   }
 
-  function attachApplyFlowJobId(jobId) {
-    if (!jobId) return;
-    sessionStorage.setItem('applyflow_job_id', jobId);
+  function attachApplyFlowJobId(input) {
+    if (!input) return;
+    let jobId = input.trim();
+    let profileId = '';
+    let profileName = '';
+    let applierId = '';
+
+    // If input is a full URL or hash string containing parameters
+    if (input.includes('http') || input.includes('#') || input.includes('?')) {
+      try {
+        const u = new URL(input.startsWith('http') ? input : `https://dummy.com/${input.startsWith('/') ? '' : '/'}${input}`);
+        const searchParams = u.searchParams;
+        const rawHash = (u.hash || '').replace(/^#/, '');
+        const hashQuery = rawHash.includes('?') ? rawHash.slice(rawHash.indexOf('?') + 1) : rawHash;
+        const hashParams = new URLSearchParams(hashQuery);
+        const getP = (k) => searchParams.get(k) || hashParams.get(k) || '';
+
+        jobId = getP('job_id') || getP('sqc_job_id') || getP('portal_job_id') || jobId;
+        profileId = getP('profile_id') || getP('sqc_profile_id') || getP('candidate_id') || '';
+        profileName = getP('profile_name') || getP('candidate_name') || '';
+        applierId = getP('applier_id') || getP('sqc_applier_id') || '';
+      } catch (_) {}
+    }
+
+    if (jobId) sessionStorage.setItem('applyflow_job_id', jobId);
+    if (profileId) sessionStorage.setItem('applyflow_profile_id', profileId);
+    if (profileName) sessionStorage.setItem('applyflow_profile_name', profileName);
+    if (applierId) sessionStorage.setItem('applyflow_applier_id', applierId);
+
+    // Persist to background storage so all newly opened sub-tabs receive this context
+    chrome.runtime.sendMessage({
+      type: "PERSIST_REDIRECT_TRACKING",
+      data: {
+        jobId,
+        profileId: profileId || activeProfile?.id || '',
+        profileName: profileName || activeProfile?.fullName || '',
+        applierId: applierId || currentSettings?.applierId || '',
+        sourceUrl: window.location.href,
+        timestamp: Date.now()
+      }
+    }).catch(() => {});
+
     contextFetchedKey = null;
     syncApplyFlowContext();
     runExtractionAndValidation();
@@ -525,52 +581,52 @@ window.SubmissionCheckerCore = (function () {
       if (!target) return;
 
       const link = target.closest('a') || (target.tagName === 'A' ? target : null);
-      const isExt = isExternalApplyLink(target) || (link && isExternalApplyLink(link));
+      if (!link || !link.href || link.href.startsWith('javascript:')) return;
 
-      if (isExt) {
-        const applyFlowParams = JobFormExtractor.extractApplyFlowParams();
-        const effectiveJobId = sessionStorage.getItem('applyflow_job_id') || applyFlowParams.jobId || window.__SQC_PERSISTED_AF_SESSION?.jobId || "";
-        const effectiveProfileId = sessionStorage.getItem('applyflow_profile_id') || applyFlowParams.profileId || window.__SQC_PERSISTED_AF_SESSION?.profileId || activeProfile?.id || "";
-        const effectiveProfileName = applyFlowParams.profileName || window.__SQC_PERSISTED_AF_SESSION?.profileName || activeProfile?.fullName || "";
-        const effectiveApplierId = sessionStorage.getItem('applyflow_applier_id') || applyFlowParams.applierId || currentSettings?.applierId || "";
+      const applyFlowParams = JobFormExtractor.extractApplyFlowParams();
+      const effectiveJobId = applyFlowParams.jobId || sessionStorage.getItem('applyflow_job_id') || window.__SQC_PERSISTED_AF_SESSION?.jobId || "";
+      const effectiveProfileId = applyFlowParams.profileId || sessionStorage.getItem('applyflow_profile_id') || window.__SQC_PERSISTED_AF_SESSION?.profileId || activeProfile?.id || "";
+      const effectiveProfileName = applyFlowParams.profileName || sessionStorage.getItem('applyflow_profile_name') || window.__SQC_PERSISTED_AF_SESSION?.profileName || activeProfile?.fullName || "";
+      const effectiveApplierId = applyFlowParams.applierId || sessionStorage.getItem('applyflow_applier_id') || window.__SQC_PERSISTED_AF_SESSION?.applierId || currentSettings?.applierId || "";
 
-        if (effectiveJobId || effectiveProfileId) {
-          // 1. Persist to Background Storage so new tabs / redirects have it
-          chrome.runtime.sendMessage({
-            type: "PERSIST_REDIRECT_TRACKING",
-            data: {
-              jobId: effectiveJobId,
-              profileId: effectiveProfileId,
-              profileName: effectiveProfileName,
-              applierId: effectiveApplierId,
-              company: currentExtractedData?.company || '',
-              jobTitle: currentExtractedData?.job_title || '',
-              sourceUrl: window.location.href,
-              timestamp: Date.now()
-            }
-          }).catch(() => {});
-
-          // 2. Append hash parameters directly to destination URL
-          if (link && link.href && !link.href.startsWith('javascript:')) {
-            try {
-              const u = new URL(link.href, window.location.href);
-              const hashObj = new URLSearchParams(u.hash.replace(/^#/, ''));
-              if (effectiveJobId) {
-                hashObj.set('job_id', effectiveJobId);
-                hashObj.set('sqc_job_id', effectiveJobId);
-              }
-              if (effectiveProfileId) {
-                hashObj.set('profile_id', effectiveProfileId);
-                hashObj.set('candidate_id', effectiveProfileId);
-              }
-              if (effectiveProfileName) hashObj.set('profile_name', effectiveProfileName);
-              if (effectiveApplierId) hashObj.set('applier_id', effectiveApplierId);
-
-              u.hash = hashObj.toString();
-              link.href = u.toString();
-            } catch (_) {}
+      if (effectiveJobId || effectiveProfileId) {
+        // 1. Persist to Background Storage so new tabs / redirects have it
+        chrome.runtime.sendMessage({
+          type: "PERSIST_REDIRECT_TRACKING",
+          data: {
+            jobId: effectiveJobId,
+            profileId: effectiveProfileId,
+            profileName: effectiveProfileName,
+            applierId: effectiveApplierId,
+            company: currentExtractedData?.company || '',
+            jobTitle: currentExtractedData?.job_title || '',
+            sourceUrl: window.location.href,
+            timestamp: Date.now()
           }
-        }
+        }).catch(() => {});
+
+        // 2. Append hash parameters directly to destination URL
+        try {
+          const u = new URL(link.href, window.location.href);
+          const rawHash = (u.hash || '').replace(/^#/, '');
+          const hashObj = new URLSearchParams(rawHash.includes('?') ? rawHash.slice(rawHash.indexOf('?') + 1) : rawHash);
+          
+          if (effectiveJobId) {
+            hashObj.set('job_id', effectiveJobId);
+            hashObj.set('sqc_job_id', effectiveJobId);
+            hashObj.set('portal_job_id', effectiveJobId);
+          }
+          if (effectiveProfileId) {
+            hashObj.set('profile_id', effectiveProfileId);
+            hashObj.set('candidate_id', effectiveProfileId);
+            hashObj.set('sqc_profile_id', effectiveProfileId);
+          }
+          if (effectiveProfileName) hashObj.set('profile_name', effectiveProfileName);
+          if (effectiveApplierId) hashObj.set('applier_id', effectiveApplierId);
+
+          u.hash = hashObj.toString();
+          link.href = u.toString();
+        } catch (_) {}
       }
     }, true);
   }
