@@ -13,61 +13,45 @@
       <div class="brand">
         <div class="brand-icon">🛡️</div>
         <div>
-          <h1 class="brand-title">Quality Gatekeeper</h1>
-          <p class="brand-subtitle">ATS Submission Quality Guard</p>
+          <h1 class="brand-title">Apply-Flow Guard</h1>
+          <p class="brand-subtitle">Submission Quality & Profile Gatekeeper</p>
         </div>
       </div>
-      <button class="icon-btn" id="open-options-btn" title="Open Settings">⚙️</button>
+      <button class="icon-btn" id="open-options-btn" title="Open Full Settings">⚙️</button>
     </header>
 
-    <!-- Apply-Flow Live Bridge Card -->
-    <section class="card applyflow-card" id="applyflow-card">
-      <div class="card-header-row">
-        <div class="card-label" style="display:flex; align-items:center; gap:6px; color:#93c5fd;">
-          <span style="font-size:14px;">⚡</span> Apply-Flow Connection
-        </div>
-        <span class="status-badge" id="af-status-badge" style="background:rgba(59,130,246,0.2); color:#93c5fd; border:1px solid rgba(59,130,246,0.3);">Checking...</span>
+    <!-- Connection & Automation Quick Bar -->
+    <div class="quick-status-row">
+      <div class="status-pill applyflow-pill" id="applyflow-pill" title="Apply-Flow Job Sync Status">
+        <span class="status-dot green" id="af-status-dot"></span>
+        <span id="af-status-badge">Checking...</span>
       </div>
-      <div id="af-active-info" style="font-size:11px; color:#cbd5e1; margin-top:4px;">
-        <div style="display:flex; justify-content:space-between; margin-bottom:2px;">
-          <span style="color:#94a3b8;">Tab Tracked Job:</span>
-          <span id="af-tab-job-id" style="font-family:monospace; color:#67e8f9; font-weight:600;">None detected</span>
-        </div>
-        <div style="display:flex; justify-content:space-between;">
-          <span style="color:#94a3b8;">Portal Webhook:</span>
-          <span style="font-family:monospace; color:#a7f3d0;">:5000 / :3001</span>
-        </div>
-      </div>
-    </section>
+      <button id="toggle-autofill-quick" class="status-pill auto-pill" title="Toggle Auto-Fill on ATS page load">
+        <span class="pill-icon">⚡</span>
+        <span id="auto-fill-text">Auto: ON</span>
+      </button>
+    </div>
 
-    <!-- Quick Automation Switch Card -->
-    <section class="card automation-card" style="margin-top:0;">
-      <div class="card-header-row">
-        <div class="card-label" style="display:flex; align-items:center; gap:6px; color:#c4b5fd;">
-          <span style="font-size:13px;">⚡</span> Automation & Autofill
-        </div>
-        <button id="toggle-autofill-quick" class="status-badge" style="cursor:pointer; background:rgba(124,58,237,0.2); color:#c4b5fd; border:1px solid rgba(167,139,250,0.4);">Auto: ON</button>
-      </div>
-    </section>
-
-    <!-- Active Profile Card -->
+    <!-- Active Candidate Profile Card -->
     <section class="card profile-card">
       <div class="card-header-row">
         <div class="card-label">Active Candidate Assignment</div>
         <span class="status-badge" id="lock-badge">🔒 Locked</span>
       </div>
+      
       <div class="profile-select-wrapper">
         <select id="profile-select" class="custom-select"></select>
-        <button class="btn btn-secondary btn-sm" id="btn-admin-unlock" style="margin-top:6px; width:100%;">🔑 Admin Unlock & Reassign</button>
+        <button class="btn btn-secondary btn-sm" id="btn-admin-unlock">🔑 Admin Unlock & Reassign</button>
       </div>
+
       <div class="profile-details" id="profile-details">
         <div class="detail-row">
-          <span class="label">Email:</span>
+          <span class="label">Primary Email:</span>
           <span class="val" id="profile-email">...</span>
         </div>
         <div class="detail-row">
-          <span class="label">Floor:</span>
-          <span class="val" id="profile-salary">...</span>
+          <span class="label">Salary Floor:</span>
+          <span class="val highlight" id="profile-salary">...</span>
         </div>
         <div class="detail-row">
           <span class="label">Target Stack:</span>
@@ -76,28 +60,32 @@
       </div>
 
       <!-- In-Popup Admin Passkey Prompt Modal -->
-      <div class="admin-auth-box" id="admin-auth-box" style="display:none; margin-top:10px; padding:10px; background:rgba(30,41,59,0.9); border:1px solid #3b82f6; border-radius:8px;">
-        <div style="font-size:12px; font-weight:600; color:#93c5fd; margin-bottom:6px;">🔑 Admin Profile & Stack Reassignment</div>
-        <label style="font-size:10px; color:#94a3b8; display:block; margin-bottom:2px;">Select Candidate Profile:</label>
-        <select id="admin-target-profile" class="custom-select" style="margin-bottom:6px; font-size:12px;"></select>
-        <label style="font-size:10px; color:#94a3b8; display:block; margin-bottom:2px;">Assigned Stack Track Preference:</label>
-        <select id="admin-target-stack" class="custom-select" style="margin-bottom:6px; font-size:12px;">
+      <div class="admin-auth-box" id="admin-auth-box" style="display:none;">
+        <div class="admin-auth-header">🔑 Admin Profile & Stack Reassignment</div>
+        <label class="input-label">Select Candidate Profile:</label>
+        <select id="admin-target-profile" class="custom-select auth-select"></select>
+        
+        <label class="input-label">Assigned Tech Stack Track:</label>
+        <select id="admin-target-stack" class="custom-select auth-select">
           <option value="dotnet">Full Stack C# / .NET Track</option>
           <option value="python">Full Stack Python / FastAPI Track</option>
           <option value="php">Full Stack PHP / Laravel Track</option>
           <option value="auto">Auto-Detect Stack per Job</option>
         </select>
-        <label style="font-size:10px; color:#94a3b8; display:block; margin-bottom:2px;">Enter Admin Token / Passkey:</label>
-        <input type="password" id="admin-passkey-input" placeholder="Enter admin token..." style="width:100%; box-sizing:border-box; background:#0f172a; color:#fff; border:1px solid rgba(255,255,255,0.2); border-radius:6px; padding:6px 8px; font-size:12px; margin-bottom:6px;" />
-        <div id="admin-auth-error" style="color:#f87171; font-size:11px; margin-bottom:6px; display:none;"></div>
-        <div style="display:flex; gap:6px;">
-          <button class="btn btn-secondary btn-sm" id="btn-cancel-admin" style="flex:1;">Cancel</button>
-          <button class="btn btn-primary btn-sm" id="btn-submit-admin" style="flex:1;">Reassign</button>
+        
+        <label class="input-label">Admin Passkey (Default: 1234567890):</label>
+        <input type="password" id="admin-passkey-input" placeholder="Enter admin passkey..." class="custom-input" />
+        
+        <div id="admin-auth-error" class="auth-error" style="display:none;"></div>
+        
+        <div class="auth-actions">
+          <button class="btn btn-secondary btn-sm" id="btn-cancel-admin">Cancel</button>
+          <button class="btn btn-primary btn-sm" id="btn-submit-admin">Reassign</button>
         </div>
       </div>
     </section>
 
-    <!-- Mode Switcher -->
+    <!-- Interception Mode Toggle -->
     <section class="card mode-card">
       <div class="card-label">Interception Mode</div>
       <div class="mode-toggles">
@@ -109,35 +97,24 @@
         <button class="mode-btn" id="mode-audit" data-mode="audit">
           <span class="mode-icon">📊</span>
           <span class="mode-title">Passive Audit</span>
-          <span class="mode-desc">Log data without blocking</span>
+          <span class="mode-desc">Log without blocking</span>
         </button>
       </div>
     </section>
 
     <!-- Backend Webhook Status -->
     <section class="card webhook-card">
-      <div class="webhook-header">
-        <div class="card-label">Backend Webhook</div>
-        <span class="status-badge" id="webhook-status">Local Logging</span>
-      </div>
-      <div class="webhook-url" id="webhook-url">http://localhost:3001/api/submissions/log</div>
-    </section>
-
-    <!-- Recent Submissions Mini Feed -->
-    <section class="card history-card">
       <div class="card-header-row">
-        <div class="card-label">Recent Submissions</div>
-        <span class="view-all-link" id="view-all-history">View All</span>
+        <div class="card-label">Backend Webhook</div>
+        <span class="status-badge" id="webhook-status">Active</span>
       </div>
-      <div class="submissions-list" id="submissions-list">
-        <div class="empty-state">No submissions recorded yet</div>
-      </div>
+      <div class="webhook-url" id="webhook-url">https://your-service.onrender.com/api/submissions/log</div>
     </section>
 
     <!-- Quick Footer Actions -->
     <footer class="popup-footer">
-      <button class="btn btn-secondary" id="open-test-bench">🧪 Open ATS Simulator</button>
-      <button class="btn btn-primary" id="open-full-dashboard">📊 Dashboard</button>
+      <button class="btn btn-secondary" id="open-test-bench">🧪 ATS Simulator</button>
+      <button class="btn btn-primary" id="open-full-dashboard">⚙️ Extension Settings</button>
     </footer>
   </div>
 

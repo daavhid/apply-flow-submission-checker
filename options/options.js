@@ -613,7 +613,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const profileLockToggle = document.getElementById('profile-lock-toggle');
     const lockStatusBadge = document.getElementById('admin-lock-status-badge');
 
-    if (adminPasskeyInput) adminPasskeyInput.value = s.adminPasskey || 'admin-unlock-2026';
+    if (adminPasskeyInput) adminPasskeyInput.value = s.adminPasskey || '1234567890';
     if (profileLockToggle) profileLockToggle.checked = isLocked;
     if (lockStatusBadge) {
       lockStatusBadge.innerText = isLocked ? "🔒 Locked" : "🔓 Unlocked";
@@ -671,7 +671,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('save-all-btn')?.addEventListener('click', async () => {
     const updatedSettings = {
       ...config.settings,
-      adminPasskey: document.getElementById('admin-passkey-setting')?.value.trim() || 'admin-unlock-2026',
+      adminPasskey: document.getElementById('admin-passkey-setting')?.value.trim() || '1234567890',
       activeProfileId: document.getElementById('admin-active-assignment')?.value || config.settings.activeProfileId,
       activeStackKey: document.getElementById('admin-active-stack')?.value || 'dotnet',
       isProfileLocked: document.getElementById('profile-lock-toggle')?.checked !== false,

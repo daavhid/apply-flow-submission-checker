@@ -528,7 +528,7 @@ const DEFAULT_SETTINGS = {
   activeProfileId: "candidate-1",
   activeStackKey: "dotnet", // Active Tech Stack track assigned to this applier/user (e.g. dotnet, python, php, auto)
   isProfileLocked: true, // Candidate profile is locked to the applier by default
-  adminPasskey: "admin-unlock-2026", // Admin master passkey required to unlock or switch profiles
+  adminPasskey: "1234567890", // Admin master passkey required to unlock or switch profiles
   interceptionMode: "active", // "active" (hard block) or "audit" (shadow passive logging)
   allowOverride: true, // Allow applier to bypass block after warning confirmation
   minScreeningLength: 15, // Min character length for open text technical prompts
@@ -699,7 +699,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         // If profile is locked, require valid admin token
         if (settings.isProfileLocked) {
-          const expectedToken = settings.adminPasskey || "admin-unlock-2026";
+          const expectedToken = settings.adminPasskey || "1234567890";
           if (!message.adminToken || message.adminToken.trim() !== expectedToken.trim()) {
             return {
               success: false,
@@ -720,7 +720,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case "ADMIN_UNLOCK_PROFILE": {
         const data = await chrome.storage.local.get(["settings", "profiles"]);
         const settings = data.settings || DEFAULT_SETTINGS;
-        const expectedToken = settings.adminPasskey || "admin-unlock-2026";
+        const expectedToken = settings.adminPasskey || "1234567890";
 
         if (!message.adminToken || message.adminToken.trim() !== expectedToken.trim()) {
           return { success: false, error: "Invalid Admin Token / Passkey. Authorization rejected." };
@@ -748,7 +748,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case "ADMIN_TOGGLE_LOCK": {
         const data = await chrome.storage.local.get(["settings"]);
         const settings = data.settings || DEFAULT_SETTINGS;
-        const expectedToken = settings.adminPasskey || "admin-unlock-2026";
+        const expectedToken = settings.adminPasskey || "1234567890";
 
         if (!message.adminToken || message.adminToken.trim() !== expectedToken.trim()) {
           return { success: false, error: "Invalid Admin Token. Action rejected." };

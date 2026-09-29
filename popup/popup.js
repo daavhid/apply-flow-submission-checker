@@ -1,5 +1,5 @@
 /**
- * Submission Quality Checker - Popup Controller
+ * Submission Quality Checker - Executive Popup Controller
  */
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -10,7 +10,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const modeActiveBtn = document.getElementById('mode-active');
   const modeAuditBtn = document.getElementById('mode-audit');
   const webhookUrl = document.getElementById('webhook-url');
-  const submissionsList = document.getElementById('submissions-list');
+  const webhookStatus = document.getElementById('webhook-status');
 
   const lockBadge = document.getElementById('lock-badge');
   const btnAdminUnlock = document.getElementById('btn-admin-unlock');
@@ -33,15 +33,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  async function loadHistory() {
-    return new Promise((resolve) => {
-      chrome.runtime.sendMessage({ type: "GET_HISTORY" }, (res) => {
-        renderHistory(res.history || []);
-        resolve();
-      });
-    });
-  }
-
   function render() {
     if (!config) return;
 
@@ -49,14 +40,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     const isLocked = settings.isProfileLocked !== false;
 
     // Render Profiles Dropdown
-    profileSelect.innerHTML = (profiles || []).map(p => `
-      <option value="${p.id}" ${activeProfile && activeProfile.id === p.id ? 'selected' : ''}>
-        ${p.fullName}
-      </option>
-    `).join('');
+    if (profileSelect) {
+      profileSelect.innerHTML = (profiles || []).map(p => `
+        <option value="${p.id}" ${activeProfile && activeProfile.id === p.id ? 'selected' : ''}>
+          ${escapeHtml(p.fullName)}
+        </option>
+      `).join('');
+      profileSelect.disabled = isLocked;
+    }
 
-    // If locked, disable direct select
-    profileSelect.disabled = isLocked;
     if (lockBadge) {
       lockBadge.innerText = isLocked ? "🔒 Locked" : "🔓 Unlocked";
       lockBadge.style.background = isLocked ? "rgba(239, 68, 68, 0.2)" : "rgba(34, 197, 94, 0.2)";
@@ -67,34 +59,39 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (adminTargetProfile) {
       adminTargetProfile.innerHTML = (profiles || []).map(p => `
         <option value="${p.id}" ${activeProfile && activeProfile.id === p.id ? 'selected' : ''}>
-          ${p.fullName} (${p.targetStack || 'Dev'})
+          ${escapeHtml(p.fullName)} (${escapeHtml(p.targetStack || 'Dev')})
         </option>
       `).join('');
     }
 
     // Render Active Details
     if (activeProfile) {
-      profileEmail.innerText = activeProfile.primaryEmail;
-      profileSalary.innerText = `$${(activeProfile.salaryFloor || 0).toLocaleString()}`;
-      profileStack.innerText = activeProfile.targetStack || 'General';
+      if (profileEmail) profileEmail.innerText = activeProfile.primaryEmail || 'None';
+      if (profileSalary) profileSalary.innerText = `$${(activeProfile.salaryFloor || 0).toLocaleString()}`;
+      if (profileStack) profileStack.innerText = activeProfile.targetStack || 'General Track';
     }
 
-    // Render Mode
+    // Render Interception Mode
     const isAudit = settings.interceptionMode === 'audit';
-    modeActiveBtn.classList.toggle('active', !isAudit);
-    modeAuditBtn.classList.toggle('active', isAudit);
+    if (modeActiveBtn) modeActiveBtn.classList.toggle('active', !isAudit);
+    if (modeAuditBtn) modeAuditBtn.classList.toggle('active', isAudit);
 
-    // Render Webhook URL
-    webhookUrl.innerText = settings.backendWebhookUrl || "None (Local Only)";
+    // Render Webhook URL & Status
+    if (webhookUrl) {
+      webhookUrl.innerText = settings.backendWebhookUrl || "None (Local Audit Only)";
+    }
+    if (webhookStatus) {
+      const isConfigured = !!settings.backendWebhookUrl && !settings.backendWebhookUrl.includes('localhost');
+      webhookStatus.innerText = isConfigured ? "Live Target" : "Local Logging";
+      webhookStatus.style.background = isConfigured ? "rgba(34, 197, 94, 0.2)" : "rgba(100, 116, 139, 0.2)";
+      webhookStatus.style.color = isConfigured ? "#86efac" : "#94a3b8";
+    }
 
     // Render Quick Automation Toggle
-    const autoBadge = document.getElementById('toggle-autofill-quick');
-    if (autoBadge) {
+    const autoFillText = document.getElementById('auto-fill-text');
+    if (autoFillText) {
       const isAuto = settings.autoAutofillOnPageLoad !== false;
-      autoBadge.innerText = isAuto ? "Auto: ON" : "Auto: OFF";
-      autoBadge.style.background = isAuto ? "rgba(124, 58, 237, 0.25)" : "rgba(100, 116, 139, 0.25)";
-      autoBadge.style.color = isAuto ? "#c4b5fd" : "#94a3b8";
-      autoBadge.style.borderColor = isAuto ? "rgba(167, 139, 250, 0.5)" : "rgba(100, 116, 139, 0.4)";
+      autoFillText.innerText = isAuto ? "Auto: ON" : "Auto: OFF";
     }
 
     // Detect Apply-Flow on Active Tab
@@ -103,7 +100,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   async function checkTabApplyFlow() {
     const afBadge = document.getElementById('af-status-badge');
-    const afTabJob = document.getElementById('af-tab-job-id');
+    const afDot = document.getElementById('af-status-dot');
 
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (!tabs || tabs.length === 0) return;
@@ -120,57 +117,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         const jobId = getParam('job_id') || getParam('sqc_job_id') || getParam('portal_job_id');
 
         if (jobId) {
-          if (afBadge) {
-            afBadge.innerText = "🟢 Synced";
-            afBadge.style.background = "rgba(34, 197, 94, 0.2)";
-            afBadge.style.color = "#86efac";
-            afBadge.style.borderColor = "rgba(34, 197, 94, 0.4)";
-          }
-          if (afTabJob) {
-            afTabJob.innerText = jobId.slice(0, 16) + (jobId.length > 16 ? '...' : '');
-            afTabJob.title = jobId;
+          if (afBadge) afBadge.innerText = `Synced (${jobId.slice(0, 12)}...)`;
+          if (afDot) {
+            afDot.className = "status-dot green";
           }
         } else {
-          if (afBadge) {
-            afBadge.innerText = "🟠 No Hash/Query";
-            afBadge.style.background = "rgba(245, 158, 11, 0.2)";
-            afBadge.style.color = "#fde68a";
-            afBadge.style.borderColor = "rgba(245, 158, 11, 0.4)";
-          }
-          if (afTabJob) {
-            afTabJob.innerText = "Untracked URL";
+          if (afBadge) afBadge.innerText = "Standalone / Untracked";
+          if (afDot) {
+            afDot.className = "status-dot amber";
           }
         }
       } catch (e) {
         if (afBadge) afBadge.innerText = "Standby";
       }
     });
-  }
-
-  function renderHistory(history) {
-    if (!history || history.length === 0) {
-      submissionsList.innerHTML = '<div class="empty-state">No submissions recorded yet</div>';
-      return;
-    }
-
-    const recent = history.slice(0, 5);
-    submissionsList.innerHTML = recent.map(sub => {
-      const data = sub.extracted_data || {};
-      const status = sub.validation_status || "UNKNOWN";
-      let tagClass = 'passed';
-      if (status.includes('FAIL') || status.includes('BLOCK')) tagClass = 'blocked';
-      if (status.includes('OVERRIDDEN')) tagClass = 'overridden';
-
-      return `
-        <div class="sub-item">
-          <div class="sub-info">
-            <span class="sub-job">${escapeHtml(data.job_title || 'Application')}</span>
-            <span class="sub-company">${escapeHtml(data.company || 'Company')} • ${new Date(sub.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-          </div>
-          <span class="sub-status-tag ${tagClass}">${escapeHtml(status)}</span>
-        </div>
-      `;
-    }).join('');
   }
 
   function escapeHtml(str) {
@@ -181,11 +141,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // Profile change when unlocked
-  profileSelect.addEventListener('change', (e) => {
+  profileSelect?.addEventListener('change', (e) => {
     const profileId = e.target.value;
     chrome.runtime.sendMessage({ type: "SET_ACTIVE_PROFILE", profileId }, (res) => {
       if (!res.success && res.isLocked) {
-        alert("Profile is locked. Please use 'Admin Unlock & Reassign' with the Admin Token.");
+        alert("Profile is locked. Please use 'Admin Unlock & Reassign' with the Admin Passkey.");
       }
       loadData();
     });
@@ -213,7 +173,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const activeStackKey = document.getElementById('admin-target-stack')?.value || 'dotnet';
 
     if (!token) {
-      adminAuthError.innerText = "Please enter the Admin Token / Passkey.";
+      adminAuthError.innerText = "Please enter the Admin Passkey (Default: 1234567890).";
       adminAuthError.style.display = 'block';
       return;
     }
@@ -230,7 +190,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         adminAuthError.style.display = 'none';
         loadData();
       } else {
-        adminAuthError.innerText = res?.error || "Incorrect Admin Token.";
+        adminAuthError.innerText = res?.error || "Incorrect Admin Passkey.";
         adminAuthError.style.display = 'block';
       }
     });
@@ -265,16 +225,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
 
-  // Quick navigation buttons
+  // Navigation buttons
   document.getElementById('open-options-btn')?.addEventListener('click', () => {
     chrome.runtime.openOptionsPage();
   });
 
   document.getElementById('open-full-dashboard')?.addEventListener('click', () => {
-    chrome.runtime.openOptionsPage();
-  });
-
-  document.getElementById('view-all-history')?.addEventListener('click', () => {
     chrome.runtime.openOptionsPage();
   });
 
@@ -284,5 +240,4 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Initial load
   await loadData();
-  await loadHistory();
 });
