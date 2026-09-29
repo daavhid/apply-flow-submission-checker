@@ -302,78 +302,102 @@
   <div class="modal-overlay" id="profile-modal" style="display:none;">
     <div class="modal-box modal-xl">
       <div class="modal-header">
-        <div>
-          <h2 id="profile-modal-title">Edit Candidate Profile</h2>
-          <p class="modal-subtitle">Configure contact details, stack keywords, compliance, and custom screening questions for autofill.</p>
+        <div class="modal-header-title-area">
+          <div class="modal-header-icon">👤</div>
+          <div>
+            <h2 id="profile-modal-title">Candidate Profile & Resume Command Center</h2>
+            <p class="modal-subtitle">Auto-ingest PDF / Word DOCX resumes, manage contact, technical stack, EEOC compliance, and custom questions.</p>
+          </div>
         </div>
         <button class="close-btn" id="close-profile-modal">✕</button>
       </div>
 
-      <!-- Profile Modal Segmented Tabs -->
+      <!-- Profile Modal Segmented Pill Tab Bar -->
       <div class="modal-tab-bar">
-        <button class="modal-tab-btn active" data-ptab="p-contact">👤 Identity & Contact</button>
-        <button class="modal-tab-btn" data-ptab="p-stack">💻 Tech Stack & Skills</button>
-        <button class="modal-tab-btn" data-ptab="p-compliance">🛂 Work Auth & EEOC</button>
-        <button class="modal-tab-btn" data-ptab="p-comp">💰 Compensation & Edu</button>
-        <button class="modal-tab-btn" data-ptab="p-custom">⚡ Custom Fields & Q&A</button>
-      </div>
-
-      <!-- Resume / Text Quick Auto-Parser Zone -->
-      <div class="resume-parser-banner" style="margin: 0 24px 14px 24px; padding: 14px; background: rgba(37, 99, 235, 0.12); border: 1px solid rgba(59, 130, 246, 0.4); border-radius: 8px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
-          <div style="display:flex; align-items:center; gap:8px;">
-            <span style="font-size:18px;">📄</span>
-            <div>
-              <strong style="color:#93c5fd; font-size:13px;">Auto-Build Profile from Resume or Raw Spreadsheet Data</strong>
-              <div style="color:rgba(255,255,255,0.6); font-size:11px;">Paste resume text or copy rows directly from Excel/Google Sheets to auto-extract all fields & skills.</div>
-            </div>
-          </div>
-          <div style="display:flex; gap:6px;">
-            <input type="file" id="file-resume-parser" accept=".txt,.md,.json,.csv" style="display:none;" />
-            <button type="button" class="btn btn-secondary btn-sm" id="btn-upload-file-parser">📁 Upload File</button>
-            <button type="button" class="btn btn-secondary btn-sm" id="btn-paste-clip-parser">📋 Paste Clipboard</button>
-            <button type="button" class="btn btn-primary btn-sm" id="btn-parse-resume" style="background: linear-gradient(135deg, #2563eb, #7c3aed); border:none;">⚡ Parse & Auto-Fill</button>
-          </div>
-        </div>
-        <textarea id="profile-resume-parser-input" style="width:100%; height:75px; background:rgba(15, 23, 42, 0.9); border:1px solid rgba(255,255,255,0.18); border-radius:6px; color:#fff; font-size:12px; font-family:monospace; padding:8px 10px; resize:vertical;" placeholder="Paste candidate resume text or spreadsheet row here (e.g. Nicholas Adam Myers, adam.r.myers02@gmail.com, University of Notre Dame, Python, FastAPI, Password qweQWE123!@#...)..."></textarea>
-        <div id="parser-feedback" style="display:none; font-size:11.5px; margin-top:6px; padding:6px 10px; background:rgba(16, 185, 129, 0.15); border:1px solid rgba(16, 185, 129, 0.35); border-radius:6px; color:#6ee7b7;"></div>
+        <button class="modal-tab-btn hero-tab active" data-ptab="p-ingest"><span>📄</span> Ingest Resume (PDF / DOCX / Text)</button>
+        <button class="modal-tab-btn" data-ptab="p-contact"><span>👤</span> Identity & Contact</button>
+        <button class="modal-tab-btn" data-ptab="p-stack"><span>💻</span> Tech Stack & Skills</button>
+        <button class="modal-tab-btn" data-ptab="p-edu"><span>🎓</span> Education & Background</button>
+        <button class="modal-tab-btn" data-ptab="p-compliance"><span>🛂</span> Work Auth & EEOC</button>
+        <button class="modal-tab-btn" data-ptab="p-comp"><span>💰</span> Compensation & Terms</button>
+        <button class="modal-tab-btn" data-ptab="p-custom"><span>⚡</span> Custom Questions</button>
       </div>
 
       <div class="modal-body">
         <input type="hidden" id="edit-profile-id" />
 
+        <!-- 0. Ingest Resume Hero Tab (PDF / DOCX / Spreadsheet / Text) -->
+        <div class="modal-ptab active" id="ptab-p-ingest">
+          <div class="resume-dropzone-hero" id="resume-dropzone">
+            <div class="dropzone-icon-group">
+              <span>📄</span>
+              <span>📝</span>
+              <span>📊</span>
+            </div>
+            <h3 class="dropzone-title">Drag & Drop Resume File (.pdf, .docx, .txt)</h3>
+            <p class="dropzone-desc">Upload a PDF or Word document, or copy-paste candidate rows directly from Excel / Google Sheets to auto-extract identity, experiences, credentials, education, and technical stack skills.</p>
+            <div class="dropzone-actions">
+              <input type="file" id="modal-resume-file" accept=".pdf,.docx,.doc,.txt,.md,.json,.csv,.rtf" style="display:none;" />
+              <button type="button" class="btn btn-primary" id="btn-modal-browse-file" style="background: linear-gradient(135deg, #3b82f6, #6366f1);">📁 Browse PDF / DOCX File</button>
+              <button type="button" class="btn btn-secondary" id="btn-modal-paste-clip">📋 Paste from Clipboard</button>
+              <button type="button" class="btn btn-secondary" id="btn-modal-parse-now">⚡ Parse Text Below</button>
+            </div>
+          </div>
+
+          <!-- Real-Time Extracted Details HUD Card -->
+          <div class="extracted-hud-card" id="extracted-hud-card" style="display:none;">
+            <div class="extracted-hud-header">
+              <span class="extracted-hud-title"><span>✨</span> Real-Time Auto-Extracted Profile Details:</span>
+              <span style="font-size:11px; color:#94a3b8;">All tabs below have been populated automatically</span>
+            </div>
+            <div class="extracted-tags-cloud" id="extracted-tags-cloud"></div>
+          </div>
+
+          <div class="form-group" style="margin-top:16px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+              <label for="profile-resume-parser-input" style="font-weight:600; color:#cbd5e1;">Raw Resume & Ingestion Source Text</label>
+              <span style="font-size:11px; color:#64748b;">Editable base text saved to candidate record</span>
+            </div>
+            <textarea id="profile-resume-parser-input" style="width:100%; height:160px; background:rgba(15, 23, 42, 0.9); border:1px solid rgba(255,255,255,0.15); border-radius:8px; color:#fff; font-size:12px; font-family:monospace; padding:10px 12px; resize:vertical; line-height:1.5;" placeholder="Paste resume text or spreadsheet row here (e.g. Nicholas Adam Myers, adam.r.myers02@gmail.com, University of Notre Dame, Python, FastAPI, Password qweQWE123!@#...)..."></textarea>
+          </div>
+
+          <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:14px;">
+            <button type="button" class="btn btn-primary" id="btn-goto-identity" style="background: linear-gradient(135deg, #4f46e5, #3b82f6);">Review Identity & Stack Tabs →</button>
+          </div>
+        </div>
+
         <!-- 1. Identity & Contact -->
-        <div class="modal-ptab active" id="ptab-p-contact">
+        <div class="modal-ptab" id="ptab-p-contact">
           <div class="grid-2">
             <div class="form-group">
               <label for="edit-full-name">Full Name *</label>
-              <input type="text" id="edit-full-name" required placeholder="Carlton Johnson" />
+              <input type="text" id="edit-full-name" required placeholder="Nicholas Adam Myers" />
             </div>
             <div class="form-group">
               <label for="edit-primary-email">Primary Email *</label>
-              <input type="email" id="edit-primary-email" required placeholder="carlton.johnson.dev@gmail.com" />
+              <input type="email" id="edit-primary-email" required placeholder="adam.r.myers02@gmail.com" />
             </div>
           </div>
 
           <div class="grid-3">
             <div class="form-group">
-              <label for="edit-first-name">First Name</label>
-              <input type="text" id="edit-first-name" placeholder="Carlton" />
+              <label for="edit-first-name">Legal First Name</label>
+              <input type="text" id="edit-first-name" placeholder="Nicholas" />
             </div>
             <div class="form-group">
-              <label for="edit-last-name">Last Name</label>
-              <input type="text" id="edit-last-name" placeholder="Johnson" />
+              <label for="edit-last-name">Legal Last Name</label>
+              <input type="text" id="edit-last-name" placeholder="Myers" />
             </div>
             <div class="form-group">
               <label for="edit-preferred-name">Preferred / Display Name</label>
-              <input type="text" id="edit-preferred-name" placeholder="Carl Johnson" />
+              <input type="text" id="edit-preferred-name" placeholder="Adam Myers" />
             </div>
           </div>
 
           <div class="grid-3">
             <div class="form-group">
               <label for="edit-phone">Phone / Mobile</label>
-              <input type="text" id="edit-phone" placeholder="7276010870" />
+              <input type="text" id="edit-phone" placeholder="6452417687" />
             </div>
             <div class="form-group">
               <label for="edit-hiring-password">Hiring Portal Password</label>
@@ -389,7 +413,7 @@
           <div class="grid-2">
             <div class="form-group">
               <label for="edit-email-aliases">Verified Email Aliases (comma-separated)</label>
-              <input type="text" id="edit-email-aliases" placeholder="carlton.johnson.dev@gmail.com, carlton.j@techcraft.dev" />
+              <input type="text" id="edit-email-aliases" placeholder="adam.r.myers02@gmail.com, adams.myers@techcraft.dev" />
             </div>
             <div class="form-group">
               <label for="edit-grad-date">College Graduation Date</label>
@@ -400,11 +424,11 @@
           <div class="grid-2">
             <div class="form-group">
               <label for="edit-address">Street Address</label>
-              <input type="text" id="edit-address" placeholder="32520 Midsummer Night Ln" />
+              <input type="text" id="edit-address" placeholder="3780 Northwest 22nd Avenue" />
             </div>
             <div class="form-group">
               <label for="edit-city">City</label>
-              <input type="text" id="edit-city" placeholder="Wesley Chapel" />
+              <input type="text" id="edit-city" placeholder="Miami" />
             </div>
           </div>
 
@@ -415,7 +439,7 @@
             </div>
             <div class="form-group">
               <label for="edit-zip">Zip / Postal Code</label>
-              <input type="text" id="edit-zip" placeholder="33543" />
+              <input type="text" id="edit-zip" placeholder="33142" />
             </div>
             <div class="form-group">
               <label for="edit-country">Country</label>
@@ -423,9 +447,15 @@
             </div>
           </div>
 
-          <div class="form-group">
-            <label for="edit-linkedin">LinkedIn Profile URL</label>
-            <input type="text" id="edit-linkedin" placeholder="linkedin.com/in/carl-j-108bb127/" />
+          <div class="grid-2">
+            <div class="form-group">
+              <label for="edit-linkedin">LinkedIn Profile URL</label>
+              <input type="text" id="edit-linkedin" placeholder="linkedin.com/in/adam-myers-6ab405428" />
+            </div>
+            <div class="form-group">
+              <label for="edit-github">GitHub / Portfolio URL</label>
+              <input type="text" id="edit-github" placeholder="github.com/adam-myers-dev" />
+            </div>
           </div>
         </div>
 
@@ -434,43 +464,87 @@
           <div class="grid-2">
             <div class="form-group">
               <label for="edit-target-stack">Target Tech Stack Role</label>
-              <input type="text" id="edit-target-stack" placeholder="Full Stack C# / .NET / Cloud" />
+              <input type="text" id="edit-target-stack" placeholder="Full Stack Python / AI / Cloud" />
             </div>
             <div class="form-group">
               <label for="edit-years-exp">Years of Experience</label>
-              <input type="text" id="edit-years-exp" placeholder="9+ years" />
+              <input type="text" id="edit-years-exp" placeholder="8+ years" />
             </div>
           </div>
 
           <div class="form-group">
             <label for="edit-stack-keywords">Stack Keywords (comma-separated)</label>
-            <input type="text" id="edit-stack-keywords" placeholder=".net, c#, csharp, dotnet, asp.net, sql server, azure" />
+            <input type="text" id="edit-stack-keywords" placeholder="python, django, fastapi, aws, postgresql, react, ai, machine learning" />
             <span class="hint">Keywords used by the validator to match job postings to candidate resumes.</span>
           </div>
 
           <div class="form-group">
             <label for="edit-backend-lang">Primary Backend Languages & Frameworks</label>
-            <input type="text" id="edit-backend-lang" placeholder="C#, ASP.NET Core, .NET 8, Web API, Entity Framework" />
+            <input type="text" id="edit-backend-lang" placeholder="Python with FastAPI and Django" />
           </div>
 
           <div class="form-group">
             <label for="edit-frontend-lang">Primary Frontend Frameworks & Libraries</label>
-            <input type="text" id="edit-frontend-lang" placeholder="React, TypeScript, Next.js, Tailwind CSS, Angular" />
+            <input type="text" id="edit-frontend-lang" placeholder="React, TypeScript" />
           </div>
 
           <div class="form-group">
             <label for="edit-db-cloud">Databases & Cloud Infrastructure</label>
-            <input type="text" id="edit-db-cloud" placeholder="SQL Server, PostgreSQL, Redis, Azure (App Services, APIM), Docker" />
+            <input type="text" id="edit-db-cloud" placeholder="PostgreSQL (including AWS RDS), Redis, Docker, AWS" />
           </div>
 
           <div class="form-group" style="margin-top:12px;">
             <label for="edit-resume-text">Candidate Fixed Base Resume (Text / Markdown)</label>
-            <textarea id="edit-resume-text" style="height:110px; font-family:monospace; font-size:11.5px;" placeholder="Paste candidate full resume text / markdown here. For C# track, this fixed resume is stored once; for Python/PHP, appliers can tailor it per job directly from the HUD..."></textarea>
+            <textarea id="edit-resume-text" style="height:120px; font-family:monospace; font-size:11.5px;" placeholder="Paste candidate full resume text / markdown here. For C# track, this fixed resume is stored once; for Python/PHP, appliers can tailor it per job directly from the HUD..."></textarea>
             <span class="hint">Base resume text used for autofill and AI prompt tailoring (C# fixed base or Python/PHP base template).</span>
           </div>
         </div>
 
-        <!-- 3. Work Auth & Compliance -->
+        <!-- 3. Education & Background -->
+        <div class="modal-ptab" id="ptab-p-edu">
+          <div class="grid-3">
+            <div class="form-group">
+              <label for="edit-education-level">Highest Level of Education</label>
+              <select id="edit-education-level" class="custom-input">
+                <option value="Bachelor's Degree">Bachelor's Degree</option>
+                <option value="Master's Degree">Master's Degree</option>
+                <option value="Doctorate">Doctorate / Ph.D.</option>
+                <option value="Associate's Degree">Associate's Degree</option>
+                <option value="Some College">Some College</option>
+                <option value="High School Diploma / GED">High School Diploma / GED</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="edit-school">University / School Name</label>
+              <input type="text" id="edit-school" placeholder="University of Notre Dame" />
+            </div>
+            <div class="form-group">
+              <label for="edit-degree">Degree & Major / Field of Study</label>
+              <input type="text" id="edit-degree" placeholder="Bachelor of Science in Computer Science" />
+            </div>
+          </div>
+
+          <div class="grid-2" style="margin-top:12px;">
+            <div class="form-group">
+              <label for="edit-former-employee">Former Employee / Affiliation?</label>
+              <select id="edit-former-employee" class="custom-input">
+                <option value="No">No (Never Worked for Company/Affiliate)</option>
+                <option value="Yes">Yes</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="edit-how-heard">Default Referral Source</label>
+              <select id="edit-how-heard" class="custom-input">
+                <option value="LinkedIn">LinkedIn</option>
+                <option value="Job Board">Job Board / Indeed / Glassdoor</option>
+                <option value="Company Website">Company Career Website</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4. Work Auth & EEOC -->
         <div class="modal-ptab" id="ptab-p-compliance">
           <div class="grid-2">
             <div class="form-group">
@@ -505,25 +579,6 @@
               <select id="edit-clearance" class="custom-input">
                 <option value="No">No / None</option>
                 <option value="Yes">Yes (Active / Eligible)</option>
-              </select>
-            </div>
-          </div>
-
-          <div class="grid-2">
-            <div class="form-group">
-              <label for="edit-former-employee">Former Employee / Affiliation?</label>
-              <select id="edit-former-employee" class="custom-input">
-                <option value="No">No (Never Worked for Company/Affiliate)</option>
-                <option value="Yes">Yes</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label for="edit-how-heard">Default Referral Source</label>
-              <select id="edit-how-heard" class="custom-input">
-                <option value="LinkedIn">LinkedIn</option>
-                <option value="Job Board">Job Board / Indeed / Glassdoor</option>
-                <option value="Company Website">Company Career Website</option>
-                <option value="Other">Other</option>
               </select>
             </div>
           </div>
@@ -568,7 +623,7 @@
           </div>
         </div>
 
-        <!-- 4. Compensation & Education -->
+        <!-- 5. Compensation & Terms -->
         <div class="modal-ptab" id="ptab-p-comp">
           <div class="grid-2">
             <div class="form-group">
@@ -579,28 +634,6 @@
             <div class="form-group">
               <label for="edit-desired-salary">Desired Target Salary ($ / Year)</label>
               <input type="number" id="edit-desired-salary" placeholder="130000" />
-            </div>
-          </div>
-
-          <div class="grid-3">
-            <div class="form-group">
-              <label for="edit-education-level">Highest Level of Education</label>
-              <select id="edit-education-level" class="custom-input">
-                <option value="Bachelor's Degree">Bachelor's Degree</option>
-                <option value="Master's Degree">Master's Degree</option>
-                <option value="Doctorate">Doctorate / Ph.D.</option>
-                <option value="Associate's Degree">Associate's Degree</option>
-                <option value="Some College">Some College</option>
-                <option value="High School Diploma / GED">High School Diploma / GED</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label for="edit-school">University / School Name</label>
-              <input type="text" id="edit-school" placeholder="Texas Tech University" />
-            </div>
-            <div class="form-group">
-              <label for="edit-degree">Degree & Major / Field of Study</label>
-              <input type="text" id="edit-degree" placeholder="B.S. in Computer Science" />
             </div>
           </div>
 
@@ -726,6 +759,7 @@
     </div>
   </div>
 
+  <script src="doc-parser.js"></script>
   <script src="options.js"></script>
 </body>
 </html>

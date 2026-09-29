@@ -213,8 +213,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Contact
     document.getElementById('edit-full-name').value = p.fullName || '';
     document.getElementById('edit-primary-email').value = p.primaryEmail || '';
-    document.getElementById('edit-first-name').value = p.firstName || '';
-    document.getElementById('edit-last-name').value = p.lastName || '';
+    document.getElementById('edit-first-name').value = p.legalFirstName || p.firstName || '';
+    document.getElementById('edit-last-name').value = p.legalLastName || p.lastName || '';
     document.getElementById('edit-preferred-name').value = p.preferredName || '';
     document.getElementById('edit-phone').value = p.phone || p.formattedPhone || '';
     document.getElementById('edit-hiring-password').value = p.defaultHiringPassword || p.hiringPassword || 'qweQWE123!@#';
@@ -227,6 +227,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('edit-zip').value = p.zip || '';
     document.getElementById('edit-country').value = p.country || 'United States';
     document.getElementById('edit-linkedin').value = p.linkedin || '';
+    document.getElementById('edit-github').value = p.github || '';
 
     // Stack
     document.getElementById('edit-target-stack').value = p.targetStack || '';
@@ -235,6 +236,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('edit-backend-lang').value = p.languagesFrameworks?.preferredBackend || '';
     document.getElementById('edit-frontend-lang').value = p.languagesFrameworks?.preferredFrontend || '';
     document.getElementById('edit-db-cloud').value = p.languagesFrameworks?.preferredDatabase || '';
+
+    // Edu & Background
+    document.getElementById('edit-school').value = p.backgroundAndEducation?.schoolsAttended || p.school || '';
+    document.getElementById('edit-degree').value = p.backgroundAndEducation?.education || p.degree || '';
+    document.getElementById('edit-education-level').value = p.degreeLevel || p.backgroundAndEducation?.degreeLevel || "Bachelor's Degree";
+    document.getElementById('edit-how-heard').value = p.howHeard?.howHeard || p.howHeard || 'LinkedIn';
+    document.getElementById('edit-former-employee').value = p.formerEmployment?.workedForCompanyBefore || 'No';
 
     // Compliance
     document.getElementById('edit-work-auth').value = p.workAuthStatus || p.workAuth?.workAuthType || 'US Citizen';
@@ -246,14 +254,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('edit-veteran').value = p.eeoc?.veteranStatus || 'I am not a protected veteran';
     document.getElementById('edit-disability').value = p.eeoc?.disability || 'No, I do not have a disability and have not had one in the past';
 
-    // Comp & Edu & Resume
+    // Comp & Resume
     document.getElementById('edit-salary-floor').value = p.salaryFloor || p.compensation?.salaryFloor || '120000';
     document.getElementById('edit-desired-salary').value = p.compensation?.desiredSalary || p.desiredSalary || '130000';
-    document.getElementById('edit-school').value = p.backgroundAndEducation?.schoolsAttended || p.school || '';
-    document.getElementById('edit-degree').value = p.backgroundAndEducation?.education || p.degree || '';
-    document.getElementById('edit-education-level').value = p.degreeLevel || p.backgroundAndEducation?.degreeLevel || "Bachelor's Degree";
-    document.getElementById('edit-how-heard').value = p.howHeard?.howHeard || p.howHeard || 'LinkedIn';
-    document.getElementById('edit-former-employee').value = p.formerEmployment?.workedForCompanyBefore || 'No';
     document.getElementById('edit-resume-text').value = p.resumeText || p.baseResumeText || '';
     document.getElementById('edit-availability').value = p.compensation?.availabilityStart || 'Immediate';
     document.getElementById('edit-relocate').value = p.location?.willingToRelocate || 'No';
@@ -261,17 +264,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Custom Fields
     renderCustomFieldRows(p.customFields || []);
 
-    // Clear parser box
+    // Load Ingestion Parser text
     const parserInput = document.getElementById('profile-resume-parser-input');
-    if (parserInput) parserInput.value = '';
-    const feedback = document.getElementById('parser-feedback');
-    if (feedback) feedback.style.display = 'none';
+    if (parserInput) parserInput.value = p.resumeText || p.baseResumeText || '';
+    
+    if (p.resumeText || p.baseResumeText) {
+      displayExtractedHudTags(p.resumeText || p.baseResumeText);
+    } else {
+      const hudCard = document.getElementById('extracted-hud-card');
+      if (hudCard) hudCard.style.display = 'none';
+    }
 
-    // Reset to first tab
-    modalTabBtns.forEach(b => b.classList.remove('active'));
-    modalPtabs.forEach(p => p.classList.remove('active'));
-    modalTabBtns[0]?.classList.add('active');
-    modalPtabs[0]?.classList.add('active');
+    // Default to Identity Tab when editing existing profile
+    switchModalTab('p-contact');
 
     profileModal.style.display = 'flex';
   };
@@ -287,13 +292,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   };
 
-  document.getElementById('add-candidate-btn')?.addEventListener('click', () => {
-    document.getElementById('profile-modal-title').innerText = "Add New Candidate Profile";
-    document.getElementById('edit-profile-id').value = "";
-    
-    // Reset all inputs
+  function resetProfileForm() {
     profileModal.querySelectorAll('input, select, textarea').forEach(el => {
       if (el.id === 'edit-salary-floor') el.value = "120000";
+      else if (el.id === 'edit-desired-salary') el.value = "130000";
       else if (el.id === 'edit-country') el.value = "United States";
       else if (el.id === 'edit-work-auth') el.value = "US Citizen";
       else if (el.id === 'edit-auth-us') el.value = "Yes";
@@ -302,19 +304,40 @@ document.addEventListener('DOMContentLoaded', async () => {
       else if (el.id === 'edit-how-heard') el.value = "LinkedIn";
       else if (el.id === 'edit-former-employee') el.value = "No";
       else if (el.id === 'edit-hiring-password') el.value = "qweQWE123!@#";
+      else if (el.id === 'edit-availability') el.value = "Immediate";
+      else if (el.id === 'edit-relocate') el.value = "No";
       else el.value = "";
     });
-
     renderCustomFieldRows([]);
+    const hudCard = document.getElementById('extracted-hud-card');
+    if (hudCard) hudCard.style.display = 'none';
+  }
 
-    const feedback = document.getElementById('parser-feedback');
-    if (feedback) feedback.style.display = 'none';
+  function switchModalTab(targetTabId) {
+    modalTabBtns.forEach(b => {
+      b.classList.toggle('active', b.dataset.ptab === targetTabId);
+    });
+    modalPtabs.forEach(p => {
+      p.classList.toggle('active', p.id === `ptab-${targetTabId}`);
+    });
+  }
 
-    modalTabBtns.forEach(b => b.classList.remove('active'));
-    modalPtabs.forEach(p => p.classList.remove('active'));
-    modalTabBtns[0]?.classList.add('active');
-    modalPtabs[0]?.classList.add('active');
+  // Switch tab on click
+  modalTabBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      switchModalTab(btn.dataset.ptab);
+    });
+  });
 
+  document.getElementById('btn-goto-identity')?.addEventListener('click', () => {
+    switchModalTab('p-contact');
+  });
+
+  document.getElementById('add-candidate-btn')?.addEventListener('click', () => {
+    document.getElementById('profile-modal-title').innerText = "Add New Candidate Profile";
+    document.getElementById('edit-profile-id').value = "";
+    resetProfileForm();
+    switchModalTab('p-contact');
     profileModal.style.display = 'flex';
   });
 
@@ -334,292 +357,177 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('build-from-resume-btn')?.addEventListener('click', () => {
     document.getElementById('profile-modal-title').innerText = "⚡ Build Candidate Profile from Resume";
     document.getElementById('edit-profile-id').value = "";
-    
-    // Reset all inputs
-    profileModal.querySelectorAll('input, select, textarea').forEach(el => {
-      if (el.id === 'edit-salary-floor') el.value = "120000";
-      else if (el.id === 'edit-country') el.value = "United States";
-      else if (el.id === 'edit-work-auth') el.value = "US Citizen";
-      else if (el.id === 'edit-auth-us') el.value = "Yes";
-      else if (el.id === 'edit-requires-sponsorship') el.value = "No";
-      else if (el.id === 'edit-education-level') el.value = "Bachelor's Degree";
-      else if (el.id === 'edit-how-heard') el.value = "LinkedIn";
-      else if (el.id === 'edit-former-employee') el.value = "No";
-      else if (el.id === 'edit-hiring-password') el.value = "qweQWE123!@#";
-      else el.value = "";
-    });
-
-    renderCustomFieldRows([]);
-
-    const feedback = document.getElementById('parser-feedback');
-    if (feedback) feedback.style.display = 'none';
-
-    modalTabBtns.forEach(b => b.classList.remove('active'));
-    modalPtabs.forEach(p => p.classList.remove('active'));
-    modalTabBtns[0]?.classList.add('active');
-    modalPtabs[0]?.classList.add('active');
-
+    resetProfileForm();
+    switchModalTab('p-ingest');
     profileModal.style.display = 'flex';
-    const parserInput = document.getElementById('profile-resume-parser-input');
-    if (parserInput) {
-      parserInput.focus();
-      parserInput.scrollIntoView({ behavior: 'smooth' });
-    }
   });
 
-  // File upload for resume parser
-  const fileResumeInput = document.getElementById('file-resume-parser');
-  document.getElementById('btn-upload-file-parser')?.addEventListener('click', () => {
-    fileResumeInput?.click();
+  // Modal file browse & upload
+  const modalResumeFileInput = document.getElementById('modal-resume-file');
+  document.getElementById('btn-modal-browse-file')?.addEventListener('click', () => {
+    modalResumeFileInput?.click();
   });
-  fileResumeInput?.addEventListener('change', (e) => {
+
+  modalResumeFileInput?.addEventListener('change', async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      const content = evt.target?.result;
-      if (typeof content === 'string') {
-        const input = document.getElementById('profile-resume-parser-input');
-        if (input) input.value = content;
-        parseAndPopulateProfileFromText(content);
-      }
-    };
-    reader.readAsText(file);
+    await processUploadedResumeFile(file);
   });
 
-  // Comprehensive Resume / Spreadsheet / Text Parser Functionality
-  function parseAndPopulateProfileFromText(rawText) {
-    if (!rawText) return;
-    const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean);
-    const textLower = rawText.toLowerCase();
-    const extractedTags = [];
+  // Modal drag & drop
+  const dropzoneEl = document.getElementById('resume-dropzone');
+  if (dropzoneEl) {
+    ['dragenter', 'dragover'].forEach(name => {
+      dropzoneEl.addEventListener(name, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropzoneEl.classList.add('dragover');
+      });
+    });
 
-    // Helper: Find value from line-based key-value patterns (e.g. "Full Name\tNicholas Adam Myers" or "Full Name: Nicholas Adam Myers")
-    const getRowValue = (regex) => {
-      for (const line of lines) {
-        const match = line.match(regex);
-        if (match && match[1]) {
-          return match[1].trim();
-        }
+    ['dragleave', 'drop'].forEach(name => {
+      dropzoneEl.addEventListener(name, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropzoneEl.classList.remove('dragover');
+      });
+    });
+
+    dropzoneEl.addEventListener('drop', async (e) => {
+      const file = e.dataTransfer?.files?.[0];
+      if (file) {
+        await processUploadedResumeFile(file);
       }
-      return '';
-    };
+    });
+  }
 
-    // 1. Email extraction
-    const emailMatch = rawText.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/i);
-    if (emailMatch) {
-      document.getElementById('edit-primary-email').value = emailMatch[0];
-      extractedTags.push(`📧 ${emailMatch[0]}`);
-    }
+  async function processUploadedResumeFile(file) {
+    try {
+      const dropzoneTitle = dropzoneEl?.querySelector('.dropzone-title');
+      if (dropzoneTitle) dropzoneTitle.innerText = `⏳ Parsing ${file.name} (Extracting text & skills)...`;
 
-    // 2. Phone extraction
-    const phoneMatch = rawText.match(/(?:mobile|phone|tel)?[:\s\t]*(\+?1?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/i) ||
-                       rawText.match(/(\d{3}[\s.-]\d{3}[\s.-]\d{4})/);
-    if (phoneMatch) {
-      const cleanPhone = phoneMatch[1].replace(/[^\d]/g, '');
-      document.getElementById('edit-phone').value = cleanPhone;
-      extractedTags.push(`📱 Phone`);
-    }
-
-    // 3. LinkedIn extraction
-    const linkedInMatch = rawText.match(/(?:https?:\/\/)?(?:www\.)?linkedin\.com\/in\/[a-zA-Z0-9_-]+/i);
-    if (linkedInMatch) {
-      document.getElementById('edit-linkedin').value = linkedInMatch[0];
-      extractedTags.push(`🔗 LinkedIn`);
-    }
-
-    // 4. Name extraction
-    let fullName = getRowValue(/^(?:full\s*name|candidate\s*name)[:\s\t]+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)/i);
-    let legalFirst = getRowValue(/^(?:legal\s*first\s*name|first\s*name)[:\s\t]+([A-Za-z]+)/i);
-    let legalMiddle = getRowValue(/^(?:legal\s*middle\s*name|middle\s*name)[:\s\t]+([A-Za-z]+)/i);
-    let legalLast = getRowValue(/^(?:legal\s*last\s*name|last\s*name)[:\s\t]+([A-Za-z]+)/i);
-    let preferredName = getRowValue(/^(?:preferred\s*name)[:\s\t]+([A-Za-z\s]+)/i);
-
-    if (!fullName) {
-      const genericNameMatch = rawText.match(/(?:full\s*name|candidate\s*name|name)[:\s\t]+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)/i);
-      if (genericNameMatch) {
-        fullName = genericNameMatch[1].trim();
+      let extractedText = '';
+      if (window.ResumeDocumentParser) {
+        extractedText = await ResumeDocumentParser.extractTextFromFile(file);
       } else {
-        const firstLine = lines[0] || '';
-        if (/^[A-Z][a-z]+\s+([A-Z][a-z]+\s+)?[A-Z][a-z]+$/.test(firstLine) && firstLine.split(' ').length >= 2 && firstLine.split(' ').length <= 4) {
-          fullName = firstLine;
-        }
+        extractedText = await file.text();
       }
-    }
 
-    if (fullName) {
-      document.getElementById('edit-full-name').value = fullName;
-      const parts = fullName.split(' ');
-      if (!legalFirst) legalFirst = parts[0] || '';
-      if (!legalLast) legalLast = parts.slice(1).join(' ') || '';
-      extractedTags.push(`👤 ${fullName}`);
-    }
-    if (legalFirst) document.getElementById('edit-first-name').value = legalFirst;
-    if (legalLast) document.getElementById('edit-last-name').value = legalLast;
-    if (preferredName) {
-      document.getElementById('edit-preferred-name').value = preferredName;
-    } else if (fullName) {
-      document.getElementById('edit-preferred-name').value = fullName;
-    }
-
-    // 5. Password extraction (e.g. "Password Frequently used for Hiring Platforms qweQWE123!@#")
-    let pwVal = getRowValue(/^(?:password\s*frequently\s*used\s*for\s*hiring\s*platforms|password|portal\s*password)[:\s\t]+([^\s\t\n]+)/i);
-    if (!pwVal) {
-      const pwMatch = rawText.match(/(?:password|frequently used for hiring platforms)[:\s\t]+([^\s\t\n]+)/i);
-      if (pwMatch) pwVal = pwMatch[1].trim();
-    }
-    if (pwVal) {
-      document.getElementById('edit-hiring-password').value = pwVal;
-      extractedTags.push(`🔑 Password`);
-    }
-
-    // DOB & Graduation Date
-    let dobVal = getRowValue(/^(?:dob|date\s*of\s*birth)[:\s\t]+(\d{1,2}\/\d{1,2}\/\d{2,4})/i);
-    if (!dobVal) {
-      const dobMatch = rawText.match(/(?:dob|date of birth)[:\s\t]+(\d{1,2}\/\d{1,2}\/\d{2,4})/i);
-      if (dobMatch) dobVal = dobMatch[1].trim();
-    }
-    if (dobVal) {
-      document.getElementById('edit-dob').value = dobVal;
-      extractedTags.push(`📅 DOB: ${dobVal}`);
-    }
-
-    let gradVal = getRowValue(/^(?:graduation\s*date|grad\s*date|graduated)[:\s\t]+(\d{1,2}\/\d{1,2}\/\d{2,4})/i);
-    if (!gradVal) {
-      const gradMatch = rawText.match(/(?:graduation date|grad date|graduated)[:\s\t]+(\d{1,2}\/\d{1,2}\/\d{2,4})/i);
-      if (gradMatch) gradVal = gradMatch[1].trim();
-    }
-    if (gradVal) {
-      document.getElementById('edit-grad-date').value = gradVal;
-      extractedTags.push(`🎓 Grad Date: ${gradVal}`);
-    }
-
-    // 6. Address / Location extraction
-    const addrLine = getRowValue(/^(?:address)[:\s\t]+([^\n]+)/i);
-    if (addrLine) {
-      const parts = addrLine.split(/[\t,]+/).map(s => s.trim()).filter(Boolean);
-      if (parts.length >= 4) {
-        document.getElementById('edit-address').value = parts[0];
-        document.getElementById('edit-city').value = parts[1];
-        document.getElementById('edit-state').value = parts[2] === 'FL' ? 'Florida' : parts[2];
-        document.getElementById('edit-zip').value = parts[3];
-      } else {
-        document.getElementById('edit-address').value = addrLine;
+      if (!extractedText || extractedText.trim().length < 10) {
+        alert("Could not extract legible text from this file. Please copy-paste the text directly.");
+        if (dropzoneTitle) dropzoneTitle.innerText = `Drag & Drop Resume File (.pdf, .docx, .txt)`;
+        return;
       }
-    } else {
-      const addressMatch = rawText.match(/(?:address)[:\s\t]+([^\n\t]+)/i) || rawText.match(/(\d+\s+[A-Za-z0-9\s.,]+(?:Avenue|Ave|Street|St|Road|Rd|Drive|Dr|Lane|Ln|Blvd|Way))/i);
-      if (addressMatch) {
-        document.getElementById('edit-address').value = addressMatch[1].trim();
+
+      const parserInput = document.getElementById('profile-resume-parser-input');
+      if (parserInput) parserInput.value = extractedText;
+
+      parseAndPopulateProfileFromText(extractedText);
+
+      if (dropzoneTitle) {
+        dropzoneTitle.innerText = `✅ Successfully Extracted: ${file.name}`;
       }
-      const zipMatch = rawText.match(/\b\d{5}(?:-\d{4})?\b/);
-      if (zipMatch) {
-        document.getElementById('edit-zip').value = zipMatch[0];
-      }
-      if (textLower.includes('miami')) document.getElementById('edit-city').value = 'Miami';
-      if (textLower.includes('florida') || textLower.includes(' fl ') || textLower.includes('\tfl\t') || textLower.includes(', fl')) document.getElementById('edit-state').value = 'Florida';
-    }
-
-    // 7. Education extraction
-    let school = '';
-    if (textLower.includes('notre dame')) {
-      school = 'University of Notre Dame';
-    } else {
-      const schoolMatch = rawText.match(/(?:university|college|institute|school)[:\s\t]+([^\n\t,]+)/i) ||
-                          rawText.match(/(university of [a-zA-Z\s]+|[a-zA-Z\s]+ university|[a-zA-Z\s]+ college)/i);
-      if (schoolMatch) school = schoolMatch[1] || schoolMatch[0];
-    }
-    if (school) {
-      document.getElementById('edit-school').value = school;
-      extractedTags.push(`🏫 ${school}`);
-    }
-
-    if (textLower.includes('bachelor') || textLower.includes('b.s.') || textLower.includes('b.a.')) {
-      document.getElementById('edit-education-level').value = "Bachelor's Degree";
-      document.getElementById('edit-degree').value = "Bachelor of Science in Computer Science";
-      extractedTags.push(`📜 Bachelor's Degree`);
-    } else if (textLower.includes('master') || textLower.includes('m.s.')) {
-      document.getElementById('edit-education-level').value = "Master's Degree";
-      document.getElementById('edit-degree').value = "Master of Science in Computer Science";
-      extractedTags.push(`📜 Master's Degree`);
-    }
-
-    // 8. Stack detection & Technical Skills Alignment
-    let detectedStack = "Full Stack Software Engineer";
-    let keywords = [];
-    let backend = "";
-    let frontend = "React, TypeScript";
-    let dbCloud = "PostgreSQL, Redis, AWS, Docker";
-
-    const hasPython = textLower.includes('python') || textLower.includes('django') || textLower.includes('fastapi') || textLower.includes('flask') || textLower.includes('pytorch');
-    const hasDotNet = textLower.includes('.net') || textLower.includes('c#') || textLower.includes('csharp') || textLower.includes('asp.net') || textLower.includes('azure sql');
-    const hasPhp = textLower.includes('php') || textLower.includes('laravel') || textLower.includes('symfony');
-
-    if (hasPython && !hasDotNet) {
-      detectedStack = "Full Stack Python / AI / Cloud";
-      keywords = ["python", "django", "fastapi", "aws", "postgresql", "react", "ai", "machine learning"];
-      backend = "Python with FastAPI and Django";
-      dbCloud = "PostgreSQL (including AWS RDS), Redis, Docker";
-      extractedTags.push(`💻 Python / AI Stack`);
-    } else if (hasDotNet) {
-      detectedStack = "Full Stack C# / .NET / Cloud";
-      keywords = [".net", "c#", "csharp", "dotnet", "asp.net", "azure", "sql server", "cloud"];
-      backend = "C#, ASP.NET Core, .NET 8, Web API, Entity Framework";
-      dbCloud = "SQL Server (including Azure SQL), Redis, Azure, Docker";
-      extractedTags.push(`💻 C# / .NET Stack`);
-    } else if (hasPhp) {
-      detectedStack = "Full Stack PHP / Laravel / Cloud";
-      keywords = ["php", "laravel", "symfony", "mysql", "vue", "react", "aws", "docker"];
-      backend = "PHP 8.x with Laravel, Symfony, REST APIs";
-      dbCloud = "MySQL, PostgreSQL, Redis, AWS";
-      extractedTags.push(`💻 PHP / Laravel Stack`);
-    } else {
-      detectedStack = "Full Stack Python / AI / Cloud";
-      keywords = ["python", "fastapi", "react", "postgresql", "aws", "docker"];
-      backend = "Python with FastAPI";
-      extractedTags.push(`💻 Full Stack`);
-    }
-
-    document.getElementById('edit-target-stack').value = detectedStack;
-    document.getElementById('edit-stack-keywords').value = keywords.join(', ');
-    document.getElementById('edit-backend-lang').value = backend;
-    document.getElementById('edit-frontend-lang').value = frontend;
-    document.getElementById('edit-db-cloud').value = dbCloud;
-    document.getElementById('edit-resume-text').value = rawText;
-
-    const feedback = document.getElementById('parser-feedback');
-    if (feedback) {
-      feedback.style.display = 'block';
-      feedback.innerHTML = `
-        <div style="font-weight:600; margin-bottom:4px;">✅ Auto-Extracted Candidate Details & Stack Context:</div>
-        <div style="display:flex; flex-wrap:wrap; gap:6px;">
-          ${extractedTags.map(t => `<span style="background:rgba(16,185,129,0.25); border:1px solid rgba(16,185,129,0.4); padding:2px 8px; border-radius:4px; font-size:11px;">${escapeHtml(t)}</span>`).join('')}
-        </div>
-        <div style="margin-top:6px; color:#a7f3d0; font-size:11px;">Review the tabs below, refine any additional details as fit, and click <strong>Save Candidate Profile</strong>.</div>
-      `;
+    } catch (err) {
+      console.error("[Ingestion] Error parsing file:", err);
+      alert(`Error extracting resume: ${err.message || 'Format error'}`);
     }
   }
 
-  document.getElementById('btn-parse-resume')?.addEventListener('click', () => {
+  // Paste from clipboard
+  document.getElementById('btn-modal-paste-clip')?.addEventListener('click', async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!text || !text.trim()) {
+        alert("Clipboard is empty or text could not be read.");
+        return;
+      }
+      const parserInput = document.getElementById('profile-resume-parser-input');
+      if (parserInput) parserInput.value = text;
+      parseAndPopulateProfileFromText(text);
+    } catch (_) {
+      alert("Could not read clipboard. Please paste directly into the box below.");
+    }
+  });
+
+  document.getElementById('btn-modal-parse-now')?.addEventListener('click', () => {
     const raw = document.getElementById('profile-resume-parser-input')?.value?.trim();
     if (!raw) {
-      alert("Please paste resume text or spreadsheet row into the parser box first.");
+      alert("Please enter or paste resume text before parsing.");
       return;
     }
     parseAndPopulateProfileFromText(raw);
   });
 
-  document.getElementById('btn-paste-clip-parser')?.addEventListener('click', async () => {
-    try {
-      const text = await navigator.clipboard.readText();
-      const input = document.getElementById('profile-resume-parser-input');
-      if (text && input) {
-        input.value = text;
-        parseAndPopulateProfileFromText(text);
-      }
-    } catch (_) {
-      alert("Could not access clipboard. Please paste directly into the box.");
-    }
-  });
+  function displayExtractedHudTags(rawText) {
+    const parsed = window.ResumeDocumentParser
+      ? ResumeDocumentParser.parseCandidateDetails(rawText)
+      : null;
+
+    if (!parsed) return;
+
+    const hudCard = document.getElementById('extracted-hud-card');
+    const tagsCloud = document.getElementById('extracted-tags-cloud');
+    if (!hudCard || !tagsCloud) return;
+
+    hudCard.style.display = 'block';
+    tagsCloud.innerHTML = parsed.extractedTags.map(t => {
+      let pillClass = 'extracted-pill';
+      if (t.type === 'stack') pillClass += ' stack-pill';
+      else if (t.type === 'edu') pillClass += ' edu-pill';
+      else if (t.type === 'cred') pillClass += ' cred-pill';
+
+      return `<span class="${pillClass}"><span>${t.icon}</span> <strong>${escapeHtml(t.label)}</strong></span>`;
+    }).join('');
+  }
+
+  // Comprehensive Resume / Spreadsheet / Text Parser Functionality
+  function parseAndPopulateProfileFromText(rawText) {
+    if (!rawText) return;
+
+    const parsed = window.ResumeDocumentParser
+      ? ResumeDocumentParser.parseCandidateDetails(rawText)
+      : null;
+
+    if (!parsed) return;
+
+    // Populate Form Inputs across all tabs
+    if (parsed.fullName) document.getElementById('edit-full-name').value = parsed.fullName;
+    if (parsed.primaryEmail) document.getElementById('edit-primary-email').value = parsed.primaryEmail;
+    if (parsed.firstName) document.getElementById('edit-first-name').value = parsed.firstName;
+    if (parsed.lastName) document.getElementById('edit-last-name').value = parsed.lastName;
+    if (parsed.preferredName) document.getElementById('edit-preferred-name').value = parsed.preferredName;
+    if (parsed.phone) document.getElementById('edit-phone').value = parsed.phone;
+    if (parsed.hiringPassword) document.getElementById('edit-hiring-password').value = parsed.hiringPassword;
+    if (parsed.dob) document.getElementById('edit-dob').value = parsed.dob;
+    if (parsed.graduationDate) document.getElementById('edit-grad-date').value = parsed.graduationDate;
+    if (parsed.emailAliases?.length) document.getElementById('edit-email-aliases').value = parsed.emailAliases.join(', ');
+    if (parsed.address) document.getElementById('edit-address').value = parsed.address;
+    if (parsed.city) document.getElementById('edit-city').value = parsed.city;
+    if (parsed.state) document.getElementById('edit-state').value = parsed.state;
+    if (parsed.zip) document.getElementById('edit-zip').value = parsed.zip;
+    if (parsed.country) document.getElementById('edit-country').value = parsed.country;
+    if (parsed.linkedin) document.getElementById('edit-linkedin').value = parsed.linkedin;
+    if (parsed.github) document.getElementById('edit-github').value = parsed.github;
+
+    // Stack
+    if (parsed.targetStack) document.getElementById('edit-target-stack').value = parsed.targetStack;
+    if (parsed.yearsExperience) document.getElementById('edit-years-exp').value = parsed.yearsExperience;
+    if (parsed.primaryStackKeywords?.length) document.getElementById('edit-stack-keywords').value = parsed.primaryStackKeywords.join(', ');
+    if (parsed.backendSkills) document.getElementById('edit-backend-lang').value = parsed.backendSkills;
+    if (parsed.frontendSkills) document.getElementById('edit-frontend-lang').value = parsed.frontendSkills;
+    if (parsed.dbCloudSkills) document.getElementById('edit-db-cloud').value = parsed.dbCloudSkills;
+
+    // Edu & Background
+    if (parsed.school) document.getElementById('edit-school').value = parsed.school;
+    if (parsed.degree) document.getElementById('edit-degree').value = parsed.degree;
+    if (parsed.degreeLevel) document.getElementById('edit-education-level').value = parsed.degreeLevel;
+
+    // Set raw resume text
+    document.getElementById('edit-resume-text').value = rawText;
+
+    // Show extracted HUD
+    displayExtractedHudTags(rawText);
+  }
 
   document.getElementById('close-profile-modal')?.addEventListener('click', () => {
     profileModal.style.display = 'none';
@@ -689,8 +597,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       city: document.getElementById('edit-city').value.trim(),
       state: document.getElementById('edit-state').value.trim(),
       zip: document.getElementById('edit-zip').value.trim(),
-      country: document.getElementById('edit-country').value.trim() || 'United States',
+       country: document.getElementById('edit-country').value.trim() || 'United States',
       linkedin: document.getElementById('edit-linkedin').value.trim(),
+      github: document.getElementById('edit-github')?.value.trim() || '',
 
       targetStack: document.getElementById('edit-target-stack').value.trim(),
       salaryFloor: parseFloat(document.getElementById('edit-salary-floor').value) || 120000,
