@@ -392,28 +392,25 @@ window.SubmissionCheckerCore = (function () {
     // Quick Apply is handled separately by the verification watcher
     if (isQuickApplyTrigger(el)) return false;
 
-    // 1. Text Content Analysis
-    const text = (el.innerText || el.textContent || el.value || '').trim().toLowerCase();
-
-    // NEVER treat intermediate step buttons as final submit!
-    if (/^(next|next step|continue|save & continue|save and continue|proceed|back|previous|prev|upload|choose file|browse)$/i.test(text)) {
+    // NEVER treat navigation, start-apply, login, or intermediate step buttons as final submit!
+    if (/^(apply now|apply|apply for this job|apply for job|start application|start apply|apply on company site|apply on website|apply externally|log in|login|sign in|signin|register|next|next step|continue|save & continue|save and continue|proceed|back|previous|prev|upload|choose file|browse)$/i.test(text)) {
       return false;
     }
 
-    // 2. Explicit Submit button markers
-    if (['submit application', 'submit', 'apply now', 'send application', 'complete application', 'submit profile', 'finish and submit'].includes(text)) {
+    // 2. Explicit Final Submit button markers
+    if (['submit application', 'submit', 'send application', 'complete application', 'submit profile', 'finish and submit', 'submit my application', 'confirm and submit', 'complete submission'].includes(text)) {
       return true;
     }
 
     // 3. Automation IDs
-    const autoId = (el.getAttribute('data-automation-id') || el.getAttribute('data-qa') || '').toLowerCase();
-    if (autoId.includes('submit') || autoId.includes('apply-button') || autoId.includes('submitbutton')) {
-      if (!autoId.includes('next') && !autoId.includes('continue')) return true;
+    const autoId = (el.getAttribute('data-automation-id') || el.getAttribute('data-qa') || el.id || '').toLowerCase();
+    if (autoId.includes('submit-button') || autoId.includes('submitapplication') || autoId.includes('submitbtn') || autoId === 'submit') {
+      if (!autoId.includes('next') && !autoId.includes('continue') && !autoId.includes('start') && !autoId.includes('login')) return true;
     }
 
-    // 4. Tag & type (only if text indicates submit or isn't next/continue)
+    // 4. Tag & type (only if text indicates submit or isn't next/continue/apply)
     if ((el.tagName === 'BUTTON' || el.tagName === 'INPUT') && (el.type === 'submit')) {
-      if (/submit|apply|send|finish/i.test(text) || !text) {
+      if (/submit|send|finish|complete/i.test(text)) {
         return true;
       }
     }
@@ -456,6 +453,10 @@ window.SubmissionCheckerCore = (function () {
       // Synchronously extract and validate
       runExtractionAndValidation();
 
+      // Safeguard: Never log a submission if there are 0 form fields detected on the page
+      const hasFormContext = (currentExtractedData?.total_fields_count || 0) > 0 || !!currentExtractedData?.email_entered || !!currentExtractedData?.candidate_name || !!currentExtractedData?.resume_uploaded;
+      if (!hasFormContext) return;
+
       const isAuditMode = currentSettings?.interceptionMode === 'audit';
 
       // --- FATAL VALIDATION FAILURE IN ACTIVE GATEKEEPER MODE ---
@@ -485,6 +486,10 @@ window.SubmissionCheckerCore = (function () {
       if (event.target && event.target.closest && event.target.closest('#sqc-hud-container, #sqc-modal-overlay')) return;
 
       runExtractionAndValidation();
+
+      // Safeguard: Never log a submission if there are 0 form fields detected on the page
+      const hasFormContext = (currentExtractedData?.total_fields_count || 0) > 0 || !!currentExtractedData?.email_entered || !!currentExtractedData?.candidate_name || !!currentExtractedData?.resume_uploaded;
+      if (!hasFormContext) return;
 
       const isAuditMode = currentSettings?.interceptionMode === 'audit';
 
