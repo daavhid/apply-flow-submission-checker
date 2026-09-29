@@ -1602,23 +1602,89 @@ window.JobFormExtractor = (function () {
   function setNativeSelectValue(sel, targetVal) {
     if (!sel || !targetVal || isUnansweredPlaceholder(targetVal)) return false;
     const targetNorm = clean(targetVal).toLowerCase();
-    let matched = false;
+    let matchedIndex = -1;
 
-    if (sel.tagName === 'SELECT' && sel.options) {
+    if (sel.tagName === 'SELECT' && sel.options && sel.options.length) {
+      // 1. Exact match on text or value
       for (let i = 0; i < sel.options.length; i++) {
         const opt = sel.options[i];
         const optTxt = clean(opt.text || opt.value || '').toLowerCase();
         const optVal = clean(opt.value || '').toLowerCase();
-        
-        if (optTxt === targetNorm || optVal === targetNorm || 
-            (targetNorm.length > 2 && (optTxt.includes(targetNorm) || targetNorm.includes(optTxt)))) {
-          sel.selectedIndex = i;
-          sel.value = opt.value;
-          matched = true;
+        if (optTxt === targetNorm || optVal === targetNorm) {
+          matchedIndex = i;
           break;
         }
       }
-      if (matched) {
+
+      // 2. Substring match
+      if (matchedIndex === -1 && targetNorm.length > 2) {
+        for (let i = 0; i < sel.options.length; i++) {
+          const opt = sel.options[i];
+          const optTxt = clean(opt.text || opt.value || '').toLowerCase();
+          const optVal = clean(opt.value || '').toLowerCase();
+          if (optTxt.includes(targetNorm) || targetNorm.includes(optTxt) || (optVal && targetNorm.includes(optVal))) {
+            matchedIndex = i;
+            break;
+          }
+        }
+      }
+
+      // 3. Domain-specific synonym matching
+      if (matchedIndex === -1) {
+        // Education / Degree synonyms (Bachelor's)
+        if (targetNorm.includes('bachelor') || targetNorm.includes('undergraduate') || targetNorm.includes('college')) {
+          for (let i = 0; i < sel.options.length; i++) {
+            const optTxt = clean(sel.options[i].text || sel.options[i].value || '').toLowerCase();
+            if (/(bachelor|undergraduate|4.?year|college degree|ba\b|bs\b|b\.a|b\.s)/i.test(optTxt)) {
+              matchedIndex = i;
+              break;
+            }
+          }
+        }
+        // Referral / How heard synonyms (LinkedIn)
+        else if (targetNorm.includes('linkedin') || targetNorm.includes('job board') || targetNorm.includes('source')) {
+          for (let i = 0; i < sel.options.length; i++) {
+            const optTxt = clean(sel.options[i].text || sel.options[i].value || '').toLowerCase();
+            if (/linkedin/i.test(optTxt)) {
+              matchedIndex = i;
+              break;
+            }
+          }
+          if (matchedIndex === -1) {
+            for (let i = 0; i < sel.options.length; i++) {
+              const optTxt = clean(sel.options[i].text || sel.options[i].value || '').toLowerCase();
+              if (/(job board|indeed|glassdoor|online|internet|company website|career site|social media|other)/i.test(optTxt)) {
+                matchedIndex = i;
+                break;
+              }
+            }
+          }
+        }
+        // Negative answers (No / None / False / Decline / Not Applicable)
+        else if (targetNorm === 'no' || targetNorm === 'none' || targetNorm === 'false') {
+          for (let i = 0; i < sel.options.length; i++) {
+            const optTxt = clean(sel.options[i].text || sel.options[i].value || '').toLowerCase();
+            if (/^no\b|^none\b|^false\b|^not applicable|^never|^i do not/i.test(optTxt)) {
+              matchedIndex = i;
+              break;
+            }
+          }
+        }
+        // Positive answers (Yes / True)
+        else if (targetNorm === 'yes' || targetNorm === 'true') {
+          for (let i = 0; i < sel.options.length; i++) {
+            const optTxt = clean(sel.options[i].text || sel.options[i].value || '').toLowerCase();
+            if (/^yes\b|^true\b|^i am\b|^i have\b/i.test(optTxt)) {
+              matchedIndex = i;
+              break;
+            }
+          }
+        }
+      }
+
+      if (matchedIndex !== -1) {
+        sel.selectedIndex = matchedIndex;
+        sel.value = sel.options[matchedIndex].value;
         sel.dispatchEvent(new Event('change', { bubbles: true }));
         sel.dispatchEvent(new Event('input', { bubbles: true }));
       }
@@ -1628,11 +1694,11 @@ window.JobFormExtractor = (function () {
     if (container) {
       const displaySpan = container.querySelector('.k-input, .filter-option-inner-inner, .filter-option, .select2-selection__rendered, [class*="singleValue"]');
       if (displaySpan) {
-        displaySpan.innerText = targetVal;
+        displaySpan.innerText = (matchedIndex !== -1 && sel.options ? sel.options[matchedIndex].text : targetVal);
       }
     }
 
-    return matched;
+    return matchedIndex !== -1;
   }
 
   function setNativeRadioValue(radioGroup, targetVal) {
@@ -1644,15 +1710,15 @@ window.JobFormExtractor = (function () {
       const val = clean(r.value).toLowerCase();
 
       if (optionLabel === targetNorm || val === targetNorm || 
-          (targetNorm === 'yes' && (optionLabel.startsWith('yes') || val.startsWith('yes'))) ||
-          (targetNorm === 'no' && (optionLabel.startsWith('no') || val.startsWith('no')))) {
+          (targetNorm === 'yes' && (/^yes\b|^true\b|^agree\b/i.test(optionLabel) || /^yes\b|^true\b/i.test(val))) ||
+          (targetNorm === 'no' && (/^no\b|^false\b|^disagree\b|^none\b/i.test(optionLabel) || /^no\b|^false\b/i.test(val)))) {
         if (!r.checked) {
           r.checked = true;
           r.dispatchEvent(new Event('change', { bubbles: true }));
           r.dispatchEvent(new Event('click', { bubbles: true }));
           return true;
         }
-        return false;
+        return true;
       }
     }
     return false;
@@ -1681,7 +1747,6 @@ window.JobFormExtractor = (function () {
 
     const p = profile || {};
     const cfg = settings || {};
-    const allowEeoc = cfg.autoFillDemographics !== false;
     const allowSalary = cfg.autoFillCompensation !== false;
     const allowCustomQa = cfg.autoFillCustomQuestions !== false;
 
@@ -1747,12 +1812,39 @@ window.JobFormExtractor = (function () {
             targetRadioVal = p.eeoc?.identifyAsMilitaryVeteran || 'No';
           } else if (labelNorm.includes('clearance') || labelNorm.includes('security')) {
             targetRadioVal = p.credentials?.securityClearance || 'No';
-          } else if (labelNorm.includes('authorized') || labelNorm.includes('lawfully')) {
+          } else if (labelNorm.includes('authorized') || labelNorm.includes('lawfully') || labelNorm.includes('legally authorized')) {
             targetRadioVal = p.workAuth?.authorizedInUS || 'Yes';
-          } else if (labelNorm.includes('sponsor')) {
+          } else if (labelNorm.includes('sponsor') || labelNorm.includes('visa') || labelNorm.includes('h-1b') || labelNorm.includes('h1-b')) {
             targetRadioVal = p.workAuth?.requiresSponsorship || 'No';
-          } else if (labelNorm.includes('18 or older') || labelNorm.includes('age')) {
+          } else if (labelNorm.includes('18 or older') || labelNorm.includes('age') || labelNorm.includes('legal age')) {
             targetRadioVal = p.eligibility?.age18OrOlder || 'Yes';
+          } else if (
+            labelNorm.includes('current or former employee') || labelNorm.includes('former employee') ||
+            labelNorm.includes('previous employee') || labelNorm.includes('affiliated company') ||
+            labelNorm.includes('affiliate') || labelNorm.includes('worked for') ||
+            labelNorm.includes('worked here') || labelNorm.includes('worked before') ||
+            labelNorm.includes('are you a member') || labelNorm.includes('member of') ||
+            labelNorm.includes('relative') || labelNorm.includes('family member') ||
+            labelNorm.includes('relationship with') || labelNorm.includes('conflict of interest')
+          ) {
+            targetRadioVal = 'No';
+          } else if (
+            labelNorm.includes('terminated') || labelNorm.includes('misconduct') ||
+            labelNorm.includes('disciplinary') || labelNorm.includes('suspended') ||
+            labelNorm.includes('non-compete') || labelNorm.includes('restrictive covenant') ||
+            labelNorm.includes('nda') || labelNorm.includes('confidentiality') ||
+            labelNorm.includes('convicted') || labelNorm.includes('felony') ||
+            labelNorm.includes('crime') || labelNorm.includes('government employee') ||
+            labelNorm.includes('finra')
+          ) {
+            targetRadioVal = 'No';
+          } else if (
+            labelNorm.includes('travel') || labelNorm.includes('onsite') ||
+            labelNorm.includes('overtime') || labelNorm.includes('hybrid') ||
+            labelNorm.includes('essential functions') || labelNorm.includes('minimum qualifications') ||
+            labelNorm.includes('driver license') || labelNorm.includes('drivers license')
+          ) {
+            targetRadioVal = 'Yes';
           }
         }
 
@@ -1832,6 +1924,14 @@ window.JobFormExtractor = (function () {
           valueToFill = new Date().toISOString().split('T')[0];
         } else if (labelNorm.includes('linkedin') || nameLower.includes('linkedin')) {
           valueToFill = p.linkedin || '';
+        } else if (labelNorm.includes('school') || labelNorm.includes('university') || labelNorm.includes('college') || labelNorm.includes('institution') || nameLower.includes('school') || nameLower.includes('university')) {
+          valueToFill = p.backgroundAndEducation?.schoolsAttended || p.school || 'Texas Tech University';
+        } else if (labelNorm.includes('degree') || labelNorm.includes('major') || labelNorm.includes('field of study')) {
+          valueToFill = p.backgroundAndEducation?.education || p.degree || "Bachelor's Degree in Computer Science";
+        } else if (labelNorm.includes('highest level of education') || labelNorm.includes('education level') || labelNorm.includes('degree level')) {
+          valueToFill = p.degreeLevel || p.backgroundAndEducation?.degreeLevel || "Bachelor's Degree";
+        } else if (labelNorm.includes('how did you hear') || labelNorm.includes('referral source') || labelNorm.includes('how heard') || labelNorm.includes('source') || nameLower.includes('source')) {
+          valueToFill = p.howHeard?.howHeard || p.howHeard || 'LinkedIn';
         }
       }
 
@@ -1888,12 +1988,27 @@ window.JobFormExtractor = (function () {
           val = p.eeoc?.disability || 'No, I do not have a disability and have not had one in the past';
         } else if (labelNorm.includes('salary type')) {
           val = 'Yearly';
-        } else if (labelNorm.includes('worked with us') || labelNorm.includes('previous employee')) {
+        } else if (
+          labelNorm.includes('worked with us') || labelNorm.includes('previous employee') ||
+          labelNorm.includes('current or former employee') || labelNorm.includes('affiliated') ||
+          labelNorm.includes('worked before') || labelNorm.includes('member') ||
+          labelNorm.includes('are you a member') || labelNorm.includes('relative') ||
+          labelNorm.includes('non-compete') || labelNorm.includes('misconduct') ||
+          labelNorm.includes('conflict of interest')
+        ) {
           val = 'No';
         } else if (labelNorm.includes('sms') || labelNorm.includes('text')) {
           val = 'Yes*';
-        } else if (labelNorm.includes('authorized') || labelNorm.includes('work lawfully')) {
+        } else if (labelNorm.includes('authorized') || labelNorm.includes('work lawfully') || labelNorm.includes('legally authorized')) {
           val = 'Yes';
+        } else if (labelNorm.includes('sponsor') || labelNorm.includes('visa')) {
+          val = 'No';
+        } else if (labelNorm.includes('education') || labelNorm.includes('degree') || labelNorm.includes('highest level')) {
+          val = p.degreeLevel || p.backgroundAndEducation?.degreeLevel || "Bachelor's degree";
+        } else if (labelNorm.includes('how did you hear') || labelNorm.includes('referral') || labelNorm.includes('how heard') || labelNorm.includes('source')) {
+          val = p.howHeard?.howHeard || p.howHeard || 'LinkedIn';
+        } else if (labelNorm.includes('school') || labelNorm.includes('university') || labelNorm.includes('college') || labelNorm.includes('institution')) {
+          val = p.backgroundAndEducation?.schoolsAttended || p.school || 'Texas Tech University';
         } else if (labelNorm.includes('graduate')) {
           val = 'Yes';
         }

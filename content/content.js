@@ -292,7 +292,10 @@ window.SubmissionCheckerCore = (function () {
         profile_assigned: activeProfile?.fullName || "Unassigned",
         portal_job_id: data.portal_job_id || "",
         job_id: data.portal_job_id || data.req_id || "",
-        job_status: data.is_already_applied ? "ALREADY_APPLIED" : (val?.isValid ? "READY" : "IN_PROGRESS"),
+        // Explicitly flag telemetry as PENDING (not a final submission)
+        is_final_submission: false,
+        job_status: data.is_already_applied ? "ALREADY_APPLIED" : "PENDING",
+        validation_status: "IN_PROGRESS",
         extracted_data: {
           candidate_name: data.candidate_name,
           candidate_first_name: data.candidate_first_name,
@@ -391,6 +394,8 @@ window.SubmissionCheckerCore = (function () {
 
     // Quick Apply is handled separately by the verification watcher
     if (isQuickApplyTrigger(el)) return false;
+
+    const text = (el.innerText || el.textContent || el.value || '').trim().toLowerCase();
 
     // NEVER treat navigation, start-apply, login, or intermediate step buttons as final submit!
     if (/^(apply now|apply|apply for this job|apply for job|start application|start apply|apply on company site|apply on website|apply externally|log in|login|sign in|signin|register|next|next step|continue|save & continue|save and continue|proceed|back|previous|prev|upload|choose file|browse)$/i.test(text)) {
@@ -645,7 +650,7 @@ window.SubmissionCheckerCore = (function () {
     }
   }
 
-  async function logPayloadToBackend(status, val) {
+  async function logPayloadToBackend(status, val, isManualConfirm = false) {
     const applyFlowParams = JobFormExtractor.extractApplyFlowParams();
     const effectiveJobId = sessionStorage.getItem('applyflow_job_id') || applyFlowParams.jobId || window.__SQC_PERSISTED_AF_SESSION?.jobId || currentExtractedData?.portal_job_id || currentExtractedData?.req_id || "";
     const effectiveProfileId = sessionStorage.getItem('applyflow_profile_id') || applyFlowParams.profileId || window.__SQC_PERSISTED_AF_SESSION?.profileId || activeProfile?.id || "";
@@ -656,12 +661,25 @@ window.SubmissionCheckerCore = (function () {
     const jobStatus = isAlreadyApplied ? "ALREADY_APPLIED" : (val?.isValid ? "SUBMITTED" : "REJECTED");
     const validationStatus = val?.isValid ? "PASSED" : (status.includes("OVERRIDDEN") ? "OVERRIDDEN_FAILED" : (status.includes("FLAGGED") ? "WARNING" : "FAILED"));
 
+    // Safeguard: Do not log automatic form submission if 0 fields are filled and not manually confirmed
+    const hasMeaningfulInputs = (currentExtractedData?.total_fields_count || 0) > 0 &&
+      (Boolean(currentExtractedData?.email_entered) || Boolean(currentExtractedData?.candidate_name) || Boolean(currentExtractedData?.resume_uploaded));
+    
+    if (!isManualConfirm && !isAlreadyApplied && !hasMeaningfulInputs) {
+      console.warn("[Submission Checker] Suppressing premature submission log: form has 0 filled inputs and was not manually confirmed.");
+      return { success: false, reason: "NO_FORM_INPUTS_DETECTED" };
+    }
+
     const payload = {
       job_id: effectiveJobId,
       profile_id: effectiveProfileId,
       applier_id: effectiveApplierId,
       profile_name: effectiveProfileName,
       candidate_id: effectiveProfileId,
+
+      // Explicit Final Submission Flag
+      is_final_submission: true,
+      submission_confirmed_by: isManualConfirm ? "MANUAL_HUD_CONFIRM" : "VERIFIED_FORM_SUBMIT_EVENT",
 
       // Apply-Flow Status: "SUBMITTED" (marks APPLIED), "ALREADY_APPLIED", or "REJECTED"
       job_status: jobStatus,
@@ -695,7 +713,7 @@ window.SubmissionCheckerCore = (function () {
       screening_qa: currentExtractedData?.screening_qa || [],
       validation_errors: val?.errors || [],
       validation_warnings: val?.warnings || [],
-      submission_notes: "Auto-verified by SQC Extension",
+      submission_notes: isManualConfirm ? "Confirmed via Apply-Flow Gatekeeper HUD" : "Auto-verified on Form Submit Event",
       timestamp: new Date().toISOString()
     };
 
@@ -713,7 +731,7 @@ window.SubmissionCheckerCore = (function () {
     runExtractionAndValidation();
     const currentUrl = window.location.href.split('#')[0];
     loggedSubmissionUrl = currentUrl;
-    const res = await logPayloadToBackend("PASSED", currentValidation);
+    const res = await logPayloadToBackend("PASSED", currentValidation, true);
     SubmissionHUD.setQuickApplyStatus('submitted', "🎉 Submission successfully logged to Apply-Flow!");
     return res;
   }
