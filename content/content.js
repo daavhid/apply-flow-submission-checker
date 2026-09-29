@@ -731,6 +731,43 @@ window.SubmissionCheckerCore = (function () {
     return res;
   }
 
+  async function reportBlockedStatus(reasonKey, customMessage) {
+    runExtractionAndValidation();
+    const applyFlowParams = JobFormExtractor.extractApplyFlowParams();
+    const effectiveJobId = applyFlowParams.jobId || sessionStorage.getItem('applyflow_job_id') || window.__SQC_PERSISTED_AF_SESSION?.jobId || "";
+    const effectiveProfileId = applyFlowParams.profileId || sessionStorage.getItem('applyflow_profile_id') || window.__SQC_PERSISTED_AF_SESSION?.profileId || activeProfile?.id || "";
+    const effectiveApplierId = applyFlowParams.applierId || sessionStorage.getItem('applyflow_applier_id') || window.__SQC_PERSISTED_AF_SESSION?.applierId || currentSettings?.applierId || "Applier";
+    const effectiveProfileName = applyFlowParams.profileName || sessionStorage.getItem('applyflow_profile_name') || window.__SQC_PERSISTED_AF_SESSION?.profileName || activeProfile?.fullName || "Candidate";
+
+    const payload = {
+      job_id: effectiveJobId,
+      profile_id: effectiveProfileId,
+      applier_id: effectiveApplierId,
+      profile_name: effectiveProfileName,
+      candidate_id: effectiveProfileId,
+      job_status: "BLOCKED",
+      validation_status: "BLOCKED",
+      block_reason: reasonKey,
+      submission_notes: customMessage || `Application blocked: ${reasonKey}`,
+      extracted_data: {
+        job_id: effectiveJobId,
+        profile_id: effectiveProfileId,
+        req_id: currentExtractedData?.req_id || "",
+        job_title: currentExtractedData?.job_title || "Application Role",
+        company: currentExtractedData?.company || "Employer",
+        job_url: currentExtractedData?.job_url || window.location.href,
+      },
+      timestamp: new Date().toISOString()
+    };
+
+    chrome.runtime.sendMessage({
+      type: "LOG_SUBMISSION",
+      payload
+    }, () => {});
+
+    SubmissionHUD.showToast(`⚠️ Job flagged as '${reasonKey === "EMAIL_OTP_REQUIRED" ? "Needs Email OTP" : "Login Issue"}' in Apply-Flow!`);
+  }
+
   return {
     init,
     reloadConfig: fetchConfig,
@@ -738,7 +775,8 @@ window.SubmissionCheckerCore = (function () {
     attachApplyFlowJobId,
     restoreForm: restoreFormManually,
     confirmAndLogSubmission: confirmAndLogSubmissionManually,
-    markAsAlreadyApplied: markAsAlreadyAppliedManually
+    markAsAlreadyApplied: markAsAlreadyAppliedManually,
+    reportBlockedStatus
   };
 })();
 

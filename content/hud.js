@@ -321,7 +321,7 @@ window.SubmissionHUD = (function () {
         `}
       </div>
 
-      <div class="sqc-card" style="margin-top:12px;">
+      <div class="sqc-card" style="margin-top:10px;">
         <div class="sqc-card-header"><span>Job Metadata</span></div>
         <div class="sqc-job-row"><span class="k">Job Title:</span><span class="v" title="${escapeHtml(extractedData.job_title)}">${escapeHtml(extractedData.job_title)}</span></div>
         <div class="sqc-job-row"><span class="k">Company:</span><span class="v" title="${escapeHtml(extractedData.company)}">${escapeHtml(extractedData.company)}</span></div>
@@ -329,6 +329,16 @@ window.SubmissionHUD = (function () {
         ${extractedData.jd_salary?.has_jd_salary ? `
           <div class="sqc-job-row"><span class="k">JD Pay Budget:</span><span class="v" style="color:#86efac; font-weight:600;">${escapeHtml(extractedData.jd_salary.raw)}</span></div>
         ` : ''}
+      </div>
+
+      <!-- Report Blocker / 2FA / Login Issue -->
+      <div class="sqc-card" style="margin-top:10px;">
+        <div class="sqc-card-header"><span>🚩 Report Application Blocker</span></div>
+        <p style="font-size:11px; color:#94a3b8; margin-bottom:8px;">Blocked by email verification code or login 2FA? Log the blocker so Apply-Flow flags the job accurately.</p>
+        <div style="display:flex; gap:6px;">
+          <button class="sqc-btn-subtle" id="sqc-flag-otp" style="flex:1; border-color:rgba(245,158,11,0.4); color:#fde68a; font-size:10.5px; padding:5px 6px;">🔐 Needs Email OTP</button>
+          <button class="sqc-btn-subtle" id="sqc-flag-login" style="flex:1; border-color:rgba(239,68,68,0.4); color:#fca5a5; font-size:10.5px; padding:5px 6px;">🚫 Login / Portal Error</button>
+        </div>
       </div>
     `;
 
@@ -590,6 +600,18 @@ window.SubmissionHUD = (function () {
       const val = drawerEl.querySelector('#sqc-af-input-job-id')?.value?.trim();
       if (!val) return alert("Please paste an Apply-Flow Job ID.");
       if (window.SubmissionCheckerCore) window.SubmissionCheckerCore.attachApplyFlowJobId(val);
+    });
+
+    drawerEl.querySelector('#sqc-flag-otp')?.addEventListener('click', () => {
+      if (window.SubmissionCheckerCore) {
+        window.SubmissionCheckerCore.reportBlockedStatus("EMAIL_OTP_REQUIRED", "Blocked: Candidate email verification / OTP code required to login.");
+      }
+    });
+
+    drawerEl.querySelector('#sqc-flag-login')?.addEventListener('click', () => {
+      if (window.SubmissionCheckerCore) {
+        window.SubmissionCheckerCore.reportBlockedStatus("LOGIN_ERROR", "Blocked: ATS portal account error or login disabled.");
+      }
     });
   }
 
