@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Submission Quality Checker & Live Gatekeeper",
+  "name": "Apply-Flow Quality Gatekeeper",
   "version": "1.0.0",
-  "description": "Real-time ATS form extractor, submission quality validator, live HUD, and duplicate prevention gatekeeper.",
+  "description": "An Apply-Flow Subsidiary Suite — Real-time ATS form extractor, submission quality validator, live HUD, and duplicate prevention gatekeeper.",
   "permissions": [
     "storage",
     "activeTab",
@@ -15,7 +15,7 @@
   ],
   "action": {
     "default_popup": "popup/popup.html",
-    "default_title": "Submission Quality Checker",
+    "default_title": "Apply-Flow Quality Gatekeeper",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",

@@ -343,11 +343,14 @@ window.SubmissionHUD = (function () {
       <!-- Top Header -->
       <div class="sqc-header">
         <div class="sqc-title">
-          <span>🛡️</span>
-          <span>Quality Gatekeeper</span>
-          <span class="sqc-mode-tag">${currentSettings?.interceptionMode === 'audit' ? 'Audit' : 'Gate'}</span>
+          <span class="sqc-brand-icon">🛡️</span>
+          <div class="sqc-title-group">
+            <span class="sqc-title-main">Apply-Flow Gatekeeper</span>
+            <span class="sqc-title-sub">Subsidiary of Apply-Flow</span>
+          </div>
+          <span class="sqc-mode-tag ${currentSettings?.interceptionMode === 'audit' ? 'audit' : 'gate'}">${currentSettings?.interceptionMode === 'audit' ? 'Audit' : 'Active Gate'}</span>
         </div>
-        <button class="sqc-close-btn" id="sqc-drawer-close">✕</button>
+        <button class="sqc-close-btn" id="sqc-drawer-close" title="Close Panel">✕</button>
       </div>
 
       <!-- Candidate Assignment Selector Bar -->
@@ -361,7 +364,7 @@ window.SubmissionHUD = (function () {
         </div>
         <div class="sqc-candidate-actions">
           ${isLocked ? '<button class="sqc-btn-subtle" id="sqc-btn-hud-unlock">🔑 Admin</button>' : ''}
-          <button class="sqc-btn-subtle" id="sqc-open-options">⚙️</button>
+          <button class="sqc-btn-subtle" id="sqc-open-options" title="Open Settings">⚙️</button>
         </div>
       </div>
 
@@ -375,7 +378,7 @@ window.SubmissionHUD = (function () {
           <option value="php">Full Stack PHP / Laravel Track</option>
           <option value="auto">Auto-Detect Stack per Job</option>
         </select>
-        <input type="password" id="sqc-hud-passkey" placeholder="Enter Admin Token..." class="sqc-input-sm" />
+        <input type="password" id="sqc-hud-passkey" placeholder="Admin Passkey (Default: 1234567890)" class="sqc-input-sm" />
         <div id="sqc-hud-admin-err" class="sqc-err-sm" style="display:none;"></div>
         <div style="display:flex; gap:6px; margin-top:4px;">
           <button id="sqc-hud-cancel-admin" class="sqc-btn sqc-btn-secondary sqc-btn-sm">Cancel</button>
@@ -417,11 +420,25 @@ window.SubmissionHUD = (function () {
 
       <!-- Actions Footer -->
       <div class="sqc-actions">
-        <button class="sqc-btn sqc-btn-confirm-apply" id="sqc-btn-confirm-apply" title="Confirm that this 1-click / Quick Apply submission completed and log to Apply-Flow">⚡ Confirm</button>
-        <button class="sqc-btn sqc-btn-autofill" id="sqc-btn-restore" title="Autofill blank inputs using candidate profile and custom fields">⚡ Restore</button>
-        <button class="sqc-btn sqc-btn-ai" id="sqc-btn-copy-ai-footer" title="Copy tailored ChatGPT prompt with Candidate Resume, JD, and Questions">🤖 AI Prompt</button>
-        <button class="sqc-btn sqc-btn-secondary" id="sqc-btn-paste-ai-footer" title="Paste JSON/answers from ChatGPT to auto-fill form">📥 Paste</button>
-        <button class="sqc-btn sqc-btn-primary" id="sqc-btn-copy" title="Copy clean payload JSON">📋 JSON</button>
+        <div class="sqc-actions-primary">
+          <button class="sqc-btn sqc-btn-confirm-apply" id="sqc-btn-confirm-apply" title="Confirm that this 1-click / Quick Apply submission completed and log to Apply-Flow">
+            <span class="sqc-btn-icon">⚡</span> Confirm
+          </button>
+          <button class="sqc-btn sqc-btn-autofill" id="sqc-btn-restore" title="Autofill blank inputs using candidate profile and custom fields">
+            <span class="sqc-btn-icon">🪄</span> Autofill
+          </button>
+          <button class="sqc-btn sqc-btn-ai" id="sqc-btn-copy-ai-footer" title="Copy tailored ChatGPT prompt with Candidate Resume, JD, and Questions">
+            <span class="sqc-btn-icon">🤖</span> AI Prompt
+          </button>
+        </div>
+        <div class="sqc-actions-secondary">
+          <button class="sqc-btn sqc-btn-tool" id="sqc-btn-paste-ai-footer" title="Paste JSON/answers from ChatGPT to auto-fill form">
+            <span>📥</span> Paste AI
+          </button>
+          <button class="sqc-btn sqc-btn-tool" id="sqc-btn-copy" title="Copy clean payload JSON">
+            <span>📋</span> Copy JSON
+          </button>
+        </div>
       </div>
     `;
 
