@@ -8,6 +8,45 @@ window.JobFormValidator = (function () {
 
   const DIRTY_REGEX = /^([.\-_*#/\\!@$%^&+=]+|asdf|qwerty|nil|null|test|idk|same|blank|nothing|dummy)$/i;
 
+  const US_STATE_MAP = {
+    'al': 'alabama', 'ak': 'alaska', 'az': 'arizona', 'ar': 'arkansas', 'ca': 'california',
+    'co': 'colorado', 'ct': 'connecticut', 'de': 'delaware', 'fl': 'florida', 'ga': 'georgia',
+    'hi': 'hawaii', 'id': 'idaho', 'il': 'illinois', 'in': 'indiana', 'ia': 'iowa',
+    'ks': 'kansas', 'ky': 'kentucky', 'la': 'louisiana', 'me': 'maine', 'md': 'maryland',
+    'ma': 'massachusetts', 'mi': 'michigan', 'mn': 'minnesota', 'ms': 'mississippi', 'mo': 'missouri',
+    'mt': 'montana', 'ne': 'nebraska', 'nv': 'nevada', 'nh': 'new hampshire', 'nj': 'new jersey',
+    'nm': 'new mexico', 'ny': 'new york', 'nc': 'north carolina', 'nd': 'north dakota', 'oh': 'ohio',
+    'ok': 'oklahoma', 'or': 'oregon', 'pa': 'pennsylvania', 'ri': 'rhode island', 'sc': 'south carolina',
+    'sd': 'south dakota', 'tn': 'tennessee', 'tx': 'texas', 'ut': 'utah', 'vt': 'vermont',
+    'va': 'virginia', 'wa': 'washington', 'wv': 'west virginia', 'wi': 'wisconsin', 'wy': 'wyoming',
+    'dc': 'district of columbia', 'pr': 'puerto rico', 'gu': 'guam', 'vi': 'virgin islands'
+  };
+
+  const US_STATE_CODE_MAP = Object.fromEntries(
+    Object.entries(US_STATE_MAP).map(([code, name]) => [name, code])
+  );
+
+  function getCandidateStackCategory(profile) {
+    if (!profile) return 'unknown';
+    const target = (profile.targetStack || '').toLowerCase();
+    const kws = (profile.primaryStackKeywords || []).map(k => String(k).toLowerCase());
+    const all = `${target} ${kws.join(' ')}`;
+
+    if (all.includes('c#') || all.includes('.net') || all.includes('dotnet') || all.includes('csharp')) {
+      return 'dotnet';
+    }
+    if (all.includes('python')) {
+      return 'python';
+    }
+    if (all.includes('java') && !all.includes('javascript')) {
+      return 'java';
+    }
+    if (all.includes('php') || all.includes('laravel')) {
+      return 'php';
+    }
+    return 'unknown';
+  }
+
   function getEffectiveStack(profile, activeStackKey = null, jobTitle = '') {
     if (!profile) return null;
     const stacks = profile.stacks || {};
@@ -57,6 +96,42 @@ window.JobFormValidator = (function () {
     const warnings = [];
     const fieldErrorMap = new Map();
 
+    // If the job has just been successfully submitted on the ATS portal, mark as SUBMISSION_SUCCESS and valid
+    if (data && data.is_submission_success) {
+      return {
+        isValid: true,
+        isSubmissionSuccess: true,
+        submissionSuccessMessage: data.submission_success_message || "You have successfully applied for this job.",
+        errorCount: 0,
+        warningCount: 0,
+        errors: [],
+        warnings: [],
+        fieldErrorMap: new Map()
+      };
+    }
+
+    // If the job encountered an error / submission failure on the ATS portal
+    if (data && data.is_submission_failed) {
+      const failMsg = data.submission_failure_message || "Submission failed on portal.";
+      return {
+        isValid: false,
+        isSubmissionFailed: true,
+        submissionFailureMessage: failMsg,
+        errorCount: 1,
+        warningCount: 0,
+        errors: [{
+          field: "submission",
+          rule: "SUBMISSION_FAILED",
+          severity: "BLOCKING",
+          message: failMsg,
+          expected: "Successful submission",
+          actual: failMsg
+        }],
+        warnings: [],
+        fieldErrorMap: new Map()
+      };
+    }
+
     // If the job is already applied on the ATS portal, mark as ALREADY_APPLIED and valid
     if (data && data.is_already_applied) {
       return {
@@ -94,18 +169,49 @@ window.JobFormValidator = (function () {
     const effectiveStack = getEffectiveStack(profile, settings.activeStackKey, data.job_title);
     const minScreeningLen = settings.minScreeningLength || 15;
 
-    function addError(element, message, rule, isWarning = false) {
+    // Check for dynamic in-memory tailored resume data
+    let tailoredData = null;
+    try {
+      if (typeof window !== 'undefined' && window.__SQC_TAILORED_RESUME_DATA) {
+        tailoredData = window.__SQC_TAILORED_RESUME_DATA;
+      } else if (typeof sessionStorage !== 'undefined') {
+        const raw = sessionStorage.getItem('sqc_tailored_resume_data');
+        if (raw) tailoredData = JSON.parse(raw);
+      }
+    } catch (_) {}
+
+    // Merge dynamically extracted tailored skills into effectiveStack
+    if (tailoredData && Array.isArray(tailoredData.primaryStackKeywords) && tailoredData.primaryStackKeywords.length > 0) {
+      if (effectiveStack) {
+        effectiveStack.keywords = Array.from(new Set([
+          ...(effectiveStack.keywords || []),
+          ...tailoredData.primaryStackKeywords
+        ]));
+        if (tailoredData.backendSkills && (!effectiveStack.preferredBackend || !effectiveStack.preferredBackend.includes(tailoredData.backendSkills))) {
+          effectiveStack.preferredBackend = `${effectiveStack.preferredBackend ? effectiveStack.preferredBackend + ', ' : ''}${tailoredData.backendSkills}`;
+        }
+        if (tailoredData.frontendSkills && (!effectiveStack.preferredFrontend || !effectiveStack.preferredFrontend.includes(tailoredData.frontendSkills))) {
+          effectiveStack.preferredFrontend = `${effectiveStack.preferredFrontend ? effectiveStack.preferredFrontend + ', ' : ''}${tailoredData.frontendSkills}`;
+        }
+        if (tailoredData.dbCloudSkills && (!effectiveStack.preferredDatabase || !effectiveStack.preferredDatabase.includes(tailoredData.dbCloudSkills))) {
+          effectiveStack.preferredDatabase = `${effectiveStack.preferredDatabase ? effectiveStack.preferredDatabase + ', ' : ''}${tailoredData.dbCloudSkills}`;
+        }
+      }
+    }
+
+    function addError(element, message, rule, isWarning = false, meta = null) {
+      const item = { rule, message, ...(meta ? { meta } : {}) };
       if (isWarning) {
-        warnings.push({ rule, message });
+        warnings.push(item);
       } else {
-        errors.push({ rule, message });
+        errors.push(item);
       }
 
       if (element) {
         if (!fieldErrorMap.has(element)) {
           fieldErrorMap.set(element, []);
         }
-        fieldErrorMap.get(element).push({ message, isWarning });
+        fieldErrorMap.get(element).push({ message, isWarning, ...(meta ? { meta } : {}) });
       }
     }
 
@@ -155,8 +261,154 @@ window.JobFormValidator = (function () {
     validFirstNames.forEach(fn => allNameTokens.add(fn));
     validLastNames.forEach(ln => allNameTokens.add(ln));
 
+    // =========================================================================
+    // 0. CONTEXT WINDOW & DISPATCHED CANDIDATE MISMATCH RULE
+    // Validates that the active extension station matches the target candidate
+    // dispatched in the Apply-Flow job URL query/hash parameters.
+    // =========================================================================
+    const targetCandidateName = (
+      data.target_profile_name ||
+      data.profile_name ||
+      data.apply_flow_params?.profileName ||
+      data.apply_flow_params?.profile_name ||
+      data.apply_flow_params?.candidate_name ||
+      (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('applyflow_profile_name') : '') ||
+      (typeof window !== 'undefined' && window.JobFormExtractor?.extractApplyFlowParams ? window.JobFormExtractor.extractApplyFlowParams()?.profileName : '') ||
+      ''
+    ).trim();
+
+    const targetCandidateId = (
+      data.target_candidate_id ||
+      data.apply_flow_params?.profileId ||
+      data.apply_flow_params?.profile_id ||
+      data.apply_flow_params?.candidate_id ||
+      data.apply_flow_params?.sqc_profile_id ||
+      (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('applyflow_profile_id') : '') ||
+      (typeof window !== 'undefined' && window.JobFormExtractor?.extractApplyFlowParams ? window.JobFormExtractor.extractApplyFlowParams()?.profileId : '') ||
+      ''
+    ).trim();
+
+    if (targetCandidateName || targetCandidateId) {
+      let isIdMatch = false;
+      let isNameMatch = false;
+
+      // 1. ID Match Check
+      if (targetCandidateId && profile?.id) {
+        if (String(targetCandidateId).trim().toLowerCase() === String(profile.id).trim().toLowerCase()) {
+          isIdMatch = true;
+        }
+      }
+
+      // 2. Name Match Check (matches full name, legal name, preferred name, aliases, or token overlap)
+      if (targetCandidateName) {
+        const targetLower = targetCandidateName.toLowerCase().trim();
+        const targetTokens = targetLower.split(/\s+/).filter(t => t.length >= 2);
+
+        const exactOrSubstr = validFullNames.some(vn => 
+          vn === targetLower || targetLower.includes(vn) || vn.includes(targetLower)
+        );
+        const hasMatchingLast = Array.from(validLastNames).some(ln => targetLower.includes(ln));
+        const hasMatchingFirst = Array.from(validFirstNames).some(fn => targetLower.includes(fn));
+        const tokenMatch = (hasMatchingLast && hasMatchingFirst) || targetTokens.filter(t => allNameTokens.has(t)).length >= 2;
+
+        if (exactOrSubstr || tokenMatch) {
+          isNameMatch = true;
+        }
+      }
+
+      // If either id or name matches, context is verified
+      const isContextMatched = (targetCandidateId && isIdMatch) || (targetCandidateName && isNameMatch);
+
+      if (!isContextMatched) {
+        const displayTarget = targetCandidateName || targetCandidateId;
+        addError(
+          null,
+          `Context Window Mismatch: This job application was dispatched in Apply-Flow for candidate "${displayTarget}", but this browser workstation is currently active for "${profile.fullName || 'Unassigned'}". Do not submit under this profile! Switch the active profile to "${displayTarget}" or open this job on the assigned candidate workstation.`,
+          "CONTEXT_PROFILE_MISMATCH"
+        );
+      }
+    }
+
+    // =========================================================================
+    // 0.2 TECH STACK & ASSIGNED CANDIDATE TRACK VERIFICATION RULE
+    // Ensures a candidate assigned to C# is not submitted to a Python job, and vice versa!
+    // =========================================================================
+    const detectedJobStack = data?.detected_job_stack || (window.JobFormExtractor && window.JobFormExtractor.detectJobTechStack ? window.JobFormExtractor.detectJobTechStack(data?.job_title, data?.jd_text, data?.apply_flow_params) : null);
+    const candStackKey = getCandidateStackCategory(profile);
+
+    if (detectedJobStack && detectedJobStack.key && detectedJobStack.key !== 'unknown' && candStackKey !== 'unknown') {
+      if (detectedJobStack.key !== candStackKey) {
+        const stackDisplay = {
+          dotnet: '.NET / C#',
+          python: 'Python / AI / Data',
+          java: 'Java / Spring',
+          php: 'PHP / Laravel'
+        };
+        const jobStackLabel = stackDisplay[detectedJobStack.key] || detectedJobStack.title;
+        const candStackLabel = stackDisplay[candStackKey] || profile.targetStack;
+        const evidence = detectedJobStack.matchedTokens?.length ? ` (${detectedJobStack.matchedTokens.slice(0, 4).join(', ')})` : '';
+
+        addError(
+          null,
+          `Tech Stack Mismatch: This job is a ${jobStackLabel} position${evidence}, but current workstation profile is locked to "${profile.fullName}" on the "${profile.targetStack || candStackLabel}" track. Submitting will send conflicting technical credentials!`,
+          "JOB_STACK_MISMATCH",
+          false,
+          {
+            detectedJobStack,
+            candStackKey,
+            jobStackLabel,
+            candStackLabel,
+            candidateName: profile.fullName
+          }
+        );
+      }
+    }
+
+    // =========================================================================
+    // 0.5 LOGGED-IN PORTAL ACCOUNT MISMATCH RULE
+    // Detects when the applier is signed into a job board (ZipRecruiter, LinkedIn, etc.)
+    // under a candidate account that does NOT match the locked/active workstation profile!
+    // Prevents submitting 1-Click apply under another candidate's account!
+    // =========================================================================
+    const loggedInAccount = data.logged_in_account || (typeof window !== 'undefined' && window.JobFormExtractor?.extractLoggedInAccount ? window.JobFormExtractor.extractLoggedInAccount() : null);
+    if (loggedInAccount && (loggedInAccount.accountName || loggedInAccount.accountEmail)) {
+      const acctName = (loggedInAccount.accountName || '').toLowerCase().trim();
+      const acctEmail = (loggedInAccount.accountEmail || '').toLowerCase().trim();
+      const platform = loggedInAccount.platform || 'job portal';
+
+      let isAccountMatch = false;
+
+      // 1. Email check if available
+      if (acctEmail && validEmails.has(acctEmail)) {
+        isAccountMatch = true;
+      }
+
+      // 2. Name check
+      if (acctName) {
+        const acctTokens = acctName.split(/\s+/).filter(t => t.length >= 2);
+        
+        // Check if ANY token of the logged-in name matches active candidate's first name, last name, preferred name, middle names
+        const matchesCandidateToken = acctTokens.some(tok => allNameTokens.has(tok));
+        const matchesFullName = validFullNames.some(fn => fn.includes(acctName) || acctName.includes(fn));
+
+        if (matchesCandidateToken || matchesFullName) {
+          isAccountMatch = true;
+        }
+      }
+
+      if (!isAccountMatch) {
+        const candidateDisplay = profile.fullName || profile.preferredName || 'Assigned Candidate';
+        const displayAcct = loggedInAccount.accountName || loggedInAccount.accountEmail;
+        addError(
+          null,
+          `Critical Account Mismatch: You are currently signed into ${platform} as "${displayAcct}", but this workstation is locked to "${candidateDisplay}". Clicking 1-Click Apply will submit under the wrong candidate's account! Please log out of ${platform} and sign in as "${candidateDisplay}", or switch the workstation candidate.`,
+          "ACCOUNT_MISMATCH"
+        );
+      }
+    }
+
     // Full Name Check
-    if (data.candidate_name) {
+    if (data.candidate_name && data.candidate_name.trim()) {
       const entered = data.candidate_name.toLowerCase().trim();
       const enteredTokens = entered.split(/\s+/).filter(t => t.length >= 2);
 
@@ -178,7 +430,7 @@ window.JobFormValidator = (function () {
     }
 
     // First Name Check (Supports legal first name, legal middle name, preferred name, and aliases)
-    if (data.candidate_first_name) {
+    if (data.candidate_first_name && data.candidate_first_name.trim()) {
       const first = data.candidate_first_name.toLowerCase().trim();
       const isFirstValid = Array.from(validFirstNames).some(v => 
         v === first || 
@@ -198,7 +450,7 @@ window.JobFormValidator = (function () {
     }
 
     // Last Name Check
-    if (data.candidate_last_name) {
+    if (data.candidate_last_name && data.candidate_last_name.trim()) {
       const last = data.candidate_last_name.toLowerCase().trim();
       const isLastValid = Array.from(validLastNames).some(v => 
         v === last || v.includes(last) || last.includes(v)
@@ -214,7 +466,7 @@ window.JobFormValidator = (function () {
     }
 
     // Phone Number Check
-    if (data.phone_entered && profile.phone) {
+    if (data.phone_entered && data.phone_entered.trim() && profile.phone) {
       const enteredDigits = data.phone_entered.replace(/\D/g, '');
       const profileDigits = String(profile.phone).replace(/\D/g, '');
       if (enteredDigits.length >= 7 && profileDigits.length >= 7 && enteredDigits !== profileDigits && !profileDigits.includes(enteredDigits) && !enteredDigits.includes(profileDigits)) {
@@ -223,14 +475,14 @@ window.JobFormValidator = (function () {
     }
 
     // Email Check
-    if (data.email_entered) {
+    if (data.email_entered && data.email_entered.trim()) {
       const enteredEmail = data.email_entered.toLowerCase().trim();
-      const aliases = (profile.emailAliases || [profile.primaryEmail]).map(e => e.toLowerCase().trim());
+      const aliases = (profile.emailAliases || [profile.primaryEmail]).filter(Boolean).map(e => e.toLowerCase().trim());
       const isExactAlias = aliases.some(alias => alias === enteredEmail || enteredEmail.endsWith('@' + alias.split('@')[1]));
       const containsCandidateTokens = Array.from(allNameTokens).some(tok => tok.length >= 3 && enteredEmail.includes(tok));
 
       if (!isExactAlias && !containsCandidateTokens) {
-        addError(data._elements?.email, `Email Mismatch: "${data.email_entered}" does not belong to active profile "${profile.fullName}". Expected ${profile.primaryEmail}`, "EMAIL_MISMATCH");
+        addError(data._elements?.email, `Email Mismatch: "${data.email_entered}" does not belong to active profile "${profile.fullName}". Expected ${profile.primaryEmail || 'assigned email'}`, "EMAIL_MISMATCH");
       }
 
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(enteredEmail)) {
@@ -243,15 +495,30 @@ window.JobFormValidator = (function () {
     // =========================================================================
     // 2. RESUME ATTACHMENT & STACK MATCH
     // =========================================================================
-    if (!data.resume_uploaded || data.resume_uploaded === 'No file chosen') {
-      if (data._elements?.resume) {
-        addError(data._elements?.resume, "No resume attached! Candidate resume is required.", "MISSING_RESUME");
+    const isTailoringMethod = profile.tailoringMode === 'tailored';
+    const hasTailoredResume = Boolean(tailoredData?.text || (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('sqc_tailored_resume')));
+
+    // 2.1 Tailoring Profile Requirement Check
+    if (isTailoringMethod && !hasTailoredResume) {
+      addError(
+        data._elements?.resume,
+        `Tailoring Method Required: Candidate "${profile.fullName}" is configured for the Tailoring Method. A job-tailored resume must be pasted into the Floating HUD before submitting to ensure all required skills are referenced.`,
+        "TAILORING_RESUME_REQUIRED"
+      );
+    }
+
+    // 2.2 Empty / Missing Resume Check
+    const hasPortalResumeUploaded = Boolean(data.resume_uploaded && data.resume_uploaded !== 'No file chosen');
+    if (!hasPortalResumeUploaded && !hasTailoredResume) {
+      if (data._elements?.resume || document.querySelector('input[type="file"], textarea[name*="resume" i], [class*="resume-upload"]')) {
+        addError(data._elements?.resume, "Missing Resume: No resume file or text has been attached to this job application. Candidate resume is required before submitting.", "MISSING_RESUME");
       }
-    } else {
+    } else if (hasPortalResumeUploaded) {
       const filename = data.resume_uploaded.toLowerCase();
       const isNameInResume = Array.from(allNameTokens).some(tok => tok.length >= 3 && filename.includes(tok));
       const isGenericResume = filename === 'pasted resume content' || 
                               filename.includes('resume attached') || 
+                              filename.includes('tailored resume') ||
                               filename.includes('resume uploaded') || 
                               filename.includes('uploaded file') || 
                               filename.includes('attachment') || 
@@ -265,7 +532,7 @@ window.JobFormValidator = (function () {
       }
 
       // Dynamic Stack Check: Verify resume matches candidate's stack
-      const candidateStackKeywords = (profile.primaryStackKeywords || []).map(k => k.toLowerCase());
+      const candidateStackKeywords = (effectiveStack?.keywords || profile.primaryStackKeywords || []).map(k => k.toLowerCase());
       const isResumeGeneric = filename.includes('resume') || filename.includes('cv');
       
       const stackCategories = {
@@ -297,8 +564,35 @@ window.JobFormValidator = (function () {
       const aText = q.value || '';
       const aLower = aText.toLowerCase().trim();
 
-      // Skip unanswered questions
-      if (!aText || aLower === 'unanswered' || aLower === 'no file chosen' || aLower === 'no resume pasted') return;
+      // Optional fields → skip ALL validation, no strictness whatsoever
+      const isRequired = q.required || q.is_required;
+      if (!isRequired) return;
+
+      const isUnanswered = !aText ||
+        aLower === 'unanswered' ||
+        aLower === 'no file chosen' ||
+        aLower === 'no resume pasted' ||
+        aLower === '--' ||
+        aLower === '-' ||
+        aLower === 'select' ||
+        aLower === 'please select' ||
+        aLower === 'choose' ||
+        aLower === 'choose an option' ||
+        aLower === 'select an option';
+
+      // Flag required empty questions
+      if (isUnanswered) {
+        if (q.required || q.is_required) {
+          // Skip location fields — Kendo comboboxes for state/city often return empty DOM values
+          // even when visually filled. These are validated by the location mismatch checks below.
+          const isLocationField = /(^|\s)(state|administrative\s*area|state\/province|city|locality|county|zip|postal|country|address(\s*line)?(\s*\d)?|apt|suite|province)([\s:*]|$)/i.test(qLower)
+            && !qLower.includes('statement') && !qLower.includes('status') && !qLower.includes('citizenship');
+          if (!isLocationField) {
+            addError(q.element, `Required field is unanswered: "${qText}". Please answer before submitting.`, "REQUIRED_FIELD_EMPTY");
+          }
+        }
+        return;
+      }
 
       // 1. WORK AUTH & SPONSORSHIP (Category 1)
       if (/legally authorized to work|authorized to work in|permitted to work in/i.test(qLower)) {
@@ -330,19 +624,102 @@ window.JobFormValidator = (function () {
           addError(q.element, `Eligibility Error: Selected "No" on job qualification/essential functions verification.`, "ELIGIBILITY_MISMATCH");
         }
       }
+      if (/worked (with|for) us before|worked here before|previous(ly)? employed by|former employee/i.test(qLower)) {
+        if (aLower === 'yes' || aLower === 'true') {
+          addError(q.element, `Previous Employment Mismatch: Selected "Yes", but candidate has not previously worked here (expected "No").`, "EXPERIENCE_MISMATCH");
+        }
+      }
 
       // 3. LOCATION, REMOTE, HYBRID & TRAVEL (Category 3)
-      if (profile.state && /(^|\s)state(\*|\s|:|$)/i.test(qLower) && !qLower.includes('statement') && !qLower.includes('status')) {
-        if (aLower && !aLower.includes(profile.state.toLowerCase()) && !profile.state.toLowerCase().includes(aLower)) {
+      const isBooleanYesNoQuestion = (q.type === 'radio' || q.type === 'checkbox') ||
+        (q.options && q.options.some(o => /^(yes|no|true|false)$/i.test(o.trim())));
+
+      // Check if this field belongs to a work experience or education block rather than candidate's personal residence
+      const isWorkHistoryOrEdu = (function() {
+        // 'County' is NEVER a candidate residence profile field — always employer/location address
+        if (/^county[*:\s]?$/i.test(qLower.trim())) return true;
+        // Label itself hints at employer/work context
+        if (/employer|company|school|university|institution|previous|prior|job\s*location|office\s*location|supervisor|position\s*held|job\s*title/i.test(qLower)) return true;
+        if (!q.element || typeof q.element.closest !== 'function') return false;
+
+        // Walk up ancestors (avoid using 'div' as it matches everything on the page)
+        const container = q.element.closest(
+          '[class*="work-history" i], [class*="workHistory" i], [class*="work_history" i], ' +
+          '[class*="experience" i], [class*="employment" i], ' +
+          '[class*="education" i], [class*="history" i], ' +
+          '[data-automation-id*="workExperience" i], [data-automation-id*="work-experience" i], ' +
+          '[data-automation-id*="education" i], [data-automation-id*="employment" i], ' +
+          'fieldset, section, article, [role="group"]'
+        );
+        if (container) {
+          const txt = (container.innerText || '').toLowerCase();
+          const workSignals = [
+            'responsibilities', 'reason for leaving', 'currently working here',
+            'position (required)', 'position*', 'company phone',
+            'start date (required)', 'end date (required)',
+            'dates attended', 'degree (required)', 'gpa',
+            'county', 'company name', 'employer name',
+            'job title', 'supervisor', 'position held',
+            'employment type', 'full-time', 'part-time'
+          ];
+          if (workSignals.some(s => txt.includes(s))) return true;
+        }
+
+        // Fallback: check parent divs up to 8 levels for work/employer signals
+        let el = q.element;
+        for (let i = 0; i < 8; i++) {
+          el = el?.parentElement;
+          if (!el) break;
+          const txt = (el.innerText || '').toLowerCase().slice(0, 2000); // cap to avoid huge DOM text
+          if (
+            txt.includes('responsibilities') || txt.includes('company phone') ||
+            txt.includes('reason for leaving') || txt.includes('employer name') ||
+            txt.includes('position (required)') || txt.includes('currently working here') ||
+            txt.includes('start date (required)') || txt.includes('end date (required)')
+          ) return true;
+        }
+
+        return false;
+      })();
+
+      // A. Explicit Question: US State other than California
+      if (/live in a u\.?s\.? state other than california|other than california|except california/i.test(qLower)) {
+        const candidateInCalifornia = (profile.state || '').toLowerCase().includes('california') || (profile.location?.resideState || '').toLowerCase().includes('ca');
+        if (!candidateInCalifornia && (aLower === 'no' || aLower === 'false')) {
+          addError(q.element, `Eligibility Error: Selected "NO" to living in a U.S. state other than California, but candidate lives in ${profile.state || 'Florida'}.`, "LOCATION_MISMATCH");
+        }
+      } 
+      // B. State Name Field Check (only on actual State inputs/dropdowns of Candidate Residence, never on Yes/No questions or Work History)
+      else if (!isBooleanYesNoQuestion && !isWorkHistoryOrEdu && profile.state && /(^|\s)(state|administrative\s*area|state\/province)(\*|\s|:|$)/i.test(qLower) && !qLower.includes('statement') && !qLower.includes('status')) {
+        const rawState = (profile.state || '').toLowerCase().trim();
+        const pFullName = US_STATE_MAP[rawState] || rawState;
+        const pCode = US_STATE_CODE_MAP[rawState] || US_STATE_CODE_MAP[pFullName] || rawState;
+
+        const aClean = aLower.replace(/[^a-z]/g, '');
+        const aFullName = US_STATE_MAP[aClean] || aLower;
+        const aCode = US_STATE_CODE_MAP[aClean] || US_STATE_CODE_MAP[aFullName] || aClean;
+
+        const matchesState = (
+          aClean === pCode ||
+          aFullName === pFullName ||
+          aCode === pCode ||
+          pFullName.includes(aLower) ||
+          aLower.includes(pFullName) ||
+          (pCode && pCode.length === 2 && aClean.startsWith(pCode)) ||
+          (aCode && aCode.length === 2 && pFullName.startsWith(aCode))
+        );
+
+        if (aLower && !matchesState) {
           addError(q.element, `State Mismatch: Selected "${aText}", candidate profile state is "${profile.state}".`, "LOCATION_MISMATCH");
         }
       }
-      if (profile.city && /(^|\s)city(\*|\s|:|$)/i.test(qLower) && !qLower.includes('citizenship') && !qLower.includes('velocity')) {
+
+      if (!isWorkHistoryOrEdu && profile.city && !isBooleanYesNoQuestion && /(^|\s)(city|locality)(\*|\s|:|$)/i.test(qLower) && !qLower.includes('citizenship') && !qLower.includes('velocity')) {
         if (aLower && !aLower.includes(profile.city.toLowerCase()) && !profile.city.toLowerCase().includes(aLower)) {
           addError(q.element, `City Mismatch: Entered "${aText}", candidate profile city is "${profile.city}".`, "LOCATION_MISMATCH");
         }
       }
-      if (profile.zip && /(^|\s)(zip|postal)(\*|\s|:|$)/i.test(qLower)) {
+      if (!isWorkHistoryOrEdu && profile.zip && !isBooleanYesNoQuestion && /(^|\s)(zip|postal)(\*|\s|:|$)/i.test(qLower)) {
         if (aLower && !aLower.includes(profile.zip.toLowerCase()) && !profile.zip.toLowerCase().includes(aLower)) {
           addError(q.element, `Zip Mismatch: Entered "${aText}", candidate profile zip is "${profile.zip}".`, "LOCATION_MISMATCH");
         }
@@ -406,12 +783,32 @@ window.JobFormValidator = (function () {
       }
 
       // 10. SOCIAL / LINKEDIN (Category 10)
-      if (profile.linkedin && /linkedin/i.test(qLower)) {
+      const isUrlInputField = (q.type === 'text' || q.type === 'textarea' || q.type === 'url') && !isBooleanYesNoQuestion;
+      const isReferralQuestion = /how did you|how heard|learn about|source|referral/i.test(qLower);
+
+      if (profile.linkedin && isUrlInputField && !isReferralQuestion && /linkedin/i.test(qLower)) {
         const cleanEntered = aLower.replace(/https?:\/\/(www\.)?/, '').replace(/\/+$/, '');
         const cleanExpected = profile.linkedin.toLowerCase().replace(/https?:\/\/(www\.)?/, '').replace(/\/+$/, '');
         const pLast = (profile.lastName || '').toLowerCase();
         if (cleanEntered && !cleanEntered.includes(pLast) && !cleanEntered.includes(cleanExpected.split('/in/')[1] || 'none')) {
           addError(q.element, `LinkedIn Mismatch: Entered "${aText}", expected profile link "${profile.linkedin}".`, "PROFILE_RECORD_MISMATCH");
+        }
+      }
+
+      // 10.1 GITHUB PROFILE & UNMET STRICT REQUIREMENT CHECK
+      if (isUrlInputField && !isReferralQuestion && /(^|\b)(github|git hub|github profile|github url)(\b|$)/i.test(qLower)) {
+        const hasCandGithub = Boolean(profile.github || profile.links?.github);
+        if (!hasCandGithub) {
+          addError(
+            q.element,
+            `Strict Requirement Unmet: This job strictly requires a GitHub Profile URL, but candidate "${profile.fullName || 'Active'}" has no GitHub profile configured. This application cannot be submitted.`,
+            "UNMET_REQUIREMENT_GITHUB"
+          );
+        } else {
+          const candGithub = (profile.github || profile.links?.github || '').toLowerCase().replace(/https?:\/\/(www\.)?github\.com\/?/i, '').replace(/\/+$/, '');
+          if (aLower && candGithub && !aLower.includes(candGithub)) {
+            addError(q.element, `GitHub Profile Mismatch: Entered "${aText}", expected profile link "${profile.github || profile.links?.github}".`, "PROFILE_RECORD_MISMATCH");
+          }
         }
       }
 
@@ -423,7 +820,7 @@ window.JobFormValidator = (function () {
       }
       if (/valid driver('s)? license/i.test(qLower)) {
         if (aLower === 'no' || aLower === 'false') {
-          addError(q.element, `Credential Mismatch: Selected "No" on valid driver's license (expected "Yes").`, "PROFILE_RECORD_MISMATCH");
+          addError(q.element, `Driver's License: Selected "No" — confirm candidate has a valid driver's license if required for this role.`, "PROFILE_RECORD_MISMATCH", true);
         }
       }
       if (/professional.*licenses|certifications/i.test(qLower)) {
@@ -440,6 +837,8 @@ window.JobFormValidator = (function () {
       // 13-15. DYNAMIC TECHNICAL ENGINEERING & STACK MATCHING (Categories 13-15)
       // Dynamic Preferred Backend Language / Framework Check
       if (/preferred backend|primary backend language|backend language.*professional/i.test(qLower)) {
+        // Skip open-text descriptive fields — answers are paragraphs, not tech names
+        if (q.type === 'textarea') return;
         const prefBackend = effectiveStack?.preferredBackend || profile.languagesFrameworks?.preferredBackend || '';
         if (prefBackend && aLower.length > 0) {
           const backendKeywords = prefBackend.toLowerCase().split(/[\s,/]+/).filter(w => w.length > 1 && w !== 'with' && w !== 'and');
@@ -452,6 +851,8 @@ window.JobFormValidator = (function () {
 
       // Dynamic Preferred Frontend Framework Check
       if (/preferred frontend|primary frontend|frontend framework.*professional/i.test(qLower)) {
+        // Skip open-text descriptive fields
+        if (q.type === 'textarea') return;
         const prefFrontend = effectiveStack?.preferredFrontend || profile.languagesFrameworks?.preferredFrontend || '';
         if (prefFrontend && aLower.length > 0) {
           const frontendKeywords = prefFrontend.toLowerCase().split(/[\s,/]+/).filter(w => w.length > 1 && w !== 'with' && w !== 'and');
@@ -464,6 +865,8 @@ window.JobFormValidator = (function () {
 
       // Dynamic Preferred Database Check
       if (/preferred database|primary database|database.*professional/i.test(qLower)) {
+        // Skip open-text descriptive fields
+        if (q.type === 'textarea') return;
         const prefDb = effectiveStack?.preferredDatabase || profile.languagesFrameworks?.preferredDatabase || '';
         if (prefDb && aLower.length > 0) {
           const dbKeywords = prefDb.toLowerCase().split(/[\s,/()]+/).filter(w => w.length > 2 && w !== 'including' && w !== 'and');
@@ -538,10 +941,11 @@ window.JobFormValidator = (function () {
     if (data.salary_numeric !== null && !isNaN(data.salary_numeric)) {
       const sal = data.salary_numeric;
       const floor = profile.compensation?.salaryFloor || profile.salaryFloor || 120000;
+      const likelyHourly = sal > 0 && sal < 500; // hourly rate (e.g. $55/hr) vs annual ($130,000)
 
       if (sal <= 1) {
         addError(data._elements?.salary, `Invalid salary: $${sal}. Auto-rejected by ATS pay filters.`, "INVALID_SALARY_PLACEHOLDER");
-      } else if (sal < floor && sal > 1000) {
+      } else if (!likelyHourly && sal < floor && sal > 1000) {
         addError(data._elements?.salary, `Salary Warning: $${sal.toLocaleString()} is below candidate floor of $${floor.toLocaleString()}.`, "SALARY_BELOW_FLOOR", true);
       }
     }
@@ -557,6 +961,8 @@ window.JobFormValidator = (function () {
   }
 
   return {
-    validate
+    validate,
+    getEffectiveStack,
+    getCandidateStackCategory
   };
 })();

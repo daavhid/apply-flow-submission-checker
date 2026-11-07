@@ -41,9 +41,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Render Profiles Dropdown
     if (profileSelect) {
-      profileSelect.innerHTML = (profiles || []).map(p => `
+      const visibleProfiles = (profiles || []).filter(p => !p.archived || (activeProfile && activeProfile.id === p.id));
+      profileSelect.innerHTML = visibleProfiles.map(p => `
         <option value="${p.id}" ${activeProfile && activeProfile.id === p.id ? 'selected' : ''}>
-          ${escapeHtml(p.fullName)}
+          ${escapeHtml(p.fullName)}${p.archived ? ' [Archived]' : ''}
         </option>
       `).join('');
       profileSelect.disabled = isLocked;
@@ -59,7 +60,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (adminTargetProfile) {
       adminTargetProfile.innerHTML = (profiles || []).map(p => `
         <option value="${p.id}" ${activeProfile && activeProfile.id === p.id ? 'selected' : ''}>
-          ${escapeHtml(p.fullName)} (${escapeHtml(p.targetStack || 'Dev')})
+          ${escapeHtml(p.fullName)} (${escapeHtml(p.targetStack || 'Dev')})${p.archived ? ' [Archived]' : ''}
         </option>
       `).join('');
     }
@@ -69,6 +70,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (profileEmail) profileEmail.innerText = activeProfile.primaryEmail || 'None';
       if (profileSalary) profileSalary.innerText = `$${(activeProfile.salaryFloor || 0).toLocaleString()}`;
       if (profileStack) profileStack.innerText = activeProfile.targetStack || 'General Track';
+      const profileStrategy = document.getElementById('profile-strategy');
+      if (profileStrategy) {
+        const isTailored = activeProfile.tailoringMode === 'tailored';
+        profileStrategy.innerText = isTailored ? '✨ Tailoring Method' : '📄 Base Method';
+        profileStrategy.style.color = isTailored ? '#c084fc' : '#93c5fd';
+        profileStrategy.style.fontWeight = '600';
+      }
     }
 
     // Render Interception Mode

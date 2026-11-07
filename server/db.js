@@ -129,8 +129,11 @@ const db = {
       const candidateMatch = !candidate_id || sCandId === candidate_id;
       if (!candidateMatch) return false;
 
-      // Match 1: Exact or same job URL
-      if (cleanUrl && sUrl && (cleanUrl === sUrl || cleanUrl.includes(sUrl) || sUrl.includes(cleanUrl))) {
+      // Helper: Exclude generic search / feed URLs from URL-only duplicate matches
+      const isFeedUrl = (u) => !u || u.includes('/suggested-jobs') || u.includes('/jobs-search') || u.includes('/search') || u.includes('/feed');
+
+      // Match 1: Exact job permalink URL (never feed/search lists)
+      if (!isFeedUrl(cleanUrl) && !isFeedUrl(sUrl) && cleanUrl && sUrl && cleanUrl === sUrl) {
         return true;
       }
       // Match 2: Same Requisition ID + Same Company

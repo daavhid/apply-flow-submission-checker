@@ -27,8 +27,8 @@ function broadcastSSE(type, payload) {
 
 // Middleware
 app.use(cors({ origin: '*' }));
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '25mb' }));
+app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
 // Request Logger with Timestamp & Status Colors
 app.use((req, res, next) => {
@@ -95,7 +95,65 @@ app.post(['/api/submissions/live-event', '/api/live-event'], (req, res) => {
   res.json({ success: true, receivedAt: new Date().toISOString() });
 });
 
-// 1b. Check for Existing / Duplicate Submission
+// 1b. Check for Application Status & Existing / Duplicate Submissions (Apply-Flow Contract)
+app.all(['/api/submissions/check-status', '/api/check-status'], (req, res) => {
+  const q = req.method === 'POST' ? { ...req.query, ...req.body } : req.query;
+  const candidate_id = q.profile_id || q.candidate_id || '';
+  const job_url = q.url || q.job_url || '';
+  const req_id = q.job_id || q.req_id || '';
+  const company = q.company || q.company_name || '';
+  const job_title = q.role_title || q.job_title || '';
+
+  const duplicate = db.findDuplicateSubmission({ candidate_id, job_url, req_id, company, job_title });
+
+  if (duplicate) {
+    const candidateName = duplicate.profile_assigned || "Active Candidate";
+    const appliedDate = duplicate.timestamp ? duplicate.timestamp.slice(0, 10) : new Date().toISOString().slice(0, 10);
+    const appliedBy = duplicate.applier_id || "Applier";
+
+    return res.json({
+      success: true,
+      exists_in_system: true,
+      has_applied: true,
+      can_apply: false,
+      job: {
+        id: duplicate.extracted_data?.req_id || duplicate.id,
+        role_title: duplicate.extracted_data?.job_title || job_title || "Position",
+        company_name: duplicate.extracted_data?.company || company || "Company",
+        job_link: duplicate.extracted_data?.job_url || job_url,
+        review_status: "APPROVED"
+      },
+      candidate: {
+        profile_id: candidate_id || duplicate.candidate_id,
+        profile_name: candidateName,
+        status_for_candidate: duplicate.validation_status || "APPLIED",
+        applied_at: duplicate.timestamp,
+        applied_by: appliedBy
+      },
+      application_history: [
+        {
+          profile_name: candidateName,
+          status: duplicate.validation_status || "APPLIED",
+          applied_at: duplicate.timestamp,
+          applied_by: appliedBy
+        }
+      ],
+      reason: "ALREADY_APPLIED",
+      message: `${candidateName} was already submitted to this job on ${appliedDate} by ${appliedBy}.`
+    });
+  }
+
+  return res.json({
+    success: true,
+    exists_in_system: false,
+    has_applied: false,
+    can_apply: true,
+    job: null,
+    message: "Job URL not found in Apply-Flow database. Fresh application."
+  });
+});
+
+// 1c. Legacy check-duplicate endpoint
 app.get(['/api/submissions/check-duplicate', '/api/check-duplicate'], (req, res) => {
   const { candidate_id, job_url, req_id, company, job_title } = req.query;
   const duplicate = db.findDuplicateSubmission({ candidate_id, job_url, req_id, company, job_title });
@@ -103,6 +161,8 @@ app.get(['/api/submissions/check-duplicate', '/api/check-duplicate'], (req, res)
   if (duplicate) {
     return res.json({
       already_applied: true,
+      has_applied: true,
+      can_apply: false,
       existingRecord: duplicate,
       appliedAt: duplicate.timestamp,
       applier: duplicate.applier_id || 'Unknown Applier',
@@ -113,12 +173,14 @@ app.get(['/api/submissions/check-duplicate', '/api/check-duplicate'], (req, res)
 
   return res.json({
     already_applied: false,
+    has_applied: false,
+    can_apply: true,
     existingRecord: null
   });
 });
 
 // 2. Final Submission Logging Endpoint (Webhook Target)
-app.post(['/api/submissions/log', '/api/submissions'], (req, res) => {
+app.post(['/api/submissions/log', '/api/submissions', '/api/submissions/webhook'], (req, res) => {
   const submissionPayload = req.body;
 
   if (submissionPayload && (submissionPayload.ping === true || submissionPayload.ping === 'true')) {
@@ -139,16 +201,18 @@ app.post(['/api/submissions/log', '/api/submissions'], (req, res) => {
 
   // Save to persistent local DB
   const savedRecord = db.saveSubmission(submissionPayload);
+  const shotCount = Array.isArray(savedRecord.screenshots) ? savedRecord.screenshots.length : 0;
 
   // Pretty print to terminal
   console.log('\n======================================================');
   console.log('📥 NEW SUBMISSION INTERCEPTED & LOGGED');
-  console.log(`👤 Candidate: ${savedRecord.profile_assigned || 'Unknown'}`);
-  console.log(`💼 Job:       ${savedRecord.extracted_data?.job_title || 'N/A'}`);
-  console.log(`🏢 Company:   ${savedRecord.extracted_data?.company || 'N/A'} (${savedRecord.extracted_data?.ats_domain || 'generic'})`);
-  console.log(`📄 Resume:    ${savedRecord.extracted_data?.resume_uploaded || 'None'}`);
-  console.log(`💰 Salary:    $${savedRecord.extracted_data?.salary_expected || '0'}`);
-  console.log(`🚦 Status:    ${savedRecord.validation_status === 'PASSED' ? '\x1b[32mPASSED\x1b[0m' : '\x1b[31m' + savedRecord.validation_status + '\x1b[0m'}`);
+  console.log(`👤 Candidate:   ${savedRecord.profile_assigned || 'Unknown'}`);
+  console.log(`💼 Job:         ${savedRecord.extracted_data?.job_title || 'N/A'}`);
+  console.log(`🏢 Company:     ${savedRecord.extracted_data?.company || 'N/A'} (${savedRecord.extracted_data?.ats_domain || 'generic'})`);
+  console.log(`📄 Resume:      ${savedRecord.extracted_data?.resume_uploaded || 'None'}`);
+  console.log(`💰 Salary:      $${savedRecord.extracted_data?.salary_expected || '0'}`);
+  console.log(`📸 Screenshots: ${shotCount} page snapshot(s) attached`);
+  console.log(`🚦 Status:      ${savedRecord.validation_status === 'PASSED' ? '\x1b[32mPASSED\x1b[0m' : '\x1b[31m' + savedRecord.validation_status + '\x1b[0m'}`);
   if (savedRecord.validation_errors && savedRecord.validation_errors.length > 0) {
     console.log(`⚠️ Errors (${savedRecord.validation_errors.length}):`, savedRecord.validation_errors.map(e => e.message).join(' | '));
   }

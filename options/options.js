@@ -62,6 +62,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     return new Promise((resolve) => {
       chrome.runtime.sendMessage({ type: "GET_CONFIG" }, (res) => {
         config = res || {};
+        if (!config.profiles || config.profiles.length === 0) {
+          chrome.runtime.sendMessage({ type: "SYNC_DEFAULT_PROFILES" }, (syncRes) => {
+            if (syncRes && syncRes.profiles) {
+              config.profiles = syncRes.profiles;
+            }
+            renderCandidates();
+            renderWebhooks();
+            renderSettings();
+            resolve();
+          });
+          return;
+        }
         renderCandidates();
         renderWebhooks();
         renderSettings();
@@ -103,48 +115,308 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
 
+  function getInitials(name) {
+    const parts = (name || '').trim().split(/\s+/).filter(Boolean);
+    if (parts.length === 0) return '?';
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  }
+
+  let directorySearchQuery = '';
+  let directoryStackFilter = 'all';
+  let directoryStatusFilter = 'active';
+
+  // DOM Elements for Station Hub & Space-Managed Candidate Directory
+  const stationSeatDisplay = document.getElementById('station-seat-display');
+  const stationSeatInput = document.getElementById('station-seat-input');
+  const btnEditStationName = document.getElementById('btn-edit-station-name');
+  const btnToggleStationLock = document.getElementById('btn-toggle-station-lock');
+  const adminLockStatusBadge = document.getElementById('admin-lock-status-badge');
+  const heroAvatar = document.getElementById('hero-avatar');
+  const heroName = document.getElementById('hero-name');
+  const heroEmail = document.getElementById('hero-email');
+  const heroRole = document.getElementById('hero-role');
+  const heroSalary = document.getElementById('hero-salary');
+  const heroLockIndicator = document.getElementById('hero-lock-indicator');
+  const heroTailoringIndicator = document.getElementById('hero-tailoring-indicator');
+  const adminActiveStack = document.getElementById('admin-active-stack');
+  const trackLockHint = document.getElementById('track-lock-hint');
+  const stationLockedBanner = document.getElementById('station-locked-banner');
+  const lockedCandidateName = document.getElementById('locked-candidate-name');
+  const stationAdminPanel = document.getElementById('station-admin-panel');
+  const candidateDirectoryContainer = document.getElementById('candidate-directory-container');
+  const candidatesTableTbody = document.getElementById('candidates-table-tbody');
+  const candidateSearchInput = document.getElementById('candidate-search-input');
+  const directoryStatusChips = document.getElementById('directory-status-chips');
+  const directoryStackChips = document.getElementById('directory-stack-chips');
+  const directoryEmptyMsg = document.getElementById('directory-empty-msg');
+
+  // Modals
+  const stationUnlockModal = document.getElementById('station-unlock-modal');
+  const unlockPasskeyInput = document.getElementById('unlock-passkey-input');
+  const btnToggleUnlockEye = document.getElementById('btn-toggle-unlock-eye');
+  const unlockErrorMsg = document.getElementById('unlock-error-msg');
+  const confirmStationUnlockBtn = document.getElementById('confirm-station-unlock-btn');
+  const cancelStationUnlockBtn = document.getElementById('cancel-station-unlock-btn');
+  const closeStationUnlockModal = document.getElementById('close-station-unlock-modal');
+
+  const stationPasskeyModal = document.getElementById('station-passkey-modal');
+  const btnOpenPasskeyModal = document.getElementById('btn-open-passkey-modal');
+  const newPasskeyInput = document.getElementById('new-passkey-input');
+  const confirmPasskeyInput = document.getElementById('confirm-passkey-input');
+  const passkeyErrorMsg = document.getElementById('passkey-error-msg');
+  const saveStationPasskeyBtn = document.getElementById('save-station-passkey-btn');
+  const cancelStationPasskeyBtn = document.getElementById('cancel-station-passkey-btn');
+  const closeStationPasskeyModal = document.getElementById('close-station-passkey-modal');
+
   function renderCandidates() {
     if (!config || !config.profiles) return;
     const profiles = config.profiles;
     const activeId = config.settings?.activeProfileId;
+    const isLocked = config.settings?.isProfileLocked !== false;
+    const activeProfile = profiles.find(p => p.id === activeId) || profiles[0] || {};
+    const applierSeat = config.settings?.applierId || 'Applier-Primary';
 
-    if (candidateCountChip) {
-      candidateCountChip.innerText = `${profiles.length} Profile${profiles.length !== 1 ? 's' : ''}`;
+    // 1. Station Seat & Lock Status Bar
+    if (stationSeatDisplay) stationSeatDisplay.innerText = applierSeat;
+    if (stationSeatInput) stationSeatInput.value = applierSeat;
+
+    if (adminLockStatusBadge) {
+      adminLockStatusBadge.className = `station-lock-badge ${isLocked ? 'locked' : 'unlocked'}`;
+      adminLockStatusBadge.innerHTML = isLocked
+        ? '<span class="lock-dot"></span><span class="lock-text">🔒 Station Locked</span>'
+        : '<span class="lock-dot"></span><span class="lock-text">🔓 Admin Unlocked</span>';
     }
 
-    candidatesGrid.innerHTML = profiles.map(p => {
+    if (btnToggleStationLock) {
+      btnToggleStationLock.className = `btn btn-lock-toggle ${isLocked ? '' : 'is-unlocked-state'}`;
+      btnToggleStationLock.innerHTML = isLocked
+        ? '<span class="btn-lock-icon">🔑</span><span class="btn-lock-label">Unlock Station</span>'
+        : '<span class="btn-lock-icon">🔒</span><span class="btn-lock-label">Lock Station Now</span>';
+    }
+
+    // 2. Active Candidate Hero Showcase
+    if (activeProfile && activeProfile.id) {
+      if (heroAvatar) heroAvatar.innerText = getInitials(activeProfile.fullName);
+      if (heroName) heroName.innerText = activeProfile.fullName || 'Unassigned';
+      if (heroEmail) heroEmail.innerText = activeProfile.primaryEmail || 'No email set';
+      if (heroRole) heroRole.innerText = activeProfile.targetStack || 'Developer';
+
+      const floorVal = activeProfile.salaryFloor || activeProfile.compensation?.salaryFloor || 0;
+      if (heroSalary) heroSalary.innerText = floorVal > 0 ? `$${floorVal.toLocaleString()}/yr floor` : 'Flexible target';
+
+      if (heroLockIndicator) {
+        heroLockIndicator.innerText = isLocked ? '🔒 Protected' : '🔓 Reassignable';
+      }
+      if (heroTailoringIndicator) {
+        const isTailored = activeProfile.tailoringMode === 'tailored';
+        heroTailoringIndicator.className = `hero-tag-method ${isTailored ? 'is-tailored' : 'is-base'}`;
+        heroTailoringIndicator.innerHTML = isTailored ? '✨ Tailoring Method' : '📄 Base Method';
+        heroTailoringIndicator.title = isTailored 
+          ? 'Requires custom tailored resume pasted per application'
+          : 'Standard verified fixed resume used for all applications';
+      }
+      if (lockedCandidateName) {
+        lockedCandidateName.innerText = activeProfile.fullName || 'Active Candidate';
+      }
+    }
+
+    // Track selector in Hero
+    if (adminActiveStack) {
+      adminActiveStack.disabled = isLocked;
+      if (config.settings?.activeStackKey) {
+        adminActiveStack.value = config.settings.activeStackKey;
+      }
+    }
+    if (trackLockHint) {
+      trackLockHint.innerText = isLocked
+        ? '🔒 Track locked by station policy'
+        : '⚡ Active tech stack preference for tailoring';
+    }
+
+    // 3. Notice Banners & Admin Panel
+    if (stationLockedBanner) {
+      stationLockedBanner.style.display = isLocked ? 'flex' : 'none';
+    }
+    if (stationAdminPanel) {
+      stationAdminPanel.style.display = isLocked ? 'none' : 'block';
+    }
+
+    // Reassign dropdown in admin panel
+    const adminAssignmentSelect = document.getElementById('admin-active-assignment');
+    if (adminAssignmentSelect) {
+      adminAssignmentSelect.innerHTML = profiles.map(p => `
+        <option value="${p.id}" ${p.id === activeId ? 'selected' : ''}>
+          ${escapeHtml(p.fullName)} (${escapeHtml(p.targetStack || 'Dev')})${p.archived ? ' — [Archived]' : ''}
+        </option>
+      `).join('');
+    }
+
+    // 4. Update Profile Count badges (Active vs Archived)
+    const totalProfiles = profiles.length;
+    const archivedCount = profiles.filter(p => p.archived).length;
+    const activeCount = totalProfiles - archivedCount;
+    const countActiveChip = document.getElementById('count-active-chip');
+    const countArchivedChip = document.getElementById('count-archived-chip');
+    if (countActiveChip) countActiveChip.innerText = activeCount;
+    if (countArchivedChip) countArchivedChip.innerText = archivedCount;
+    if (candidateCountChip) candidateCountChip.innerText = `${activeCount} Active (${totalProfiles} Total)`;
+
+    // 5. Always keep Candidate Profiles Directory visible so users can add/parse/edit profiles anytime
+    if (candidateDirectoryContainer) {
+      candidateDirectoryContainer.style.display = 'block';
+    }
+
+    renderDirectoryTable();
+  }
+
+  function renderDirectoryTable() {
+    if (!candidatesTableTbody || !config || !config.profiles) return;
+    const profiles = config.profiles;
+    const activeId = config.settings?.activeProfileId;
+    const q = directorySearchQuery.toLowerCase().trim();
+
+    const filtered = profiles.filter(p => {
+      // Filter by status chip
+      if (directoryStatusFilter === 'active' && p.archived) return false;
+      if (directoryStatusFilter === 'archived' && !p.archived) return false;
+
+      // Filter by stack chip
+      if (directoryStackFilter !== 'all') {
+        const stackStr = `${p.targetStack || ''} ${(p.primaryStackKeywords || []).join(' ')}`.toLowerCase();
+        if (directoryStackFilter === 'dotnet' && !stackStr.includes('c#') && !stackStr.includes('.net') && !stackStr.includes('dotnet')) return false;
+        if (directoryStackFilter === 'python' && !stackStr.includes('python') && !stackStr.includes('fastapi') && !stackStr.includes('django')) return false;
+        if (directoryStackFilter === 'php' && !stackStr.includes('php') && !stackStr.includes('laravel')) return false;
+      }
+
+      // Filter by query
+      if (q) {
+        const searchStr = `${p.fullName || ''} ${p.primaryEmail || ''} ${p.targetStack || ''} ${(p.primaryStackKeywords || []).join(' ')} ${p.city || ''}`.toLowerCase();
+        if (!searchStr.includes(q)) return false;
+      }
+
+      return true;
+    });
+
+    if (directoryEmptyMsg) {
+      directoryEmptyMsg.style.display = filtered.length === 0 ? 'block' : 'none';
+      if (filtered.length === 0) {
+        directoryEmptyMsg.innerHTML = `
+          <div style="padding: 32px 16px; text-align: center;">
+            <div style="font-size: 28px; margin-bottom: 8px;">📂</div>
+            <div style="font-weight: 600; color: #fff; font-size: 14px; margin-bottom: 6px;">No candidate profiles found</div>
+            <div style="color: var(--text-muted); font-size: 12.5px; max-width: 420px; margin: 0 auto 16px;">
+              ${q ? `No profiles match "${escapeHtml(q)}". Try clearing your search query.` : directoryStatusFilter === 'archived' ? 'You have no archived candidate profiles.' : 'Create your first candidate profile or auto-extract one directly from a resume document.'}
+            </div>
+            <div style="display: inline-flex; gap: 8px;">
+              ${q || directoryStackFilter !== 'all' || directoryStatusFilter !== 'active' ? `
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-reset-filters">Clear All Filters</button>
+              ` : ''}
+              <button type="button" class="btn btn-primary btn-sm" id="btn-empty-add-candidate">+ Add Candidate</button>
+            </div>
+          </div>
+        `;
+        document.getElementById('btn-reset-filters')?.addEventListener('click', () => {
+          directorySearchQuery = '';
+          directoryStackFilter = 'all';
+          directoryStatusFilter = 'active';
+          if (candidateSearchInput) candidateSearchInput.value = '';
+          directoryStatusChips?.querySelectorAll('.chip-filter').forEach(c => c.classList.toggle('active', c.dataset.status === 'active'));
+          directoryStackChips?.querySelectorAll('.chip-filter').forEach(c => c.classList.toggle('active', c.dataset.stack === 'all'));
+          renderDirectoryTable();
+        });
+        document.getElementById('btn-empty-add-candidate')?.addEventListener('click', openAddCandidateModal);
+      }
+    }
+
+    candidatesTableTbody.innerHTML = filtered.map(p => {
       const isAssigned = p.id === activeId;
+      const isArchived = !!p.archived;
+      const initials = getInitials(p.fullName);
+      const floorVal = p.salaryFloor || p.compensation?.salaryFloor || 0;
+      const formattedSalary = floorVal > 0 ? `$${floorVal.toLocaleString()}` : '—';
       const customCount = (p.customFields || []).length;
 
+      let rowClass = '';
+      if (isAssigned) rowClass = 'row-active-station';
+      else if (isArchived) rowClass = 'row-archived-profile';
+
       return `
-        <div class="candidate-card ${isAssigned ? 'active-assigned' : ''}">
-          <div class="candidate-card-header">
-            <div>
-              <div class="c-name">${escapeHtml(p.fullName)} ${isAssigned ? '<span style="font-size:10px; background:#2563eb; color:#fff; padding:2px 6px; border-radius:4px; vertical-align:middle;">Active</span>' : ''}</div>
-              <div class="c-email">📧 ${escapeHtml(p.primaryEmail)}</div>
+        <tr class="${rowClass}" data-id="${p.id}">
+          <td>
+            <div class="c-table-avatar-cell">
+              <div class="c-table-avatar ${isArchived ? 'is-archived' : ''}">${escapeHtml(initials)}</div>
+              <div>
+                <div class="c-table-name">
+                  ${escapeHtml(p.fullName)}
+                  ${isArchived ? '<span class="c-archive-pill">Archived</span>' : ''}
+                </div>
+                <div class="c-table-email">${escapeHtml(p.primaryEmail)}${p.phone ? ' · ' + escapeHtml(p.phone) : ''}</div>
+              </div>
             </div>
-            <span class="c-badge">${escapeHtml(p.targetStack || 'Developer')}</span>
-          </div>
-
-          <div class="c-details">
-            <div class="c-row"><span class="k">Salary Floor:</span><span class="v">$${(p.salaryFloor || p.compensation?.salaryFloor || 0).toLocaleString()}</span></div>
-            <div class="c-row"><span class="k">Work Auth:</span><span class="v">${escapeHtml(p.workAuthStatus || p.workAuth?.workAuthType || 'US Citizen')}</span></div>
-            <div class="c-row"><span class="k">Location:</span><span class="v">${escapeHtml(p.city || '')}${p.city && p.state ? ', ' : ''}${escapeHtml(p.state || 'FL')}</span></div>
-            <div class="c-row"><span class="k">Aliases:</span><span class="v">${(p.emailAliases || []).length} registered</span></div>
-            ${customCount > 0 ? `<div class="c-row"><span class="k">Custom Q&A:</span><span class="v" style="color:#93c5fd;">⚡ ${customCount} saved field${customCount > 1 ? 's' : ''}</span></div>` : ''}
-          </div>
-
-          <div class="c-actions">
-            <button type="button" class="btn btn-secondary btn-sm" data-action="edit-candidate" data-id="${p.id}">✏️ Edit Profile</button>
-            <button type="button" class="btn btn-danger btn-sm" data-action="delete-candidate" data-id="${p.id}">🗑️ Delete</button>
-          </div>
-        </div>
+          </td>
+          <td>
+            <div style="display: flex; flex-direction: column; gap: 4px; align-items: flex-start;">
+              <span class="c-badge">${escapeHtml(p.targetStack || 'Developer')}</span>
+              ${p.tailoringMode === 'tailored' ? `
+                <span class="c-method-chip is-tailored" title="Tailoring Method: Requires custom tailored resume per application">✨ Tailored Mode</span>
+              ` : `
+                <span class="c-method-chip is-base" title="Base Method: Standard verified fixed resume">📄 Base Mode</span>
+              `}
+            </div>
+          </td>
+          <td>
+            <span class="c-salary-pill">${escapeHtml(formattedSalary)}</span>
+          </td>
+          <td>
+            <span class="c-qa-pill">⚡ ${customCount} Q&A</span>
+          </td>
+          <td>
+            ${isArchived ? `
+              <span class="c-status-chip is-archived">
+                📦 Archived
+              </span>
+            ` : (
+              isAssigned ? `
+                <span class="c-status-chip is-active">
+                  ● Active Station
+                </span>
+              ` : `
+                <span class="c-status-chip is-inactive">
+                  ○ Ready
+                </span>
+              `
+            )}
+          </td>
+          <td style="text-align:right;">
+            <div style="display:inline-flex; gap:6px; align-items:center; justify-content: flex-end;">
+              ${isArchived ? `
+                <button type="button" class="btn btn-secondary btn-sm" data-action="toggle-archive" data-id="${p.id}" title="Restore candidate profile from archive">
+                  Unarchive
+                </button>
+              ` : (
+          !isAssigned ? `
+                  <button type="button" class="btn btn-primary btn-sm" data-action="set-active-candidate" data-id="${p.id}" title="Assign this candidate profile to browser workstation">
+                    Assign
+                  </button>
+                  <button type="button" class="btn btn-secondary btn-sm" data-action="toggle-archive" data-id="${p.id}" title="Archive candidate profile">
+                    📦
+                  </button>
+                ` : `
+                  <span class="c-current-badge">✓ Active Seat</span>
+                `
+        )}
+              <button type="button" class="btn btn-secondary btn-sm" data-action="edit-candidate" data-id="${p.id}" title="Edit profile details">✏️ Edit</button>
+              <button type="button" class="btn btn-danger btn-sm" data-action="delete-candidate" data-id="${p.id}" title="Delete profile">🗑️</button>
+            </div>
+          </td>
+        </tr>
       `;
     }).join('');
   }
 
-  // Candidate grid event delegation (CSP-compliant)
-  candidatesGrid?.addEventListener('click', (e) => {
+  // Table row action delegation
+  candidatesTableTbody?.addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-action]');
     if (!btn) return;
     const action = btn.dataset.action;
@@ -153,8 +425,257 @@ document.addEventListener('DOMContentLoaded', async () => {
       editCandidate(id);
     } else if (action === 'delete-candidate') {
       deleteCandidate(id);
+    } else if (action === 'set-active-candidate') {
+      setActiveCandidate(id);
+    } else if (action === 'toggle-archive') {
+      toggleArchiveCandidate(id);
     }
   });
+
+  const toggleArchiveCandidate = (profileId) => {
+    const prof = (config.profiles || []).find(p => p.id === profileId);
+    if (!prof) return;
+    const willArchive = !prof.archived;
+    const confirmMsg = willArchive
+      ? `Archive "${prof.fullName}"? The profile will be preserved in your database but hidden from active station rotation.`
+      : `Unarchive "${prof.fullName}" and restore to active profile rotation?`;
+    if (!confirm(confirmMsg)) return;
+
+    chrome.runtime.sendMessage({ type: "TOGGLE_ARCHIVE_PROFILE", profileId }, (res) => {
+      if (res && res.success) {
+        config.profiles = res.profiles;
+        if (res.settings) config.settings = res.settings;
+        renderCandidates();
+        renderSettings();
+      }
+    });
+  };
+
+  document.getElementById('btn-edit-active-hero-candidate')?.addEventListener('click', () => {
+    const activeId = config.settings?.activeProfileId;
+    if (activeId) {
+      editCandidate(activeId);
+    }
+  });
+
+  const setActiveCandidate = (profileId) => {
+    if (!config || !config.settings) return;
+    const prof = (config.profiles || []).find(p => p.id === profileId);
+    if (prof && prof.archived) {
+      if (confirm(`"${prof.fullName}" is currently archived. Unarchive and assign to this workstation?`)) {
+        chrome.runtime.sendMessage({ type: "TOGGLE_ARCHIVE_PROFILE", profileId, archived: false }, () => {
+          doSetActiveCandidate(profileId);
+        });
+      }
+      return;
+    }
+    doSetActiveCandidate(profileId);
+  };
+
+  const doSetActiveCandidate = (profileId) => {
+    const updatedSettings = {
+      ...config.settings,
+      activeProfileId: profileId
+    };
+    chrome.runtime.sendMessage({ type: "SAVE_SETTINGS", settings: updatedSettings }, (res) => {
+      if (res && res.success) {
+        config.settings = res.settings;
+        renderCandidates();
+        renderSettings();
+      }
+    });
+  };
+
+  // Directory Search & Filter Listeners
+  candidateSearchInput?.addEventListener('input', (e) => {
+    directorySearchQuery = e.target.value || '';
+    renderDirectoryTable();
+  });
+
+  directoryStatusChips?.querySelectorAll('.chip-filter').forEach(chip => {
+    chip.addEventListener('click', () => {
+      directoryStatusChips.querySelectorAll('.chip-filter').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+      directoryStatusFilter = chip.dataset.status || 'active';
+      renderDirectoryTable();
+    });
+  });
+
+  directoryStackChips?.querySelectorAll('.chip-filter').forEach(chip => {
+    chip.addEventListener('click', () => {
+      directoryStackChips.querySelectorAll('.chip-filter').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+      directoryStackFilter = chip.dataset.stack || 'all';
+      renderDirectoryTable();
+    });
+  });
+
+  // Lock / Unlock Handlers
+  btnToggleStationLock?.addEventListener('click', () => {
+    const isLocked = config.settings?.isProfileLocked !== false;
+    if (isLocked) {
+      // Open Unlock Modal
+      if (unlockPasskeyInput) unlockPasskeyInput.value = '';
+      if (unlockErrorMsg) unlockErrorMsg.style.display = 'none';
+      if (stationUnlockModal) stationUnlockModal.style.display = 'flex';
+      setTimeout(() => unlockPasskeyInput?.focus(), 60);
+    } else {
+      // Lock Station
+      const updatedSettings = {
+        ...config.settings,
+        isProfileLocked: true
+      };
+      chrome.runtime.sendMessage({ type: "SAVE_SETTINGS", settings: updatedSettings }, (res) => {
+        if (res && res.success) {
+          config.settings = res.settings;
+          renderCandidates();
+          renderSettings();
+        }
+      });
+    }
+  });
+
+  // Station Seat rename
+  btnEditStationName?.addEventListener('click', () => {
+    const isLocked = config.settings?.isProfileLocked !== false;
+    if (isLocked) {
+      if (unlockPasskeyInput) unlockPasskeyInput.value = '';
+      if (unlockErrorMsg) unlockErrorMsg.style.display = 'none';
+      if (stationUnlockModal) stationUnlockModal.style.display = 'flex';
+      setTimeout(() => unlockPasskeyInput?.focus(), 60);
+      return;
+    }
+    const currentName = config.settings?.applierId || 'Applier-Primary';
+    const newName = prompt("Enter new workstation seat name / applier identifier:", currentName);
+    if (newName && newName.trim() && newName.trim() !== currentName) {
+      const updatedSettings = {
+        ...config.settings,
+        applierId: newName.trim()
+      };
+      chrome.runtime.sendMessage({ type: "SAVE_SETTINGS", settings: updatedSettings }, (res) => {
+        if (res && res.success) {
+          config.settings = res.settings;
+          renderCandidates();
+          renderSettings();
+        }
+      });
+    }
+  });
+
+  stationSeatInput?.addEventListener('change', (e) => {
+    const newName = e.target.value.trim();
+    if (!newName) return;
+    const updatedSettings = {
+      ...config.settings,
+      applierId: newName
+    };
+    chrome.runtime.sendMessage({ type: "SAVE_SETTINGS", settings: updatedSettings }, (res) => {
+      if (res && res.success) {
+        config.settings = res.settings;
+        renderCandidates();
+        renderSettings();
+      }
+    });
+  });
+
+  // Track select in Hero
+  adminActiveStack?.addEventListener('change', (e) => {
+    const val = e.target.value;
+    const updatedSettings = {
+      ...config.settings,
+      activeStackKey: val
+    };
+    chrome.runtime.sendMessage({ type: "SAVE_SETTINGS", settings: updatedSettings }, (res) => {
+      if (res && res.success) {
+        config.settings = res.settings;
+      }
+    });
+  });
+
+  // Admin Assignment Dropdown in admin panel
+  document.getElementById('admin-active-assignment')?.addEventListener('change', (e) => {
+    setActiveCandidate(e.target.value);
+  });
+
+  // Unlock Modal Handlers
+  confirmStationUnlockBtn?.addEventListener('click', () => {
+    const entered = unlockPasskeyInput?.value?.trim();
+    const master = config.settings?.adminPasskey || '1234567890';
+    if (entered === master) {
+      stationUnlockModal.style.display = 'none';
+      const updatedSettings = {
+        ...config.settings,
+        isProfileLocked: false
+      };
+      chrome.runtime.sendMessage({ type: "SAVE_SETTINGS", settings: updatedSettings }, (res) => {
+        if (res && res.success) {
+          config.settings = res.settings;
+          renderCandidates();
+          renderSettings();
+        }
+      });
+    } else {
+      if (unlockErrorMsg) {
+        unlockErrorMsg.innerText = "❌ Incorrect Master Passkey. Access Denied.";
+        unlockErrorMsg.style.display = 'block';
+      }
+    }
+  });
+
+  unlockPasskeyInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') confirmStationUnlockBtn?.click();
+  });
+
+  btnToggleUnlockEye?.addEventListener('click', () => {
+    if (!unlockPasskeyInput) return;
+    unlockPasskeyInput.type = unlockPasskeyInput.type === 'password' ? 'text' : 'password';
+  });
+
+  closeStationUnlockModal?.addEventListener('click', () => { stationUnlockModal.style.display = 'none'; });
+  cancelStationUnlockBtn?.addEventListener('click', () => { stationUnlockModal.style.display = 'none'; });
+
+  // Master Passkey Change Modal Handlers
+  btnOpenPasskeyModal?.addEventListener('click', () => {
+    if (newPasskeyInput) newPasskeyInput.value = '';
+    if (confirmPasskeyInput) confirmPasskeyInput.value = '';
+    if (passkeyErrorMsg) passkeyErrorMsg.style.display = 'none';
+    if (stationPasskeyModal) stationPasskeyModal.style.display = 'flex';
+    setTimeout(() => newPasskeyInput?.focus(), 60);
+  });
+
+  saveStationPasskeyBtn?.addEventListener('click', () => {
+    const n = newPasskeyInput?.value?.trim() || '';
+    const c = confirmPasskeyInput?.value?.trim() || '';
+    if (n.length < 6) {
+      if (passkeyErrorMsg) {
+        passkeyErrorMsg.innerText = "❌ Passkey must be at least 6 characters.";
+        passkeyErrorMsg.style.display = 'block';
+      }
+      return;
+    }
+    if (n !== c) {
+      if (passkeyErrorMsg) {
+        passkeyErrorMsg.innerText = "❌ Passkeys do not match.";
+        passkeyErrorMsg.style.display = 'block';
+      }
+      return;
+    }
+
+    const updatedSettings = {
+      ...config.settings,
+      adminPasskey: n
+    };
+    chrome.runtime.sendMessage({ type: "SAVE_SETTINGS", settings: updatedSettings }, (res) => {
+      if (res && res.success) {
+        config.settings = res.settings;
+        stationPasskeyModal.style.display = 'none';
+        alert("✅ Master Passkey updated successfully!");
+      }
+    });
+  });
+
+  closeStationPasskeyModal?.addEventListener('click', () => { stationPasskeyModal.style.display = 'none'; });
+  cancelStationPasskeyBtn?.addEventListener('click', () => { stationPasskeyModal.style.display = 'none'; });
 
   function renderCustomFieldRows(customFields = []) {
     if (!customFieldsTbody) return;
@@ -203,14 +724,31 @@ document.addEventListener('DOMContentLoaded', async () => {
     tr.querySelector('.cf-label')?.focus();
   });
 
+  let currentProfileUploadedFileB64 = null;
+  let currentProfileUploadedFileName = null;
+  let currentProfileUploadedFileType = null;
+
   const editCandidate = (profileId) => {
     const p = config.profiles.find(x => x.id === profileId);
     if (!p) return;
 
+    currentProfileUploadedFileB64 = p.resumeBase64 || null;
+    currentProfileUploadedFileName = p.resumeFileName || null;
+    currentProfileUploadedFileType = p.resumeFileType || null;
+
     document.getElementById('profile-modal-title').innerText = `Edit Profile: ${p.fullName}`;
     document.getElementById('edit-profile-id').value = p.id;
-    
+    const avatarEl = document.getElementById('modal-candidate-avatar');
+    if (avatarEl) {
+      avatarEl.innerText = getInitials(p.fullName);
+    }
+
     // Contact
+    const isArchivedSelect = document.getElementById('edit-is-archived');
+    if (isArchivedSelect) isArchivedSelect.value = p.archived ? "true" : "false";
+    const tailoringModeSelect = document.getElementById('edit-tailoring-mode');
+    if (tailoringModeSelect) tailoringModeSelect.value = p.tailoringMode || 'base';
+
     document.getElementById('edit-full-name').value = p.fullName || '';
     document.getElementById('edit-primary-email').value = p.primaryEmail || '';
     document.getElementById('edit-first-name').value = p.legalFirstName || p.firstName || '';
@@ -267,7 +805,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Load Ingestion Parser text
     const parserInput = document.getElementById('profile-resume-parser-input');
     if (parserInput) parserInput.value = p.resumeText || p.baseResumeText || '';
-    
+
     if (p.resumeText || p.baseResumeText) {
       displayExtractedHudTags(p.resumeText || p.baseResumeText);
     } else {
@@ -294,7 +832,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function resetProfileForm() {
     profileModal.querySelectorAll('input, select, textarea').forEach(el => {
-      if (el.id === 'edit-salary-floor') el.value = "120000";
+      if (el.id === 'edit-is-archived') el.value = "false";
+      else if (el.id === 'edit-tailoring-mode') el.value = "base";
+      else if (el.id === 'edit-salary-floor') el.value = "120000";
       else if (el.id === 'edit-desired-salary') el.value = "130000";
       else if (el.id === 'edit-country') el.value = "United States";
       else if (el.id === 'edit-work-auth') el.value = "US Citizen";
@@ -311,6 +851,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderCustomFieldRows([]);
     const hudCard = document.getElementById('extracted-hud-card');
     if (hudCard) hudCard.style.display = 'none';
+    const avatarEl = document.getElementById('modal-candidate-avatar');
+    if (avatarEl) {
+      avatarEl.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>';
+    }
   }
 
   function switchModalTab(targetTabId) {
@@ -333,13 +877,25 @@ document.addEventListener('DOMContentLoaded', async () => {
     switchModalTab('p-contact');
   });
 
-  document.getElementById('add-candidate-btn')?.addEventListener('click', () => {
+  function openAddCandidateModal() {
     document.getElementById('profile-modal-title').innerText = "Add New Candidate Profile";
     document.getElementById('edit-profile-id').value = "";
     resetProfileForm();
     switchModalTab('p-contact');
     profileModal.style.display = 'flex';
-  });
+    setTimeout(() => document.getElementById('edit-full-name')?.focus(), 60);
+  }
+
+  function openBuildFromResumeModal() {
+    document.getElementById('profile-modal-title').innerText = "⚡ Build Candidate Profile from Resume";
+    document.getElementById('edit-profile-id').value = "";
+    resetProfileForm();
+    switchModalTab('p-ingest');
+    profileModal.style.display = 'flex';
+  }
+
+  document.getElementById('add-candidate-btn')?.addEventListener('click', openAddCandidateModal);
+  document.getElementById('top-add-candidate-btn')?.addEventListener('click', openAddCandidateModal);
 
   // Sync Standards button handler
   document.getElementById('sync-defaults-btn')?.addEventListener('click', () => {
@@ -348,19 +904,84 @@ document.addEventListener('DOMContentLoaded', async () => {
         config.profiles = res.profiles;
         renderCandidates();
         renderSettings();
-        alert("✅ Default profiles successfully synchronized to verified standards (Nicholas Adam Myers Python/AI Track & Notre Dame updated)!");
+        alert("✅ Default profiles successfully synchronized to verified standards (Nicholas Adam Myers C# and Python tracks updated)!");
       }
     });
   });
 
-  // Build Profile from Resume top-level button
-  document.getElementById('build-from-resume-btn')?.addEventListener('click', () => {
-    document.getElementById('profile-modal-title').innerText = "⚡ Build Candidate Profile from Resume";
-    document.getElementById('edit-profile-id').value = "";
-    resetProfileForm();
-    switchModalTab('p-ingest');
-    profileModal.style.display = 'flex';
+  // Export profiles as profiles.json
+  document.getElementById('export-profiles-btn')?.addEventListener('click', () => {
+    const profiles = config.profiles || [];
+    if (profiles.length === 0) {
+      alert("No profiles to export.");
+      return;
+    }
+    const jsonStr = JSON.stringify(profiles, null, 2);
+    const blob = new Blob([jsonStr], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = "profiles.json";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   });
+
+  // Import profiles from file
+  const importFileInput = document.getElementById('import-profiles-file');
+  document.getElementById('import-profiles-btn')?.addEventListener('click', () => {
+    importFileInput?.click();
+  });
+
+  // Save current webhooks as default
+  document.getElementById('save-default-webhooks-btn')?.addEventListener('click', () => {
+    const webhooks = config.settings?.webhooks || [];
+    const backendUrl = config.settings?.backendWebhookUrl || (webhooks[0]?.url) || "http://localhost:3000/api/submissions/log";
+    const exportSettings = {
+      ...config.settings,
+      backendWebhookUrl: backendUrl,
+      webhooks
+    };
+    const jsonStr = JSON.stringify(exportSettings, null, 2);
+    const blob = new Blob([jsonStr], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = "default-settings.json";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    alert(`⭐ Default API URL set to:\n${backendUrl}\n\nDownloaded "default-settings.json"! Running "node build-extension.js" will bundle this default API endpoint for all users so you never need to configure it again.`);
+  });
+
+  importFileInput?.addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const importedProfiles = Array.isArray(parsed) ? parsed : [parsed];
+      if (importedProfiles.length === 0 || !importedProfiles[0].id) {
+        alert("Invalid profiles JSON file format.");
+        return;
+      }
+      await chrome.storage.local.set({ profiles: importedProfiles });
+      config.profiles = importedProfiles;
+      renderCandidates();
+      renderSettings();
+      alert(`✅ Successfully imported ${importedProfiles.length} candidate profile${importedProfiles.length > 1 ? 's' : ''}!`);
+    } catch (err) {
+      alert(`❌ Failed to parse profiles JSON: ${err.message}`);
+    }
+    importFileInput.value = '';
+  });
+
+  // Build Profile from Resume top-level buttons
+  document.getElementById('build-from-resume-btn')?.addEventListener('click', openBuildFromResumeModal);
+  document.getElementById('top-build-from-resume-btn')?.addEventListener('click', openBuildFromResumeModal);
 
   // Modal file browse & upload
   const modalResumeFileInput = document.getElementById('modal-resume-file');
@@ -372,11 +993,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     const file = e.target.files?.[0];
     if (!file) return;
     await processUploadedResumeFile(file);
+    modalResumeFileInput.value = '';
   });
 
   // Modal drag & drop
   const dropzoneEl = document.getElementById('resume-dropzone');
   if (dropzoneEl) {
+    dropzoneEl.addEventListener('click', (e) => {
+      if (e.target.closest('#btn-paste-clip-modal')) return;
+      modalResumeFileInput?.click();
+    });
+
     ['dragenter', 'dragover'].forEach(name => {
       dropzoneEl.addEventListener(name, (e) => {
         e.preventDefault();
@@ -424,6 +1051,17 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       parseAndPopulateProfileFromText(extractedText);
 
+      // Retain original binary file payload
+      try {
+        const reader = new FileReader();
+        reader.onload = () => {
+          currentProfileUploadedFileB64 = reader.result;
+          currentProfileUploadedFileName = file.name;
+          currentProfileUploadedFileType = file.type;
+        };
+        reader.readAsDataURL(file);
+      } catch (_) {}
+
       if (dropzoneTitle) {
         dropzoneTitle.innerText = `✅ Successfully Extracted: ${file.name}`;
       }
@@ -456,6 +1094,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
     parseAndPopulateProfileFromText(raw);
+  });
+
+  // Auto-parse when user pastes into the raw ingestion textarea
+  document.getElementById('profile-resume-parser-input')?.addEventListener('paste', () => {
+    setTimeout(() => {
+      const raw = document.getElementById('profile-resume-parser-input')?.value?.trim();
+      if (raw && raw.length >= 20) {
+        parseAndPopulateProfileFromText(raw);
+      }
+    }, 80);
   });
 
   function displayExtractedHudTags(rawText) {
@@ -529,6 +1177,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     displayExtractedHudTags(rawText);
   }
 
+  // Quick Action: Re-Extract & Infer Skills directly from current resume
+  document.getElementById('btn-reextract-skills')?.addEventListener('click', () => {
+    const resumeText = document.getElementById('edit-resume-text')?.value ||
+      document.getElementById('profile-resume-parser-input')?.value;
+    if (!resumeText || !resumeText.trim()) {
+      alert("No resume text found. Please upload or paste a resume in the 'Auto-Ingest Resume' tab first.");
+      return;
+    }
+    const parsed = window.ResumeDocumentParser?.parseCandidateDetails(resumeText);
+    if (parsed) {
+      if (parsed.backendSkills) document.getElementById('edit-backend-lang').value = parsed.backendSkills;
+      if (parsed.frontendSkills) document.getElementById('edit-frontend-lang').value = parsed.frontendSkills;
+      if (parsed.dbCloudSkills) document.getElementById('edit-db-cloud').value = parsed.dbCloudSkills;
+      if (parsed.primaryStackKeywords?.length) document.getElementById('edit-stack-keywords').value = parsed.primaryStackKeywords.join(', ');
+      if (parsed.targetStack) document.getElementById('edit-target-stack').value = parsed.targetStack;
+      displayExtractedHudTags(resumeText);
+      alert("Skills successfully re-extracted and inferred from candidate resume!");
+    }
+  });
+
   document.getElementById('close-profile-modal')?.addEventListener('click', () => {
     profileModal.style.display = 'none';
   });
@@ -537,12 +1205,28 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   document.getElementById('save-profile-btn')?.addEventListener('click', async () => {
+    const isNewProfile = !document.getElementById('edit-profile-id').value;
     const id = document.getElementById('edit-profile-id').value || `candidate_${Date.now()}`;
-    const fullName = document.getElementById('edit-full-name').value.trim();
-    const primaryEmail = document.getElementById('edit-primary-email').value.trim();
+    let fullName = document.getElementById('edit-full-name').value.trim();
+    let primaryEmail = document.getElementById('edit-primary-email').value.trim();
 
     if (!fullName || !primaryEmail) {
-      alert("Please enter both Full Name and Primary Email.");
+      const rawParserText = document.getElementById('profile-resume-parser-input')?.value?.trim();
+      if (rawParserText) {
+        parseAndPopulateProfileFromText(rawParserText, "Auto-Parsed on Save");
+        fullName = document.getElementById('edit-full-name').value.trim();
+        primaryEmail = document.getElementById('edit-primary-email').value.trim();
+      }
+    }
+
+    if (!fullName || !primaryEmail) {
+      switchModalTab('p-contact');
+      if (!fullName) {
+        document.getElementById('edit-full-name')?.focus();
+      } else {
+        document.getElementById('edit-primary-email')?.focus();
+      }
+      alert("Please enter both Full Name and Primary Email on the Identity & Contact tab.");
       return;
     }
 
@@ -580,9 +1264,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     const howHeard = document.getElementById('edit-how-heard').value;
     const formerEmployee = document.getElementById('edit-former-employee').value;
     const resumeText = document.getElementById('edit-resume-text').value.trim();
+    const archived = document.getElementById('edit-is-archived')?.value === 'true';
+    const tailoringMode = document.getElementById('edit-tailoring-mode')?.value || 'base';
 
     const profileData = {
       id,
+      archived,
+      tailoringMode,
       fullName,
       firstName,
       lastName,
@@ -597,7 +1285,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       city: document.getElementById('edit-city').value.trim(),
       state: document.getElementById('edit-state').value.trim(),
       zip: document.getElementById('edit-zip').value.trim(),
-       country: document.getElementById('edit-country').value.trim() || 'United States',
+      country: document.getElementById('edit-country').value.trim() || 'United States',
       linkedin: document.getElementById('edit-linkedin').value.trim(),
       github: document.getElementById('edit-github')?.value.trim() || '',
 
@@ -606,6 +1294,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       desiredSalary: parseFloat(document.getElementById('edit-desired-salary').value) || 130000,
       primaryStackKeywords,
       resumeText,
+      resumeBase64: currentProfileUploadedFileB64,
+      resumeFileName: currentProfileUploadedFileName,
+      resumeFileType: currentProfileUploadedFileType,
       degreeLevel: educationLevel,
       school: document.getElementById('edit-school').value.trim(),
       degree: document.getElementById('edit-degree').value.trim(),
@@ -672,6 +1363,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         renderCandidates();
         renderSettings();
         profileModal.style.display = 'none';
+
+        // If station is unlocked and it's a new profile, assign it as active
+        const isLocked = config.settings?.isProfileLocked !== false;
+        if (isNewProfile && !isLocked) {
+          setActiveCandidate(id);
+        }
+      } else {
+        alert(res?.error || "Error saving candidate profile. Please check that all required fields are filled.");
       }
     });
   });
@@ -1103,6 +1802,27 @@ document.addEventListener('DOMContentLoaded', async () => {
       .replace(/'/g, '&#039;');
   }
 
+  // Global Keyboard Shortcuts (Escape to close modals, Ctrl+S / Cmd+S to save)
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      if (profileModal && profileModal.style.display !== 'none') {
+        profileModal.style.display = 'none';
+      } else if (webhookModal && webhookModal.style.display !== 'none') {
+        webhookModal.style.display = 'none';
+      } else if (payloadModal && payloadModal.style.display !== 'none') {
+        payloadModal.style.display = 'none';
+      }
+    } else if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+      e.preventDefault();
+      if (profileModal && profileModal.style.display !== 'none') {
+        document.getElementById('save-profile-btn')?.click();
+      } else {
+        document.getElementById('save-all-btn')?.click();
+      }
+    }
+  });
+
   // Initialize
   await loadConfig();
 });
+

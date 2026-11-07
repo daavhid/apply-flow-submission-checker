@@ -81,6 +81,31 @@ document.addEventListener('DOMContentLoaded', () => {
       if (status.includes('OVERRIDDEN')) badgeClass = 'overridden';
 
       const timeStr = new Date(sub.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const shots = Array.isArray(sub.screenshots) ? sub.screenshots : [];
+      const shotsHtml = shots.length > 0 ? `
+        <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.08);">
+          <div style="font-size: 11px; font-weight: 700; color: #38bdf8; margin-bottom: 6px;">
+            📸 Captured Page Evidence (${shots.length} Screenshot${shots.length === 1 ? '' : 's'})
+          </div>
+          <div style="display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px;">
+            ${shots.map((s, idx) => `
+              <div onclick="window.openScreenshotLightbox('${escapeHtml(sub.id)}', ${idx})"
+                   style="cursor: pointer; flex: 0 0 135px; background: #0f172a; border: 1px solid #334155; border-radius: 6px; overflow: hidden; transition: border-color 0.15s;"
+                   title="Click to enlarge: ${escapeHtml(s.step_label || 'Step ' + (idx + 1))}">
+                <div style="height: 74px; overflow: hidden; background: #020617; position: relative;">
+                  <img src="${escapeHtml(s.data_url)}" style="width: 100%; height: 100%; object-fit: cover; object-position: top center; display: block;" />
+                  <span style="position: absolute; top: 4px; right: 4px; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 4px; background: rgba(15,23,42,0.88); color: #38bdf8; border: 1px solid rgba(56,189,248,0.4);">
+                    ${escapeHtml(s.trigger === 'FINAL_SUBMIT' ? 'SUBMIT' : s.trigger === 'STEP_TRANSITION' ? 'STEP' : 'Q&A')}
+                  </span>
+                </div>
+                <div style="padding: 4px 6px; font-size: 10px; color: #cbd5e1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                  ${escapeHtml(s.step_label || `Page ${idx + 1}`)}
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      ` : '';
 
       return `
         <div class="sub-item-card">
@@ -97,10 +122,11 @@ document.addEventListener('DOMContentLoaded', () => {
             <div><strong>Company:</strong> ${escapeHtml(d.company || 'N/A')} ${d.req_id ? '(' + escapeHtml(d.req_id) + ')' : ''}</div>
             <div><strong>Email:</strong> ${escapeHtml(d.email_entered || 'None')} | <strong>Salary:</strong> $${escapeHtml(d.salary_expected || '0')}</div>
             <div><strong>Resume:</strong> <span style="color:#38bdf8;">${escapeHtml(d.resume_uploaded || 'None')}</span></div>
+            ${shotsHtml}
           </div>
 
           <div class="sub-actions">
-            <span style="font-size:11px; color:#94a3b8;">${(sub.validation_errors || []).length} errors, ${(sub.validation_warnings || []).length} warnings</span>
+            <span style="font-size:11px; color:#94a3b8;">${(sub.validation_errors || []).length} errors, ${(sub.validation_warnings || []).length} warnings • 📸 ${shots.length} shot${shots.length === 1 ? '' : 's'}</span>
             <button class="btn btn-secondary btn-sm" onclick="window.inspectSubmission('${sub.id}')">🔍 View JSON Payload</button>
           </div>
         </div>
@@ -297,6 +323,36 @@ document.addEventListener('DOMContentLoaded', () => {
 
     jsonCode.innerText = JSON.stringify(item, null, 2);
     jsonModal.style.display = 'flex';
+  };
+
+  window.openScreenshotLightbox = (submissionId, shotIndex) => {
+    const item = submissions.find(s => s.id === submissionId);
+    const shot = item?.screenshots?.[shotIndex];
+    if (!shot) return;
+
+    let lb = document.getElementById('sqc-dash-lightbox');
+    if (!lb) {
+      lb = document.createElement('div');
+      lb.id = 'sqc-dash-lightbox';
+      lb.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(2,6,23,0.88);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;padding:24px;';
+      lb.addEventListener('click', (e) => { if (e.target === lb) lb.style.display = 'none'; });
+      document.body.appendChild(lb);
+    }
+    lb.innerHTML = `
+      <div style="background:#0f172a;border:1px solid #334155;border-radius:14px;max-width:960px;width:100%;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 25px 60px rgba(0,0,0,0.7);">
+        <div style="padding:14px 18px;border-bottom:1px solid #1e293b;display:flex;justify-content:space-between;align-items:center;">
+          <div>
+            <div style="font-size:15px;font-weight:700;color:#f8fafc;">📸 ${escapeHtml(shot.step_label || 'Captured Page Screenshot')}</div>
+            <div style="font-size:12px;color:#94a3b8;margin-top:2px;">Trigger: ${escapeHtml(shot.trigger || 'AUTO')} • ${shot.answered_count || 0} answered field(s) • ${shot.captured_at ? new Date(shot.captured_at).toLocaleString() : ''}</div>
+          </div>
+          <button onclick="document.getElementById('sqc-dash-lightbox').style.display='none'" class="btn btn-secondary btn-sm">✕ Close</button>
+        </div>
+        <div style="padding:16px;overflow-y:auto;background:#020617;text-align:center;">
+          <img src="${escapeHtml(shot.data_url)}" style="max-width:100%;height:auto;border-radius:8px;border:1px solid #1e293b;" />
+        </div>
+      </div>
+    `;
+    lb.style.display = 'flex';
   };
 
   document.getElementById('close-modal-btn')?.addEventListener('click', () => { jsonModal.style.display = 'none'; });
