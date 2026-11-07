@@ -11,6 +11,10 @@
     "notifications"
   ],
   "host_permissions": [
+    "http://localhost:5000/*",
+    "http://localhost:3000/*",
+    "http://127.0.0.1:5000/*",
+    "https://*.onrender.com/*",
     "<all_urls>"
   ],
   "action": {
@@ -32,6 +36,7 @@
       "all_frames": true,
       "match_about_blank": true,
       "js": [
+        "options/doc-parser.js",
         "content/extractor.js",
         "content/validator.js",
         "content/hud.js",
@@ -48,7 +53,8 @@
     {
       "resources": [
         "icons/*",
-        "content/*"
+        "content/*",
+        "options/lib/*"
       ],
       "matches": ["<all_urls>"]
     }

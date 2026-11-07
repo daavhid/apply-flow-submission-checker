@@ -1,0 +1,40 @@
+{
+  "applierId": "Applier-Primary",
+  "activeProfileId": "cmu5hal2f0004lgkehbcfrvmz",
+  "activeStackKey": "dotnet",
+  "isProfileLocked": false,
+  "adminPasskey": "1234567890",
+  "interceptionMode": "active",
+  "allowOverride": true,
+  "minScreeningLength": 15,
+  "backendWebhookUrl": "http://localhost:3000/api/submissions/log",
+  "backendApiKey": "",
+  "mockBackendSuccess": true,
+  "streamLiveEvents": true,
+  "autoDuplicateWindowDays": 14,
+  "autoDetectJobContext": true,
+  "autoAutofillOnPageLoad": true,
+  "detectCaptchaAndAlert": true,
+  "autoFillDemographics": true,
+  "autoFillCompensation": true,
+  "autoFillCustomQuestions": true,
+  "webhooks": [
+    {
+      "id": "wh_primary",
+      "name": "Primary Backend Webhook",
+      "url": "http://localhost:3000/api/submissions/log",
+      "apiKey": "",
+      "isActive": true,
+      "sendLiveEvents": true
+    },
+    {
+      "id": "wh_applyflow",
+      "name": "Apply-Flow Dashboard & Webhook",
+      "url": "http://localhost:5000/api/submissions/webhook",
+      "apiKey": "",
+      "isActive": true,
+      "sendLiveEvents": false
+    }
+  ]
+}
+

@@ -1,7 +1,7 @@
 /**
  * Apply-Flow Submission Quality Gatekeeper
- * Pure Client-Side PDF, DOCX, and Resume Text Extraction Engine
- * Zero external network dependencies. 100% offline & CSP-compliant.
+ * Production-Grade Client-Side PDF, DOCX, and Resume Text Extraction Engine
+ * Uses PDF.js & JSZip for 100% offline, CMap-decoded, CSP-compliant document parsing.
  */
 
 class ResumeDocumentParser {
@@ -27,26 +27,156 @@ class ResumeDocumentParser {
   }
 
   /**
+   * Get or dynamically initialize PDF.js library instance
+   */
+  static async getPdfJs() {
+    if (typeof window !== 'undefined' && window.pdfjsLib) {
+      return window.pdfjsLib;
+    }
+    try {
+      const pdfUrl = (typeof chrome !== 'undefined' && chrome.runtime?.getURL)
+        ? chrome.runtime.getURL('options/lib/pdf.min.mjs')
+        : './lib/pdf.min.mjs';
+      const module = await import(pdfUrl);
+      if (typeof window !== 'undefined') {
+        window.pdfjsLib = module;
+      }
+      if (module.GlobalWorkerOptions) {
+        module.GlobalWorkerOptions.workerSrc = (typeof chrome !== 'undefined' && chrome.runtime?.getURL)
+          ? chrome.runtime.getURL('options/lib/pdf.worker.min.mjs')
+          : './lib/pdf.worker.min.mjs';
+      }
+      return module;
+    } catch (err) {
+      console.warn("[DocParser] Dynamic import of pdf.min.mjs failed:", err);
+      return null;
+    }
+  }
+
+  /**
+   * Extract text from PDF buffer using PDF.js engine
+   * Properly decodes Font CMaps, CID / Type0 identity fonts, and multi-page layouts.
+   * @param {ArrayBuffer} buffer 
+   * @returns {Promise<string>}
+   */
+  static async extractTextFromPdf(buffer) {
+    try {
+      const pdfjs = await this.getPdfJs();
+      if (!pdfjs || !pdfjs.getDocument) {
+        throw new Error("PDF.js engine is not available. Please verify options/lib/pdf.min.mjs is present.");
+      }
+
+      const uint8 = new Uint8Array(buffer);
+      const loadingTask = pdfjs.getDocument({
+        data: uint8,
+        useSystemFonts: true,
+        disableFontFace: true,
+        isEvalSupported: false
+      });
+
+      const pdfDoc = await loadingTask.promise;
+      const numPages = pdfDoc.numPages;
+      const allPagesText = [];
+
+      for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+        const page = await pdfDoc.getPage(pageNum);
+        const textContent = await page.getTextContent();
+        const items = textContent.items || [];
+
+        if (items.length === 0) continue;
+
+        // Group text items by line using Y-coordinate
+        const linesMap = new Map();
+        for (const item of items) {
+          if (!item.str && item.str !== ' ') continue;
+          // transform matrix: [scaleX, skewY, skewX, scaleY, transX, transY]
+          const y = item.transform ? Math.round(item.transform[5]) : 0;
+          const x = item.transform ? item.transform[4] : 0;
+
+          // Find existing line bucket within 4px tolerance
+          let matchedY = null;
+          for (const existingY of linesMap.keys()) {
+            if (Math.abs(existingY - y) <= 4) {
+              matchedY = existingY;
+              break;
+            }
+          }
+
+          const targetY = matchedY !== null ? matchedY : y;
+          if (!linesMap.has(targetY)) {
+            linesMap.set(targetY, []);
+          }
+          linesMap.get(targetY).push({ x, str: item.str });
+        }
+
+        // Sort lines vertically (top to bottom: Y descending)
+        const sortedYs = Array.from(linesMap.keys()).sort((a, b) => b - a);
+        const pageLines = [];
+
+        for (const y of sortedYs) {
+          const lineItems = linesMap.get(y);
+          // Sort items horizontally (left to right: X ascending)
+          lineItems.sort((a, b) => a.x - b.x);
+          
+          let lineStr = '';
+          for (const item of lineItems) {
+            if (lineStr.length > 0 && !lineStr.endsWith(' ') && !item.str.startsWith(' ')) {
+              lineStr += ' ';
+            }
+            lineStr += item.str;
+          }
+          const trimmed = lineStr.trim();
+          if (trimmed) {
+            pageLines.push(trimmed);
+          }
+        }
+
+        if (pageLines.length > 0) {
+          allPagesText.push(pageLines.join('\n'));
+        }
+      }
+
+      const fullText = allPagesText.join('\n\n').trim();
+      if (fullText.length > 20) {
+        return fullText;
+      }
+      throw new Error("Extracted PDF content was empty");
+    } catch (err) {
+      console.warn("[DocParser] PDF.js extraction encountered an issue, trying text fallback:", err);
+      return this.fallbackBinaryTextExtraction(buffer);
+    }
+  }
+
+  /**
    * Extract text from DOCX (PKZip containing word/document.xml)
+   * Uses JSZip or DecompressionStream fallback
    * @param {ArrayBuffer} buffer 
    * @returns {Promise<string>}
    */
   static async extractTextFromDocx(buffer) {
     try {
-      const bytes = new Uint8Array(buffer);
-      const xmlString = await this.unzipDocxDocumentXml(bytes);
-      if (!xmlString) {
-        // Fallback: raw regex extraction from binary if zip header parsing varies
-        const decoder = new TextDecoder('utf-8', { fatal: false });
-        const raw = decoder.decode(bytes);
-        const textNodes = raw.match(/<w:t[^>]*>([^<]+)<\/w:t>/g);
-        if (textNodes && textNodes.length > 0) {
-          return textNodes.map(t => t.replace(/<[^>]+>/g, '')).join(' ');
+      let xmlString = '';
+
+      // Try window.JSZip first if loaded
+      if (typeof window !== 'undefined' && window.JSZip) {
+        const zip = await window.JSZip.loadAsync(buffer);
+        const docFile = zip.file("word/document.xml");
+        if (docFile) {
+          xmlString = await docFile.async("string");
         }
-        throw new Error("Could not extract word/document.xml from DOCX");
       }
 
-      // Parse XML nodes to preserve paragraph breaks and structure
+      // Fallback to manual PKZip header parsing
+      if (!xmlString) {
+        const bytes = new Uint8Array(buffer);
+        xmlString = await this.unzipDocxDocumentXml(bytes);
+      }
+
+      if (!xmlString) {
+        throw new Error("Could not locate word/document.xml in DOCX archive");
+      }
+
+      // Parse XML nodes to preserve paragraph and line breaks
       const parser = new DOMParser();
       const xmlDoc = parser.parseFromString(xmlString, "application/xml");
       const paragraphs = xmlDoc.getElementsByTagName("w:p");
@@ -75,7 +205,7 @@ class ResumeDocumentParser {
         return textLines.join("\n");
       }
 
-      // Fallback text extraction
+      // Fallback regex strip
       return xmlString.replace(/<w:p[^>]*>/gi, '\n')
                       .replace(/<w:br[^>]*>/gi, '\n')
                       .replace(/<w:tab[^>]*>/gi, '    ')
@@ -102,11 +232,9 @@ class ResumeDocumentParser {
     const len = bytes.length;
 
     while (offset < len - 30) {
-      // Local file header signature 0x04034b50 ("PK\x03\x04")
       if (view.getUint32(offset, true) === 0x04034b50) {
         const compMethod = view.getUint16(offset + 8, true);
         const compSize = view.getUint32(offset + 18, true);
-        const uncompSize = view.getUint32(offset + 22, true);
         const fileNameLen = view.getUint16(offset + 26, true);
         const extraLen = view.getUint16(offset + 28, true);
 
@@ -117,10 +245,8 @@ class ResumeDocumentParser {
         if (fileName === "word/document.xml") {
           const compData = bytes.subarray(dataOffset, dataOffset + compSize);
           if (compMethod === 0) {
-            // Uncompressed
             return new TextDecoder().decode(compData);
           } else if (compMethod === 8) {
-            // Deflated
             try {
               const decompressed = await this.decompressRawDeflate(compData);
               return new TextDecoder().decode(decompressed);
@@ -137,9 +263,6 @@ class ResumeDocumentParser {
     return null;
   }
 
-  /**
-   * Decompress raw deflate data using standard browser DecompressionStream
-   */
   static async decompressRawDeflate(uint8Arr) {
     if (typeof DecompressionStream !== 'undefined') {
       try {
@@ -147,164 +270,12 @@ class ResumeDocumentParser {
         const buffer = await new Response(stream).arrayBuffer();
         return new Uint8Array(buffer);
       } catch (_) {
-        try {
-          const stream2 = new Response(uint8Arr).body.pipeThrough(new DecompressionStream('deflate'));
-          const buffer2 = await new Response(stream2).arrayBuffer();
-          return new Uint8Array(buffer2);
-        } catch (e2) {
-          throw e2;
-        }
+        const stream2 = new Response(uint8Arr).body.pipeThrough(new DecompressionStream('deflate'));
+        const buffer2 = await new Response(stream2).arrayBuffer();
+        return new Uint8Array(buffer2);
       }
     }
     throw new Error("DecompressionStream is not supported in this browser");
-  }
-
-  /**
-   * Extract text from PDF buffer
-   * @param {ArrayBuffer} buffer 
-   * @returns {Promise<string>}
-   */
-  static async extractTextFromPdf(buffer) {
-    try {
-      const bytes = new Uint8Array(buffer);
-      const textDecoder = new TextDecoder('latin1');
-      const rawPdf = textDecoder.decode(bytes);
-
-      const extractedPieces = [];
-      const streamRegex = /stream[\r\n]+([\s\S]*?)[\r\n]+endstream/g;
-      let streamMatch;
-
-      while ((streamMatch = streamRegex.exec(rawPdf)) !== null) {
-        const streamStartIndex = streamMatch.index + streamMatch[0].indexOf('\n') + 1;
-        const streamRawStr = streamMatch[1];
-        const streamBytes = bytes.subarray(streamStartIndex, streamStartIndex + streamRawStr.length);
-
-        // Try extracting uncompressed BT ... ET text blocks
-        const uncompressedText = this.parsePdfTextCommands(streamRawStr);
-        if (uncompressedText) {
-          extractedPieces.push(uncompressedText);
-        } else {
-          // Attempt Flate decompression
-          try {
-            const decomp = await this.decompressPdfFlate(streamBytes);
-            if (decomp) {
-              const decompStr = new TextDecoder('latin1').decode(decomp);
-              const textFromDecomp = this.parsePdfTextCommands(decompStr);
-              if (textFromDecomp) {
-                extractedPieces.push(textFromDecomp);
-              }
-            }
-          } catch (_) {
-            // Non-deflate stream or image data
-          }
-        }
-      }
-
-      if (extractedPieces.length > 0) {
-        const result = extractedPieces.join('\n').trim();
-        if (result.length > 50) return result;
-      }
-
-      // Fallback: Scan raw text strings from PDF objects
-      return this.fallbackPdfStringExtraction(rawPdf);
-    } catch (err) {
-      console.warn("[DocParser] PDF extraction error, attempting fallback:", err);
-      return this.fallbackBinaryTextExtraction(buffer);
-    }
-  }
-
-  /**
-   * Parse PDF text commands (BT ... ET, Tj, TJ, ')
-   */
-  static parsePdfTextCommands(streamStr) {
-    if (!streamStr || (!streamStr.includes('BT') && !streamStr.includes('Tj') && !streamStr.includes('TJ'))) {
-      return '';
-    }
-
-    const lines = [];
-    // Match text blocks
-    const btRegex = /BT([\s\S]*?)ET/g;
-    let btMatch;
-
-    while ((btMatch = btRegex.exec(streamStr)) !== null) {
-      const block = btMatch[1];
-      let lineText = '';
-
-      // Match Tj (string operand)
-      // e.g. (Hello World) Tj or <48656c6c6f> Tj
-      const tjRegex = /(?:\((.*?)\)|<([0-9A-Fa-f]+)>)\s*Tj/g;
-      let tjMatch;
-      while ((tjMatch = tjRegex.exec(block)) !== null) {
-        if (tjMatch[1] !== undefined) {
-          lineText += this.cleanPdfString(tjMatch[1]) + ' ';
-        } else if (tjMatch[2] !== undefined) {
-          lineText += this.hexToString(tjMatch[2]) + ' ';
-        }
-      }
-
-      // Match TJ (array operand)
-      // e.g. [(Hello) -10 (World)] TJ
-      const tjArrRegex = /\[(.*?)\]\s*TJ/g;
-      let arrMatch;
-      while ((arrMatch = tjArrRegex.exec(block)) !== null) {
-        const arrContent = arrMatch[1];
-        const innerStrings = arrContent.match(/\((.*?)\)|<([0-9A-Fa-f]+)>/g) || [];
-        for (const str of innerStrings) {
-          if (str.startsWith('(') && str.endsWith(')')) {
-            lineText += this.cleanPdfString(str.slice(1, -1));
-          } else if (str.startsWith('<') && str.endsWith('>')) {
-            lineText += this.hexToString(str.slice(1, -1));
-          }
-        }
-        lineText += ' ';
-      }
-
-      if (lineText.trim()) {
-        lines.push(lineText.trim());
-      }
-    }
-
-    return lines.join('\n');
-  }
-
-  static cleanPdfString(str) {
-    return str.replace(/\\([0-7]{1,3})/g, (_, oct) => String.fromCharCode(parseInt(oct, 8)))
-              .replace(/\\n/g, '\n')
-              .replace(/\\r/g, '\r')
-              .replace(/\\t/g, '\t')
-              .replace(/\\\(/g, '(')
-              .replace(/\\\)/g, ')')
-              .replace(/\\\\/g, '\\');
-  }
-
-  static hexToString(hex) {
-    let str = '';
-    for (let i = 0; i < hex.length; i += 2) {
-      str += String.fromCharCode(parseInt(hex.substr(i, 2), 16) || 32);
-    }
-    return str;
-  }
-
-  static async decompressPdfFlate(bytes) {
-    if (!bytes || bytes.length < 4) return null;
-    // Strip 2-byte zlib header if present (e.g. 0x78 0x9C)
-    let payload = bytes;
-    if (bytes[0] === 0x78) {
-      payload = bytes.subarray(2);
-    }
-    return await this.decompressRawDeflate(payload);
-  }
-
-  static fallbackPdfStringExtraction(rawPdf) {
-    const matches = rawPdf.match(/\(([^()]{3,})\)/g) || [];
-    const validLines = [];
-    for (const m of matches) {
-      const clean = m.slice(1, -1).replace(/[^\x20-\x7E\t\n]/g, '').trim();
-      if (clean.length > 2 && !clean.includes('%PDF') && !clean.includes('obj')) {
-        validLines.push(clean);
-      }
-    }
-    return validLines.join('\n');
   }
 
   static fallbackBinaryTextExtraction(buffer) {
@@ -352,7 +323,7 @@ class ResumeDocumentParser {
       graduationDate: '',
       school: '',
       degree: '',
-      degreeLevel: "Bachelor's degree",
+      degreeLevel: "Bachelor's Degree",
       targetStack: 'Full Stack Software Engineer',
       primaryStackKeywords: [],
       backendSkills: '',
@@ -403,8 +374,8 @@ class ResumeDocumentParser {
       result.extractedTags.push({ icon: '🐙', label: 'GitHub Profile', type: 'link' });
     }
 
-    // 4. Name Extraction
-    let fullName = getRowValue(/^(?:full\s*name|candidate\s*name)[:\s\t]+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)/i);
+    // 4. Candidate Name Extraction
+    let fullName = getRowValue(/^(?:full\s*name|candidate\s*name|name)[:\s\t]+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)/i);
     let legalFirst = getRowValue(/^(?:legal\s*first\s*name|first\s*name)[:\s\t]+([A-Za-z]+)/i);
     let legalMiddle = getRowValue(/^(?:legal\s*middle\s*name|middle\s*name)[:\s\t]+([A-Za-z]+)/i);
     let legalLast = getRowValue(/^(?:legal\s*last\s*name|last\s*name)[:\s\t]+([A-Za-z]+)/i);
@@ -415,10 +386,14 @@ class ResumeDocumentParser {
       if (genericNameMatch) {
         fullName = genericNameMatch[1].trim();
       } else {
-        // First clean heading line
+        // Find first clean name line at the top of the resume
         for (let i = 0; i < Math.min(lines.length, 5); i++) {
           const l = lines[i];
-          if (/^[A-Z][a-z]+\s+([A-Z][a-z]+\s+)?[A-Z][a-z]+$/.test(l) && l.split(' ').length >= 2 && l.split(' ').length <= 4 && !l.toLowerCase().includes('resume') && !l.toLowerCase().includes('curriculum')) {
+          if (/^[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){1,3}$/.test(l) &&
+              !l.toLowerCase().includes('resume') &&
+              !l.toLowerCase().includes('curriculum') &&
+              !l.toLowerCase().includes('developer') &&
+              !l.toLowerCase().includes('engineer')) {
             fullName = l;
             break;
           }
@@ -428,9 +403,9 @@ class ResumeDocumentParser {
 
     if (fullName) {
       result.fullName = fullName;
-      const parts = fullName.split(' ');
+      const parts = fullName.split(/\s+/);
       result.firstName = legalFirst || parts[0] || '';
-      result.lastName = legalLast || parts.slice(1).join(' ') || '';
+      result.lastName = legalLast || parts[parts.length - 1] || '';
       result.preferredName = preferredName || fullName;
       result.extractedTags.push({ icon: '👤', label: fullName, type: 'name' });
     }
@@ -507,51 +482,27 @@ class ResumeDocumentParser {
     }
 
     if (textLower.includes('master') || textLower.includes('m.s.') || textLower.includes('m.sc.')) {
-      result.degreeLevel = "Master's degree";
+      result.degreeLevel = "Master's Degree";
       result.degree = "Master of Science in Computer Science";
       result.extractedTags.push({ icon: '📜', label: `Master's (${result.school || 'University'})`, type: 'edu' });
     } else if (textLower.includes('bachelor') || textLower.includes('b.s.') || textLower.includes('b.a.') || textLower.includes('b.sc.')) {
-      result.degreeLevel = "Bachelor's degree";
+      result.degreeLevel = "Bachelor's Degree";
       result.degree = "Bachelor of Science in Computer Science";
       result.extractedTags.push({ icon: '📜', label: `Bachelor's (${result.school || 'University'})`, type: 'edu' });
     } else if (result.school) {
       result.extractedTags.push({ icon: '🏫', label: result.school, type: 'edu' });
     }
 
-    // 9. Technical Skills & Track Alignment
-    const hasPython = textLower.includes('python') || textLower.includes('django') || textLower.includes('fastapi') || textLower.includes('flask') || textLower.includes('pytorch');
-    const hasDotNet = textLower.includes('.net') || textLower.includes('c#') || textLower.includes('csharp') || textLower.includes('asp.net') || textLower.includes('azure sql');
-    const hasPhp = textLower.includes('php') || textLower.includes('laravel') || textLower.includes('symfony');
-    const hasJava = textLower.includes('spring boot') || (textLower.includes('java ') && !textLower.includes('javascript'));
+    // 9. Robust Technical Skills Extraction & Intelligent Skill Inference
+    const skillData = this.extractAndInferTechnicalSkills(rawText, textLower);
+    result.targetStack = skillData.targetStack;
+    result.primaryStackKeywords = skillData.primaryStackKeywords;
+    result.backendSkills = skillData.backendSkills;
+    result.frontendSkills = skillData.frontendSkills;
+    result.dbCloudSkills = skillData.dbCloudSkills;
 
-    if (hasPython && !hasDotNet) {
-      result.targetStack = "Full Stack Python / AI / Cloud";
-      result.primaryStackKeywords = ["python", "django", "fastapi", "aws", "postgresql", "react", "ai", "machine learning"];
-      result.backendSkills = "Python with FastAPI and Django";
-      result.frontendSkills = "React, TypeScript";
-      result.dbCloudSkills = "PostgreSQL (including AWS RDS), Redis, Docker, AWS";
-      result.extractedTags.push({ icon: '🐍', label: 'Full Stack Python / AI Track', type: 'stack' });
-    } else if (hasDotNet) {
-      result.targetStack = "Full Stack C# / .NET / Cloud";
-      result.primaryStackKeywords = [".net", "c#", "csharp", "dotnet", "asp.net", "azure", "sql server", "cloud"];
-      result.backendSkills = "C#, ASP.NET Core, .NET 8, Web API, Entity Framework";
-      result.frontendSkills = "React, TypeScript, Angular";
-      result.dbCloudSkills = "SQL Server (including Azure SQL), Redis, Azure, Docker";
-      result.extractedTags.push({ icon: '🔷', label: 'Full Stack C# / .NET Track', type: 'stack' });
-    } else if (hasPhp) {
-      result.targetStack = "Full Stack PHP / Laravel / Cloud";
-      result.primaryStackKeywords = ["php", "laravel", "symfony", "mysql", "vue", "react", "aws", "docker"];
-      result.backendSkills = "PHP 8.x with Laravel, Symfony, REST APIs";
-      result.frontendSkills = "Vue.js, Tailwind CSS, React";
-      result.dbCloudSkills = "MySQL, PostgreSQL, Redis, AWS";
-      result.extractedTags.push({ icon: '🐘', label: 'Full Stack PHP / Laravel Track', type: 'stack' });
-    } else {
-      result.targetStack = "Full Stack Python / AI / Cloud";
-      result.primaryStackKeywords = ["python", "fastapi", "react", "postgresql", "aws", "docker"];
-      result.backendSkills = "Python with FastAPI";
-      result.frontendSkills = "React, TypeScript";
-      result.dbCloudSkills = "PostgreSQL, Redis, AWS, Docker";
-      result.extractedTags.push({ icon: '💻', label: 'Full Stack Software Engineer', type: 'stack' });
+    if (skillData.extractedTags?.length) {
+      result.extractedTags.push(...skillData.extractedTags);
     }
 
     // Years of Experience calculation / detection
@@ -562,6 +513,350 @@ class ResumeDocumentParser {
     }
 
     return result;
+  }
+
+  /**
+   * Technical Taxonomy: Comprehensive Skill Dictionary
+   */
+  static getTechnicalTaxonomy() {
+    return {
+      backend: [
+        { name: "C#", patterns: [/(?:^|[\s,;/|\(])c#(?=[\s,;./|\)]|$)/i, /\bcsharp\b/i] },
+        { name: ".NET 8", patterns: [/(?:^|[\s,;/|\(])\.net\s*8(?=[\s,;./|\)]|$)/i, /\bdotnet\s*8\b/i] },
+        { name: ".NET Core", patterns: [/(?:^|[\s,;/|\(])\.net\s*core(?=[\s,;./|\)]|$)/i, /\bdotnet\s*core\b/i] },
+        { name: ".NET Framework", patterns: [/(?:^|[\s,;/|\(])\.net\s*framework(?=[\s,;./|\)]|$)/i] },
+        { name: ".NET", patterns: [/(?:^|[\s,;/|\(])\.net(?=[\s,;./|\)]|$)/i, /\bdotnet\b/i] },
+        { name: "ASP.NET Core", patterns: [/\basp\.net\s*core\b/i, /\baspnet\s*core\b/i] },
+        { name: "ASP.NET Web API", patterns: [/\basp\.net\s*web\s*api\b/i, /\bweb\s*api\b/i] },
+        { name: "ASP.NET MVC", patterns: [/\basp\.net\s*mvc\b/i] },
+        { name: "ASP.NET Web Forms", patterns: [/\basp\.net\s*web\s*forms\b/i] },
+        { name: "Entity Framework Core", patterns: [/\bentity\s*framework\s*core\b/i, /\bef\s*core\b/i] },
+        { name: "Entity Framework", patterns: [/\bentity\s*framework\b/i] },
+        { name: "Dapper", patterns: [/\bdapper\b/i] },
+        { name: "LINQ", patterns: [/\blinq\b/i] },
+        { name: "WCF", patterns: [/\bwcf\b/i, /\bwindows\s*communication\s*foundation\b/i] },
+        { name: "Dependency Injection", patterns: [/\bdependency\s*injection\b/i] },
+        { name: "Python", patterns: [/\bpython(?:\s*3(?:\.\d+)?)?\b/i] },
+        { name: "FastAPI", patterns: [/\bfastapi\b/i] },
+        { name: "Django", patterns: [/\bdjango\b/i] },
+        { name: "Flask", patterns: [/\bflask\b/i] },
+        { name: "Celery", patterns: [/\bcelery\b/i] },
+        { name: "SQLAlchemy", patterns: [/\bsqlalchemy\b/i] },
+        { name: "Pydantic", patterns: [/\bpydantic\b/i] },
+        { name: "Node.js", patterns: [/\bnode(?:\.js)?\b/i] },
+        { name: "Express.js", patterns: [/\bexpress(?:\.js)?\b/i] },
+        { name: "NestJS", patterns: [/\bnest(?:\.js)?\b/i] },
+        { name: "Java", patterns: [/\bjava\b/i] },
+        { name: "Spring Boot", patterns: [/\bspring\s*boot\b/i] },
+        { name: "Spring Framework", patterns: [/\bspring\s*framework\b/i] },
+        { name: "Hibernate", patterns: [/\bhibernate\b/i] },
+        { name: "Go / Golang", patterns: [/\bgolang\b/i, /\bgo\s+programming\b/i] },
+        { name: "PHP", patterns: [/\bphp(?:\s*8(?:\.\d+)?)?\b/i] },
+        { name: "Laravel", patterns: [/\blaravel\b/i] },
+        { name: "Symfony", patterns: [/\bsymfony\b/i] },
+        { name: "Ruby on Rails", patterns: [/\bruby\s+on\s+rails\b/i, /\brails\b/i] },
+        { name: "C++", patterns: [/(?:^|[\s,;/|\(])c\+\+(?=[\s,;./|\)]|$)/i] },
+        { name: "Rust", patterns: [/\brust\b/i] },
+        { name: "RESTful APIs", patterns: [/\brestful\s*apis?\b/i, /\brest\s*apis?\b/i, /\brest\b/i] },
+        { name: "GraphQL", patterns: [/\bgraphql\b/i] },
+        { name: "gRPC", patterns: [/\bgrpc\b/i] },
+        { name: "Microservices", patterns: [/\bmicroservices?\b/i] },
+        { name: "Distributed Systems", patterns: [/\bdistributed\s*systems?\b/i] },
+        { name: "Clean Architecture", patterns: [/\bclean\s*architecture\b/i] },
+        { name: "Domain-Driven Design (DDD)", patterns: [/\bdomain[- ]driven\s*design\b/i, /\bddd\b/i] },
+        { name: "CQRS", patterns: [/\bcqrs\b/i] },
+        { name: "Event-Driven Architecture", patterns: [/\bevent[- ]driven\b/i] },
+        { name: "SOLID Principles", patterns: [/\bsolid\s*principles\b/i] },
+        { name: "WebSockets", patterns: [/\bwebsockets?\b/i] }
+      ],
+
+      frontend: [
+        { name: "React", patterns: [/\breact(?:\.js)?\b/i] },
+        { name: "Next.js", patterns: [/\bnext(?:\.js)?\b/i] },
+        { name: "TypeScript", patterns: [/\btypescript\b/i] },
+        { name: "JavaScript", patterns: [/\bjavascript\b/i, /\bes6\+?\b/i] },
+        { name: "Angular", patterns: [/\bangular(?:\.js)?\b/i] },
+        { name: "Vue.js", patterns: [/\bvue(?:\.js)?\b/i] },
+        { name: "Nuxt.js", patterns: [/\bnuxt(?:\.js)?\b/i] },
+        { name: "Blazor", patterns: [/\bblazor\b/i] },
+        { name: "Razor Components", patterns: [/\brazor\s*(?:components|views|pages)?\b/i] },
+        { name: "Svelte", patterns: [/\bsvelte\b/i] },
+        { name: "HTML5 / CSS3", patterns: [/\bhtml5?\b/i, /\bcss3?\b/i] },
+        { name: "Tailwind CSS", patterns: [/\btailwind\s*css\b/i, /\btailwind\b/i] },
+        { name: "Bootstrap", patterns: [/\bbootstrap\b/i] },
+        { name: "Sass / SCSS", patterns: [/\bsass\b/i, /\bscss\b/i] },
+        { name: "Redux", patterns: [/\bredux\b/i, /\bredux\s*toolkit\b/i] },
+        { name: "Zustand", patterns: [/\bzustand\b/i] },
+        { name: "RxJS", patterns: [/\brxjs\b/i] },
+        { name: "Webpack", patterns: [/\bwebpack\b/i] },
+        { name: "Vite", patterns: [/\bvite\b/i] },
+        { name: "Responsive Design", patterns: [/\bresponsive\s*design\b/i] }
+      ],
+
+      dbCloud: [
+        { name: "SQL Server", patterns: [/\bsql\s*server\b/i, /\bmssql\b/i] },
+        { name: "Azure SQL Database", patterns: [/\bazure\s*sql\b/i] },
+        { name: "PostgreSQL", patterns: [/\bpostgresql\b/i, /\bpostgres\b/i] },
+        { name: "MySQL", patterns: [/\bmysql\b/i] },
+        { name: "Oracle Database", patterns: [/\boracle(?:\s*db)?\b/i] },
+        { name: "T-SQL", patterns: [/\bt-sql\b/i, /\btsql\b/i] },
+        { name: "PL/SQL", patterns: [/\bpl\/sql\b/i] },
+        { name: "Amazon RDS", patterns: [/\bamazon\s*rds\b/i, /\baws\s*rds\b/i] },
+        { name: "Amazon Aurora", patterns: [/\bamazon\s*aurora\b/i] },
+        { name: "Redis", patterns: [/\bredis\b/i] },
+        { name: "MongoDB", patterns: [/\bmongodb\b/i, /\bmongo\b/i] },
+        { name: "DynamoDB", patterns: [/\bdynamodb\b/i] },
+        { name: "Cassandra", patterns: [/\bcassandra\b/i] },
+        { name: "Elasticsearch", patterns: [/\belasticsearch\b/i] },
+        { name: "Apache Kafka", patterns: [/\bapache\s*kafka\b/i, /\bkafka\b/i] },
+        { name: "RabbitMQ", patterns: [/\brabbitmq\b/i] },
+        { name: "Azure Service Bus", patterns: [/\bazure\s*service\s*bus\b/i] },
+        { name: "Amazon SNS / SQS", patterns: [/\bamazon\s*(?:sns|sqs)\b/i, /\baws\s*(?:sns|sqs)\b/i, /\bsns\b/i, /\bsqs\b/i] },
+        { name: "Microsoft Azure", patterns: [/\bmicrosoft\s*azure\b/i, /\bazure\b/i] },
+        { name: "AWS", patterns: [/\bamazon\s*web\s*services\b/i, /\baws\b/i] },
+        { name: "Google Cloud (GCP)", patterns: [/\bgoogle\s*cloud\b/i, /\bgcp\b/i] },
+        { name: "Azure Kubernetes Service (AKS)", patterns: [/\baks\b/i, /\bazure\s*kubernetes\b/i] },
+        { name: "Amazon EKS", patterns: [/\beks\b/i, /\bamazon\s*eks\b/i] },
+        { name: "Azure API Management", patterns: [/\bazure\s*api\s*management\b/i] },
+        { name: "Azure Functions", patterns: [/\bazure\s*functions\b/i] },
+        { name: "AWS Lambda", patterns: [/\baws\s*lambda\b/i, /\blambda\b/i] },
+        { name: "Amazon S3", patterns: [/\bamazon\s*s3\b/i, /\baws\s*s3\b/i, /\bs3\b/i] },
+        { name: "Docker", patterns: [/\bdocker\b/i] },
+        { name: "Kubernetes", patterns: [/\bkubernetes\b/i, /\bk8s\b/i] },
+        { name: "Terraform", patterns: [/\bterraform\b/i] },
+        { name: "Azure DevOps", patterns: [/\bazure\s*devops\b/i] },
+        { name: "GitHub Actions", patterns: [/\bgithub\s*actions\b/i] },
+        { name: "GitLab CI", patterns: [/\bgitlab\s*ci\b/i] },
+        { name: "Jenkins", patterns: [/\bjenkins\b/i] },
+        { name: "CI/CD", patterns: [/(?:^|[\s,;/|\(])ci\/cd(?=[\s,;./|\)]|$)/i, /\bcontinuous\s*integration\b/i] },
+        { name: "Git", patterns: [/\bgit\b/i] }
+      ],
+
+      ai: [
+        { name: "Azure OpenAI", patterns: [/\bazure\s*openai\b/i] },
+        { name: "OpenAI API", patterns: [/\bopenai\b/i] },
+        { name: "Retrieval-Augmented Generation (RAG)", patterns: [/\bretrieval[- ]augmented\s*generation\b/i, /\brag\b/i] },
+        { name: "Prompt Engineering", patterns: [/\bprompt\s*engineering\b/i] },
+        { name: "AI-Assisted Development", patterns: [/\bai[- ]assisted\b/i, /\bgithub\s*copilot\b/i, /\bagentic\b/i] },
+        { name: "Machine Learning", patterns: [/\bmachine\s*learning\b/i] },
+        { name: "PyTorch", patterns: [/\bpytorch\b/i] },
+        { name: "TensorFlow", patterns: [/\btensorflow\b/i] }
+      ],
+
+      testing: [
+        { name: "xUnit", patterns: [/\bxunit\b/i] },
+        { name: "NUnit", patterns: [/\bnunit\b/i] },
+        { name: "MSTest", patterns: [/\bmstest\b/i] },
+        { name: "Moq", patterns: [/\bmoq\b/i] },
+        { name: "pytest", patterns: [/\bpytest\b/i] },
+        { name: "Jest", patterns: [/\bjest\b/i] },
+        { name: "Testcontainers", patterns: [/\btestcontainers\b/i] }
+      ]
+    };
+  }
+
+  /**
+   * Parse explicit sections (e.g. TECHNICAL SKILLS: Backend Development, Cloud & Infrastructure, etc.)
+   */
+  static parseExplicitSkillsSection(rawText) {
+    const sectionKeywords = [];
+    const lines = rawText.split('\n');
+    let inSkillsSection = false;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+
+      if (/^(?:technical\s*skills|skills\s*(?:&|and)\s*tools|core\s*competencies|skills|technologies|proficiencies)[:\s]*$/i.test(line)) {
+        inSkillsSection = true;
+        continue;
+      }
+
+      if (inSkillsSection && /^(?:professional\s*experience|work\s*experience|experience|employment|education|projects|certifications|awards|summary)[:\s]*$/i.test(line)) {
+        inSkillsSection = false;
+        break;
+      }
+
+      if (inSkillsSection) {
+        const colonIdx = line.indexOf(':');
+        const content = colonIdx !== -1 ? line.substring(colonIdx + 1) : line;
+        const tokens = content.split(/[,|•·;]+/).map(s => s.trim()).filter(s => s.length > 1 && s.length < 50);
+        sectionKeywords.push(...tokens);
+      }
+    }
+    return sectionKeywords;
+  }
+
+  /**
+   * Infer related skills based on detected technologies
+   */
+  static inferCorrelatedSkills(detectedSkills) {
+    const inferred = { backend: [], frontend: [], dbCloud: [] };
+    const has = (name) => detectedSkills.some(s => s.toLowerCase() === name.toLowerCase());
+
+    // Language & Framework Correlations
+    if (has(".NET 8") || has("ASP.NET Core") || has(".NET Core") || has(".NET Framework")) {
+      if (!has("C#")) inferred.backend.push("C#");
+      if (!has(".NET")) inferred.backend.push(".NET");
+      if (!has("RESTful APIs")) inferred.backend.push("RESTful APIs");
+    }
+    if (has("React") || has("Angular") || has("Vue.js") || has("Svelte")) {
+      if (!has("JavaScript")) inferred.frontend.push("JavaScript");
+      if (!has("HTML5 / CSS3")) inferred.frontend.push("HTML5 / CSS3");
+      inferred.frontend.push("Responsive Web Design");
+    }
+    if (has("TypeScript") && !has("JavaScript")) {
+      inferred.frontend.push("JavaScript");
+    }
+    if (has("Next.js") && !has("React")) {
+      inferred.frontend.push("React");
+    }
+    if (has("FastAPI") || has("Django") || has("Flask")) {
+      if (!has("Python")) inferred.backend.push("Python");
+      if (!has("RESTful APIs")) inferred.backend.push("RESTful APIs");
+    }
+    if (has("Spring Boot") && !has("Java")) {
+      inferred.backend.push("Java");
+      inferred.backend.push("RESTful APIs");
+    }
+    if (has("Laravel") && !has("PHP")) {
+      inferred.backend.push("PHP");
+      inferred.backend.push("REST APIs");
+    }
+
+    // Cloud & DevOps Correlations
+    if (has("Kubernetes") || has("Azure Kubernetes Service (AKS)") || has("Amazon EKS")) {
+      if (!has("Docker")) inferred.dbCloud.push("Docker");
+      inferred.dbCloud.push("Containerization");
+      inferred.dbCloud.push("Container Orchestration");
+    }
+    if (has("Docker") && !inferred.dbCloud.includes("Containerization")) {
+      inferred.dbCloud.push("Containerization");
+    }
+    if (has("Terraform")) {
+      inferred.dbCloud.push("Infrastructure as Code (IaC)");
+    }
+    if (has("GitHub Actions") || has("Azure DevOps") || has("GitLab CI") || has("Jenkins")) {
+      if (!has("CI/CD")) inferred.dbCloud.push("CI/CD");
+      inferred.dbCloud.push("Continuous Integration & Automated Deployment");
+    }
+    if (has("Azure Kubernetes Service (AKS)") || has("Azure Functions") || has("Azure SQL Database") || has("Azure Service Bus")) {
+      if (!has("Microsoft Azure")) inferred.dbCloud.push("Microsoft Azure");
+      inferred.dbCloud.push("Cloud Architecture");
+    }
+    if (has("Amazon EKS") || has("AWS Lambda") || has("Amazon RDS") || has("Amazon SNS / SQS")) {
+      if (!has("AWS")) inferred.dbCloud.push("AWS");
+      inferred.dbCloud.push("Cloud Architecture");
+    }
+
+    // Database & Messaging Correlations
+    if (has("SQL Server") || has("Azure SQL Database") || has("PostgreSQL") || has("MySQL") || has("Oracle Database")) {
+      inferred.dbCloud.push("Relational Databases");
+      inferred.dbCloud.push("Database Design & Optimization");
+    }
+    if (has("SQL Server") || has("Azure SQL Database")) {
+      if (!has("T-SQL")) inferred.dbCloud.push("T-SQL");
+    }
+    if (has("Apache Kafka") || has("RabbitMQ") || has("Azure Service Bus") || has("Amazon SNS / SQS")) {
+      inferred.dbCloud.push("Event-Driven Architecture");
+      inferred.backend.push("Distributed Systems");
+      inferred.backend.push("Asynchronous Messaging");
+    }
+    if (has("Redis")) {
+      inferred.dbCloud.push("In-Memory Caching");
+    }
+    if (has("Microservices") || has("CQRS")) {
+      inferred.backend.push("Distributed Systems");
+    }
+
+    // Testing & Quality Correlations
+    if (has("xUnit") || has("NUnit") || has("pytest") || has("Jest") || has("Moq")) {
+      inferred.backend.push("Unit Testing & Mocking (TDD)");
+    }
+
+    // AI Correlations
+    if (has("Azure OpenAI") || has("Retrieval-Augmented Generation (RAG)") || has("AI-Assisted Development")) {
+      inferred.backend.push("Generative AI & LLM Integration");
+    }
+
+    return inferred;
+  }
+
+  /**
+   * Master Skill Extraction & Inference Engine
+   */
+  static extractAndInferTechnicalSkills(rawText, textLower) {
+    const tax = this.getTechnicalTaxonomy();
+
+    // 1. Match Taxonomy against entire resume
+    const foundBackend = tax.backend.filter(i => i.patterns.some(p => p.test(rawText))).map(i => i.name);
+    const foundFrontend = tax.frontend.filter(i => i.patterns.some(p => p.test(rawText))).map(i => i.name);
+    const foundDbCloud = tax.dbCloud.filter(i => i.patterns.some(p => p.test(rawText))).map(i => i.name);
+    const foundAi = tax.ai.filter(i => i.patterns.some(p => p.test(rawText))).map(i => i.name);
+    const foundTesting = tax.testing.filter(i => i.patterns.some(p => p.test(rawText))).map(i => i.name);
+
+    // 2. Parse explicit skills section for any candidate-listed items
+    const explicitTokens = this.parseExplicitSkillsSection(rawText);
+
+    // 3. Generate Inferred Skills
+    const allDetectedSkills = [...foundBackend, ...foundFrontend, ...foundDbCloud, ...foundAi, ...foundTesting, ...explicitTokens];
+    const inferred = this.inferCorrelatedSkills(allDetectedSkills);
+
+    // 4. Merge and Deduplicate lists cleanly
+    const finalBackend = Array.from(new Set([...foundBackend, ...foundAi, ...foundTesting, ...inferred.backend]));
+    const finalFrontend = Array.from(new Set([...foundFrontend, ...inferred.frontend]));
+    const finalDbCloud = Array.from(new Set([...foundDbCloud, ...inferred.dbCloud]));
+
+    // 5. Track Alignment
+    const hasDotNet = finalBackend.some(s => s.includes('.NET') || s.includes('C#') || s.includes('ASP.NET'));
+    const hasPython = finalBackend.some(s => s.toLowerCase().includes('python') || s.toLowerCase().includes('fastapi') || s.toLowerCase().includes('django'));
+    const hasJava = finalBackend.some(s => s.toLowerCase().includes('java') || s.toLowerCase().includes('spring'));
+    const hasPhp = finalBackend.some(s => s.toLowerCase().includes('php') || s.toLowerCase().includes('laravel'));
+
+    let targetStack = "Full Stack Software Engineer";
+    const extractedTags = [];
+
+    if (hasDotNet) {
+      targetStack = "Full Stack C# / .NET / Cloud";
+      extractedTags.push({ icon: '🔷', label: 'Full Stack C# / .NET Track', type: 'stack' });
+      extractedTags.push({ icon: '⚡', label: 'C# & .NET 8 Ecosystem', type: 'stack' });
+    } else if (hasPython) {
+      targetStack = "Full Stack Python / AI / Cloud";
+      extractedTags.push({ icon: '🐍', label: 'Full Stack Python / AI Track', type: 'stack' });
+    } else if (hasJava) {
+      targetStack = "Full Stack Java / Spring / Cloud";
+      extractedTags.push({ icon: '☕', label: 'Java & Spring Track', type: 'stack' });
+    } else if (hasPhp) {
+      targetStack = "Full Stack PHP / Laravel / Cloud";
+      extractedTags.push({ icon: '🐘', label: 'Full Stack PHP / Laravel Track', type: 'stack' });
+    } else if (finalFrontend.length > 0) {
+      targetStack = "Full Stack TypeScript / React / Cloud";
+      extractedTags.push({ icon: '⚛️', label: 'Modern Frontend & Cloud Track', type: 'stack' });
+    }
+
+    if (finalBackend.some(s => s.includes('OpenAI') || s.includes('RAG') || s.includes('AI'))) {
+      extractedTags.push({ icon: '✨', label: 'Applied AI & RAG Engineering', type: 'stack' });
+    }
+    if (finalDbCloud.some(s => s.includes('Kubernetes') || s.includes('AKS') || s.includes('EKS') || s.includes('Terraform'))) {
+      extractedTags.push({ icon: '☁️', label: 'Cloud-Native & DevOps Ready', type: 'stack' });
+    }
+
+    // Comprehensive keywords array for submission validation and search
+    const allKeywords = Array.from(new Set([
+      ...finalBackend,
+      ...finalFrontend,
+      ...finalDbCloud,
+      ...explicitTokens
+    ].map(s => s.toLowerCase().replace(/[^a-z0-9#+.]/g, ' ').trim()).filter(Boolean)));
+
+    return {
+      targetStack,
+      backendSkills: finalBackend.join(", "),
+      frontendSkills: finalFrontend.join(", "),
+      dbCloudSkills: finalDbCloud.join(", "),
+      primaryStackKeywords: allKeywords,
+      extractedTags
+    };
   }
 }
 

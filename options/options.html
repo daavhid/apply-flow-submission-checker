@@ -3,43 +3,74 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Apply-Flow Quality Gatekeeper - Command Dashboard</title>
+  <title>Apply-Flow Quality Gatekeeper — Command Center</title>
   <link rel="stylesheet" href="options.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 </head>
 <body>
   <div class="dashboard-layout">
     <!-- Sidebar Navigation -->
     <aside class="sidebar">
       <div class="brand">
-        <div class="brand-logo">🛡️</div>
-        <div>
-          <h2>Apply-Flow Submission Quality Checker</h2>
-          <p>Command Center</p>
+        <div class="brand-logo">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            <path d="m9 12 2 2 4-4"/>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <h2>Apply-Flow</h2>
+          <p>Quality Gatekeeper</p>
         </div>
       </div>
 
       <nav class="nav-menu">
         <button class="nav-item active" data-tab="candidates">
-          <span class="nav-icon">👤</span>
+          <span class="nav-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+            </svg>
+          </span>
           <span>Candidate Profiles</span>
         </button>
+
         <button class="nav-item" data-tab="webhooks">
-          <span class="nav-icon">⚡</span>
-          <span>Webhooks & Endpoints</span>
+          <span class="nav-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M18 16.98h-5.99c-1.1 0-1.95.94-2.48 1.9A4 4 0 0 1 2 17c0-2.21 1.79-4 4-4h1"/>
+              <path d="M6 13V7a4 4 0 0 1 4-4 4 4 0 0 1 4 4v2"/><circle cx="18" cy="19" r="3"/><circle cx="18" cy="7" r="3"/>
+            </svg>
+          </span>
+          <span>Webhooks & Sync</span>
         </button>
+
         <button class="nav-item" data-tab="rules">
-          <span class="nav-icon">⚖️</span>
-          <span>Validation Rules</span>
+          <span class="nav-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>
+            </svg>
+          </span>
+          <span>Rules & Automation</span>
         </button>
+
         <button class="nav-item" data-tab="history">
-          <span class="nav-icon">📜</span>
-          <span>Submissions Audit Log</span>
+          <span class="nav-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/>
+            </svg>
+          </span>
+          <span>Audit Log</span>
         </button>
+
         <button class="nav-item" data-tab="testbench" id="nav-open-simulator">
-          <span class="nav-icon">🧪</span>
+          <span class="nav-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M10 2v7.31"/><path d="M14 9.3V1.99"/><path d="M8.5 2h7"/><path d="M14 9.3a6.5 6.5 0 1 1-4 0"/>
+              <path d="M5.52 16h12.96"/>
+            </svg>
+          </span>
           <span>ATS Simulator</span>
         </button>
       </nav>
@@ -47,7 +78,7 @@
       <div class="sidebar-footer">
         <div class="status-indicator">
           <span class="status-dot"></span>
-          <span>Gatekeeper Active</span>
+          <span>Gatekeeper Online</span>
         </div>
       </div>
     </aside>
@@ -60,87 +91,239 @@
           <h1 id="tab-title">Candidate Profiles</h1>
           <p id="tab-subtitle">Manage candidate assignment profiles, verified identities, tech stacks, and custom screening answers.</p>
         </div>
-        <div class="top-actions">
-          <button class="btn btn-primary" id="save-all-btn">💾 Save All Changes</button>
+        <div class="top-actions" style="display:flex; gap:8px; align-items:center;">
+          <button class="btn btn-ai" id="top-build-from-resume-btn" title="Create a new candidate profile automatically from a PDF/DOCX/Text resume">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            <span>Parse Resume</span>
+          </button>
+          <button class="btn btn-secondary" id="top-add-candidate-btn" title="Create a new candidate profile">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            <span>Add Profile</span>
+          </button>
+          <button class="btn btn-primary" id="save-all-btn">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+            <span>Save All Changes</span>
+          </button>
         </div>
       </header>
 
       <!-- TAB 1: Candidates Profile Manager -->
       <section class="tab-pane active" id="tab-candidates">
-        <!-- Admin Profile Lock & Security Card -->
-        <div class="card form-card lock-card">
-          <div class="lock-header">
-            <div>
-              <h3 class="card-title">
-                <span>🔒</span> Admin Assignment & Security Lock
-              </h3>
-              <p class="card-desc">
-                Locks candidate assignment to this applier station. Requires Master Passkey to reassign candidate profile or switch tracks.
-              </p>
+        <!-- Station & Candidate Assignment Hub -->
+        <div class="card station-hub-card" id="station-hub-card">
+          <div class="station-hub-header">
+            <div class="station-meta">
+              <div class="station-icon-wrap" id="station-icon-wrap">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+                  <line x1="8" y1="21" x2="16" y2="21"/>
+                  <line x1="12" y1="17" x2="12" y2="21"/>
+                </svg>
+              </div>
+              <div class="station-info">
+                <div class="station-title-row">
+                  <span class="station-seat-label">Workstation Seat:</span>
+                  <span class="station-seat-name" id="station-seat-display">Applier-Primary</span>
+                  <button type="button" class="btn-text-edit" id="btn-edit-station-name" title="Rename this station seat">✏️</button>
+                </div>
+                <p class="station-desc">Dedicated candidate assignment for this browser profile. Prevents accidental profile switching during live application runs.</p>
+              </div>
             </div>
-            <span class="badge-status" id="admin-lock-status-badge">🔒 Locked</span>
-          </div>
-
-          <div class="grid-3">
-            <div class="form-group">
-              <label for="admin-passkey-setting">Admin Master Passkey / Token *</label>
-              <input type="password" id="admin-passkey-setting" placeholder="1234567890" />
-              <span class="hint">Passkey required to switch profiles in HUD.</span>
-            </div>
-
-            <div class="form-group">
-              <label for="admin-active-assignment">Assigned Candidate Profile</label>
-              <select id="admin-active-assignment" class="custom-input"></select>
-              <span class="hint">Active profile locked for this applier.</span>
-            </div>
-
-            <div class="form-group">
-              <label for="admin-active-stack">Assigned Stack Track</label>
-              <select id="admin-active-stack" class="custom-input">
-                <option value="dotnet">Full Stack C# / .NET Track</option>
-                <option value="python">Full Stack Python / FastAPI Track</option>
-                <option value="php">Full Stack PHP / Laravel Track</option>
-                <option value="auto">Auto-Detect Stack per Job</option>
-              </select>
-              <span class="hint">Tech stack track preference.</span>
+            
+            <div class="station-actions-wrap">
+              <span class="station-lock-badge locked" id="admin-lock-status-badge">
+                <span class="lock-dot"></span>
+                <span class="lock-text">🔒 Station Locked</span>
+              </span>
+              <button type="button" class="btn btn-lock-toggle" id="btn-toggle-station-lock">
+                <span class="btn-lock-icon">🔑</span>
+                <span class="btn-lock-label">Unlock Station</span>
+              </button>
             </div>
           </div>
 
-          <div class="form-group toggle-group" style="margin-top:12px; margin-bottom:0;">
-            <label class="switch-label">
-              <input type="checkbox" id="profile-lock-toggle" checked />
-              <span class="switch-custom"></span>
-              <span><strong>Enforce Profile Lock</strong> (Disables unauthorized profile switcher in HUD/Popup)</span>
-            </label>
+          <!-- Active Assigned Candidate Hero Showcase -->
+          <div class="active-candidate-hero" id="active-candidate-hero">
+            <div class="hero-avatar-col">
+              <div class="hero-avatar" id="hero-avatar">NM</div>
+              <div class="hero-status-dot"></div>
+            </div>
+
+            <div class="hero-details-col">
+              <div class="hero-name-row">
+                <h3 class="hero-name" id="hero-name">Nicholas Adam Myers</h3>
+                <span class="hero-tag-assigned">✓ Active on this Station</span>
+                <span class="hero-tag-method" id="hero-tailoring-indicator">📄 Base Method</span>
+                <span class="hero-lock-indicator" id="hero-lock-indicator" title="Station assignment locked">🔒 Protected</span>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-edit-active-hero-candidate" style="margin-left:auto;">✏️ Edit Profile</button>
+              </div>
+              <div class="hero-meta-row">
+                <span class="hero-email" id="hero-email">nicholas.myers.dev@gmail.com</span>
+                <span class="hero-dot">·</span>
+                <span class="hero-role" id="hero-role">Full Stack C# / .NET</span>
+                <span class="hero-dot">·</span>
+                <span class="hero-salary" id="hero-salary">$120,000/yr floor</span>
+              </div>
+            </div>
+
+            <div class="hero-controls-col">
+              <div class="track-select-box">
+                <label for="admin-active-stack">Assigned Stack Track</label>
+                <select id="admin-active-stack" class="custom-input station-input">
+                  <option value="dotnet">Full Stack C# / .NET Track</option>
+                  <option value="python">Full Stack Python / FastAPI Track</option>
+                  <option value="php">Full Stack PHP / Laravel Track</option>
+                  <option value="auto">Auto-Detect Stack per Job</option>
+                </select>
+                <span class="track-hint" id="track-lock-hint">🔒 Track locked by station policy</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Locked State Notice Banner -->
+          <div class="station-notice-banner locked-banner" id="station-locked-banner">
+            <span class="banner-icon">🛡️</span>
+            <div class="banner-text">
+              <strong>Workstation Locked:</strong> This browser session is locked to <span id="locked-candidate-name">Nicholas Adam Myers</span>. Appliers cannot switch candidate identities or modify core credentials during application runs without master passkey authentication.
+            </div>
+          </div>
+
+          <!-- Unlocked (Admin Mode) Management Controls -->
+          <div class="station-admin-panel" id="station-admin-panel" style="display:none;">
+            <div class="admin-panel-head">
+              <span class="admin-shield-icon">⚙️</span>
+              <div class="admin-panel-titles">
+                <h4>Administrator Station Management</h4>
+                <p>Assign a new candidate to this seat or configure master passkey credentials.</p>
+              </div>
+              <div class="admin-quick-actions">
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-open-passkey-modal">🔑 Change Admin Passkey</button>
+              </div>
+            </div>
+
+            <div class="grid-2" style="margin-top: 14px;">
+              <div class="form-group">
+                <label for="admin-active-assignment">Reassign Station Candidate Profile</label>
+                <select id="admin-active-assignment" class="custom-input station-input"></select>
+                <span class="hint">Selecting a profile immediately reassigns this workstation seat.</span>
+              </div>
+              <div class="form-group">
+                <label for="station-seat-input">Workstation Seat / Applier Identifier</label>
+                <input type="text" id="station-seat-input" class="custom-input station-input" placeholder="e.g. Seat #1 (Nicholas)" />
+                <span class="hint">Recorded in Apply-Flow audit logs for every submission from this machine.</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Hidden inputs to maintain 100% backward compatibility with form scripts -->
+          <input type="password" id="admin-passkey-setting" style="display:none;" />
+          <input type="checkbox" id="profile-lock-toggle" style="display:none;" />
+        </div>
+
+        <!-- All Candidate Profiles Directory -->
+        <div class="candidate-directory-container" id="candidate-directory-container">
+          <div class="candidate-toolbar">
+            <div class="toolbar-heading">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <h3>Candidate Profiles Directory</h3>
+                <span class="counter-chip" id="candidate-count-chip">0 Profiles</span>
+              </div>
+              <p class="toolbar-sub">Search, assign, or edit candidate profiles in your database.</p>
+            </div>
+
+            <div class="toolbar-actions">
+              <button class="btn btn-secondary btn-sm" id="sync-defaults-btn" title="Refresh default candidate profiles with verified standards">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
+                <span>Sync Defaults</span>
+              </button>
+              <button class="btn btn-secondary btn-sm" id="export-profiles-btn" title="Export all candidate profiles as profiles.json">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                <span>Export</span>
+              </button>
+              <button class="btn btn-secondary btn-sm" id="import-profiles-btn" title="Import candidate profiles from JSON">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                <span>Import</span>
+              </button>
+              <input type="file" id="import-profiles-file" accept=".json" style="display:none;" />
+              <button class="btn btn-ai btn-sm" id="build-from-resume-btn">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                <span>Parse Resume</span>
+              </button>
+              <button class="btn btn-primary btn-sm" id="add-candidate-btn">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                <span>Add Profile</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Directory Search & Space-Efficient Filter Bar -->
+          <div class="directory-filter-bar">
+            <div class="directory-search">
+              <span class="search-icon">🔍</span>
+              <input type="text" id="candidate-search-input" placeholder="Search profiles by name, email, stack keywords..." />
+            </div>
+            <div class="directory-chips-group">
+              <div class="directory-chips" id="directory-status-chips">
+                <button type="button" class="chip-filter active" data-status="active">Active (<span id="count-active-chip">0</span>)</button>
+                <button type="button" class="chip-filter" data-status="archived">Archived (<span id="count-archived-chip">0</span>)</button>
+                <button type="button" class="chip-filter" data-status="all">All Profiles</button>
+              </div>
+              <div class="directory-chips" id="directory-stack-chips">
+                <button type="button" class="chip-filter active" data-stack="all">All Stacks</button>
+                <button type="button" class="chip-filter" data-stack="dotnet">.NET / C#</button>
+                <button type="button" class="chip-filter" data-stack="python">Python</button>
+                <button type="button" class="chip-filter" data-stack="php">PHP</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Space-Managed Candidate Directory (Compact Row Table) -->
+          <div class="candidate-directory-box">
+            <div class="candidates-table-wrap">
+              <table class="candidates-table">
+                <thead>
+                  <tr>
+                    <th>Candidate</th>
+                    <th>Target Stack</th>
+                    <th>Salary Floor</th>
+                    <th>Custom Q&A</th>
+                    <th>Station Status</th>
+                    <th style="text-align:right;">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="candidates-table-tbody">
+                  <!-- Dynamically populated candidate profile rows -->
+                </tbody>
+              </table>
+            </div>
+            <!-- Empty search notice -->
+            <div id="directory-empty-msg" class="directory-empty" style="display:none;">
+              <span>No candidate profiles match this search or filter.</span>
+            </div>
           </div>
         </div>
 
-        <div class="section-actions">
-          <div class="section-heading">
-            <h3>Candidate Records Database</h3>
-            <span class="counter-chip" id="candidate-count-chip">0 Profiles</span>
-          </div>
-          <div style="display:flex; gap:8px; flex-wrap:wrap;">
-            <button class="btn btn-secondary" id="sync-defaults-btn" title="Refresh default candidate profiles with verified standard details (e.g. Nicholas Adam Myers Python Track & Notre Dame)">🔄 Sync Standards</button>
-            <button class="btn btn-accent" id="build-from-resume-btn" style="background: linear-gradient(135deg, #3b82f6, #8b5cf6); color: #fff; font-weight: 600; border:none; box-shadow: 0 2px 8px rgba(59, 130, 246, 0.35);">⚡ Auto-Build Profile from Resume</button>
-            <button class="btn btn-primary" id="add-candidate-btn">+ Add Blank Profile</button>
-          </div>
-        </div>
-
-        <div class="candidates-grid" id="candidates-grid">
-          <!-- Dynamically populated candidate profile cards -->
-        </div>
+        <!-- Hidden legacy candidates grid for fallback -->
+        <div id="candidates-grid" style="display:none;"></div>
       </section>
 
       <!-- TAB 2: Webhooks & Endpoints -->
       <section class="tab-pane" id="tab-webhooks">
         <div class="card form-card">
-          <div class="section-actions" style="margin-bottom: 12px;">
+          <div class="section-actions" style="margin-bottom: 16px;">
             <div>
               <h3>Configured Webhook Endpoints</h3>
-              <p class="card-desc">When an application passes validation and submits, the payload is immediately broadcast to all active webhooks.</p>
+              <p class="card-desc">When an application passes quality validation, submission payloads and screenshots are broadcast to active endpoints.</p>
             </div>
-            <button class="btn btn-primary" id="add-webhook-btn">+ Add Webhook Endpoint</button>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-secondary" id="save-default-webhooks-btn" title="Set current webhooks as default for all appliers">
+                <span>⭐ Set as Default API</span>
+              </button>
+              <button class="btn btn-primary" id="add-webhook-btn">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                <span>Add Webhook Endpoint</span>
+              </button>
+            </div>
           </div>
 
           <div class="webhooks-list" id="webhooks-list">
@@ -149,28 +332,28 @@
 
           <hr class="card-divider" />
 
-          <h3>Global Applier & Live Typing Stream</h3>
-          <div class="grid-2">
+          <h3>Global Applier & Live Stream</h3>
+          <div class="grid-2" style="margin-top: 14px;">
             <div class="form-group">
-              <label for="applier-id">Applier Identifier / Name</label>
+              <label for="applier-id">Applier Identifier / Station Name</label>
               <input type="text" id="applier-id" placeholder="Applier-Primary" />
-              <span class="hint">Identifies which team member submitted this application in audit logs.</span>
+              <span class="hint">Identifies which team member submitted each application in audit logs.</span>
             </div>
 
             <div class="form-group toggle-group" style="padding-top:24px;">
               <label class="switch-label">
                 <input type="checkbox" id="stream-live-toggle" checked />
                 <span class="switch-custom"></span>
-                <span><strong>Stream Live Typing Events</strong> (Sends live DOM snapshots as candidate fields are filled)</span>
+                <span><strong>Stream Live Typing Events</strong> (Broadcase DOM fill events in real time)</span>
               </label>
             </div>
           </div>
 
-          <div class="form-group toggle-group" style="margin-top:8px;">
+          <div class="form-group toggle-group" style="margin-top:10px;">
             <label class="switch-label">
               <input type="checkbox" id="mock-backend-toggle" checked />
               <span class="switch-custom"></span>
-              <span><strong>Simulate Backend if Offline</strong> (Safely stores logs locally without throwing network errors if backend is starting up)</span>
+              <span><strong>Simulate Backend if Offline</strong> (Safely stores logs locally without throwing network errors if server is restarting)</span>
             </label>
           </div>
         </div>
@@ -182,7 +365,7 @@
           <h3>Gatekeeper Sensitivity & Enforcement Policy</h3>
           <p class="card-desc">Configure the strictness of quality validation checks before final submission.</p>
 
-          <div class="grid-2">
+          <div class="grid-2" style="margin-top: 16px;">
             <div class="form-group">
               <label for="default-mode">Default Interception Mode</label>
               <select id="default-mode" class="custom-input">
@@ -199,7 +382,7 @@
             </div>
           </div>
 
-          <div class="grid-2">
+          <div class="grid-2" style="margin-top: 10px;">
             <div class="form-group">
               <label for="duplicate-days">Duplicate Submission Warning Window (Days)</label>
               <input type="number" id="duplicate-days" min="1" max="90" value="14" />
@@ -221,7 +404,7 @@
           <h3>⚡ Automation & Form Pre-Filling ("Automate Everything Else")</h3>
           <p class="card-desc">Control automated form completion and human verification / CAPTCHA assistance.</p>
 
-          <div class="form-group toggle-group">
+          <div class="form-group toggle-group" style="margin-top: 16px;">
             <label class="switch-label">
               <input type="checkbox" id="auto-autofill-toggle" checked />
               <span class="switch-custom"></span>
@@ -268,7 +451,10 @@
       <!-- TAB 4: History & Audit Log -->
       <section class="tab-pane" id="tab-history">
         <div class="history-controls">
-          <input type="text" id="history-search" placeholder="Search by Candidate, Company, Job Title, or Status..." class="search-input" />
+          <div class="search-wrap">
+            <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+            <input type="text" id="history-search" placeholder="Search by Candidate, Company, Job Title, or Status..." class="search-input" />
+          </div>
           <div class="history-btn-group">
             <button class="btn btn-secondary" id="export-json-btn">📥 Export JSON</button>
             <button class="btn btn-secondary" id="export-csv-btn">📊 Export CSV</button>
@@ -303,24 +489,47 @@
     <div class="modal-box modal-xl">
       <div class="modal-header">
         <div class="modal-header-title-area">
-          <div class="modal-header-icon">👤</div>
+          <div class="modal-header-icon" id="modal-candidate-avatar">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          </div>
           <div>
-            <h2 id="profile-modal-title">Candidate Profile & Resume Command Center</h2>
-            <p class="modal-subtitle">Auto-ingest PDF / Word DOCX resumes, manage contact, technical stack, EEOC compliance, and custom questions.</p>
+            <h2 id="profile-modal-title">Candidate Profile & Resume Hub</h2>
+            <p class="modal-subtitle">Auto-ingest PDF / Word DOCX resumes, manage contact identity, tech stacks, EEOC compliance, and custom questions.</p>
           </div>
         </div>
-        <button class="close-btn" id="close-profile-modal">✕</button>
+        <button class="close-btn" id="close-profile-modal" title="Close (Esc)">✕</button>
       </div>
 
-      <!-- Profile Modal Segmented Pill Tab Bar -->
+      <!-- Profile Modal Segmented Tab Bar -->
       <div class="modal-tab-bar">
-        <button class="modal-tab-btn hero-tab active" data-ptab="p-ingest"><span>📄</span> Ingest Resume (PDF / DOCX / Text)</button>
-        <button class="modal-tab-btn" data-ptab="p-contact"><span>👤</span> Identity & Contact</button>
-        <button class="modal-tab-btn" data-ptab="p-stack"><span>💻</span> Tech Stack & Skills</button>
-        <button class="modal-tab-btn" data-ptab="p-edu"><span>🎓</span> Education & Background</button>
-        <button class="modal-tab-btn" data-ptab="p-compliance"><span>🛂</span> Work Auth & EEOC</button>
-        <button class="modal-tab-btn" data-ptab="p-comp"><span>💰</span> Compensation & Terms</button>
-        <button class="modal-tab-btn" data-ptab="p-custom"><span>⚡</span> Custom Questions</button>
+        <button class="modal-tab-btn hero-tab active" data-ptab="p-ingest">
+          <span class="tab-icon">✨</span>
+          <span>Auto-Ingest Resume</span>
+        </button>
+        <button class="modal-tab-btn" data-ptab="p-contact">
+          <span class="tab-icon">👤</span>
+          <span>Identity & Contact</span>
+        </button>
+        <button class="modal-tab-btn" data-ptab="p-stack">
+          <span class="tab-icon">💻</span>
+          <span>Tech Stack & Skills</span>
+        </button>
+        <button class="modal-tab-btn" data-ptab="p-edu">
+          <span class="tab-icon">🎓</span>
+          <span>Education & History</span>
+        </button>
+        <button class="modal-tab-btn" data-ptab="p-compliance">
+          <span class="tab-icon">🛂</span>
+          <span>Work Auth & EEOC</span>
+        </button>
+        <button class="modal-tab-btn" data-ptab="p-comp">
+          <span class="tab-icon">💰</span>
+          <span>Compensation & Terms</span>
+        </button>
+        <button class="modal-tab-btn" data-ptab="p-custom">
+          <span class="tab-icon">⚡</span>
+          <span>Custom Q&A Bank</span>
+        </button>
       </div>
 
       <div class="modal-body">
@@ -329,359 +538,538 @@
         <!-- 0. Ingest Resume Hero Tab (PDF / DOCX / Spreadsheet / Text) -->
         <div class="modal-ptab active" id="ptab-p-ingest">
           <div class="resume-dropzone-hero" id="resume-dropzone">
+            <div class="dropzone-pulse-glow"></div>
             <div class="dropzone-icon-group">
-              <span>📄</span>
-              <span>📝</span>
-              <span>📊</span>
+              <div class="dropzone-icon-badge">
+                <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="12" y2="12"/><line x1="15" y1="15" x2="12" y2="12"/>
+                </svg>
+              </div>
             </div>
-            <h3 class="dropzone-title">Drag & Drop Resume File (.pdf, .docx, .txt)</h3>
-            <p class="dropzone-desc">Upload a PDF or Word document, or copy-paste candidate rows directly from Excel / Google Sheets to auto-extract identity, experiences, credentials, education, and technical stack skills.</p>
+            <h3 class="dropzone-title">Drop Resume File Here to Auto-Extract Candidate Details</h3>
+            <p class="dropzone-desc">Drag and drop a <strong>.PDF</strong>, <strong>.DOCX</strong>, or <strong>.TXT</strong> document, or click browse. The gatekeeper automatically identifies candidate name, contact, technical stack, graduation dates, and work history.</p>
+            
+            <div class="dropzone-formats">
+              <span class="format-pill">PDF Document</span>
+              <span class="format-pill">Word DOCX</span>
+              <span class="format-pill">Markdown / Text</span>
+              <span class="format-pill">Clipboard Row</span>
+            </div>
+
             <div class="dropzone-actions">
               <input type="file" id="modal-resume-file" accept=".pdf,.docx,.doc,.txt,.md,.json,.csv,.rtf" style="display:none;" />
-              <button type="button" class="btn btn-primary" id="btn-modal-browse-file" style="background: linear-gradient(135deg, #3b82f6, #6366f1);">📁 Browse PDF / DOCX File</button>
-              <button type="button" class="btn btn-secondary" id="btn-modal-paste-clip">📋 Paste from Clipboard</button>
-              <button type="button" class="btn btn-secondary" id="btn-modal-parse-now">⚡ Parse Text Below</button>
+              <button type="button" class="btn btn-primary" id="btn-modal-browse-file">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                <span>Browse Document File</span>
+              </button>
+              <button type="button" class="btn btn-secondary" id="btn-modal-paste-clip">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                <span>Paste from Clipboard</span>
+              </button>
+              <button type="button" class="btn btn-secondary" id="btn-modal-parse-now">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                <span>Parse Raw Text</span>
+              </button>
             </div>
           </div>
 
           <!-- Real-Time Extracted Details HUD Card -->
           <div class="extracted-hud-card" id="extracted-hud-card" style="display:none;">
             <div class="extracted-hud-header">
-              <span class="extracted-hud-title"><span>✨</span> Real-Time Auto-Extracted Profile Details:</span>
-              <span style="font-size:11px; color:#94a3b8;">All tabs below have been populated automatically</span>
+              <div class="extracted-hud-title">
+                <span class="hud-sparkle">✨</span>
+                <span>Auto-Extracted Candidate Entities & Skills:</span>
+              </div>
+              <span class="extracted-hud-meta">All form fields have been populated automatically</span>
             </div>
             <div class="extracted-tags-cloud" id="extracted-tags-cloud"></div>
           </div>
 
-          <div class="form-group" style="margin-top:16px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-              <label for="profile-resume-parser-input" style="font-weight:600; color:#cbd5e1;">Raw Resume & Ingestion Source Text</label>
-              <span style="font-size:11px; color:#64748b;">Editable base text saved to candidate record</span>
+          <!-- Source Resume Raw Text Box -->
+          <div class="editor-section">
+            <div class="editor-section-header">
+              <div>
+                <label for="profile-resume-parser-input">Raw Ingestion Source Text</label>
+                <p class="editor-hint">Raw text extracted from candidate resume document. Saved as candidate base resume.</p>
+              </div>
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-goto-identity">
+                <span>Review Identity & Stack Tabs →</span>
+              </button>
             </div>
-            <textarea id="profile-resume-parser-input" style="width:100%; height:160px; background:rgba(15, 23, 42, 0.9); border:1px solid rgba(255,255,255,0.15); border-radius:8px; color:#fff; font-size:12px; font-family:monospace; padding:10px 12px; resize:vertical; line-height:1.5;" placeholder="Paste resume text or spreadsheet row here (e.g. Nicholas Adam Myers, adam.r.myers02@gmail.com, University of Notre Dame, Python, FastAPI, Password qweQWE123!@#...)..."></textarea>
-          </div>
-
-          <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:14px;">
-            <button type="button" class="btn btn-primary" id="btn-goto-identity" style="background: linear-gradient(135deg, #4f46e5, #3b82f6);">Review Identity & Stack Tabs →</button>
+            <textarea id="profile-resume-parser-input" class="raw-resume-textarea" placeholder="Paste full resume text or spreadsheet row here (e.g. Nicholas Adam Myers, adam.r.myers02@gmail.com, Python, FastAPI, React, PostgreSQL)..."></textarea>
           </div>
         </div>
 
         <!-- 1. Identity & Contact -->
         <div class="modal-ptab" id="ptab-p-contact">
-          <div class="grid-2">
-            <div class="form-group">
-              <label for="edit-full-name">Full Name *</label>
-              <input type="text" id="edit-full-name" required placeholder="Nicholas Adam Myers" />
+          <div class="subcard">
+            <div class="subcard-header">
+              <span class="subcard-icon">🪪</span>
+              <div>
+                <h4>Legal Identity</h4>
+                <p>Primary name records used for applicant tracking identity verification.</p>
+              </div>
             </div>
-            <div class="form-group">
-              <label for="edit-primary-email">Primary Email *</label>
-              <input type="email" id="edit-primary-email" required placeholder="adam.r.myers02@gmail.com" />
+            <div class="grid-2" style="margin-bottom: 14px;">
+              <div class="form-group">
+                <label for="edit-is-archived">Candidate Profile Status</label>
+                <select id="edit-is-archived" class="custom-input">
+                  <option value="false">Active Profile (Available for live station assignment)</option>
+                  <option value="true">Archived Profile (Preserved history, hidden from active rotation)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="edit-tailoring-mode">Resume Application Method</label>
+                <select id="edit-tailoring-mode" class="custom-input">
+                  <option value="base">📄 Base Method (Standard Verified Resume — Fixed for all jobs)</option>
+                  <option value="tailored">✨ Tailoring Method (Dynamic Per-Job Tailoring Required)</option>
+                </select>
+              </div>
+            </div>
+            <div class="grid-2">
+              <div class="form-group">
+                <label for="edit-full-name">Full Legal Name *</label>
+                <input type="text" id="edit-full-name" required placeholder="Nicholas Adam Myers" />
+              </div>
+              <div class="form-group">
+                <label for="edit-preferred-name">Preferred / Display Name</label>
+                <input type="text" id="edit-preferred-name" placeholder="Adam Myers" />
+              </div>
+            </div>
+            <div class="grid-2">
+              <div class="form-group">
+                <label for="edit-first-name">Legal First Name</label>
+                <input type="text" id="edit-first-name" placeholder="Nicholas" />
+              </div>
+              <div class="form-group">
+                <label for="edit-last-name">Legal Last Name</label>
+                <input type="text" id="edit-last-name" placeholder="Myers" />
+              </div>
             </div>
           </div>
 
-          <div class="grid-3">
-            <div class="form-group">
-              <label for="edit-first-name">Legal First Name</label>
-              <input type="text" id="edit-first-name" placeholder="Nicholas" />
+          <div class="subcard" style="margin-top: 16px;">
+            <div class="subcard-header">
+              <span class="subcard-icon">📧</span>
+              <div>
+                <h4>Contact & Communication</h4>
+                <p>Direct communication channels and verified applicant aliases.</p>
+              </div>
             </div>
-            <div class="form-group">
-              <label for="edit-last-name">Legal Last Name</label>
-              <input type="text" id="edit-last-name" placeholder="Myers" />
+            <div class="grid-2">
+              <div class="form-group">
+                <label for="edit-primary-email">Primary Application Email *</label>
+                <input type="email" id="edit-primary-email" required placeholder="adam.r.myers02@gmail.com" />
+              </div>
+              <div class="form-group">
+                <label for="edit-phone">Phone / Mobile Number</label>
+                <input type="text" id="edit-phone" placeholder="6452417687" />
+              </div>
             </div>
-            <div class="form-group">
-              <label for="edit-preferred-name">Preferred / Display Name</label>
-              <input type="text" id="edit-preferred-name" placeholder="Adam Myers" />
-            </div>
-          </div>
 
-          <div class="grid-3">
-            <div class="form-group">
-              <label for="edit-phone">Phone / Mobile</label>
-              <input type="text" id="edit-phone" placeholder="6452417687" />
-            </div>
-            <div class="form-group">
-              <label for="edit-hiring-password">Hiring Portal Password</label>
-              <input type="text" id="edit-hiring-password" placeholder="qweQWE123!@#" />
-              <span class="hint">Pre-fills account creation forms.</span>
-            </div>
-            <div class="form-group">
-              <label for="edit-dob">Date of Birth (MM/DD/YYYY)</label>
-              <input type="text" id="edit-dob" placeholder="08/18/1988" />
-            </div>
-          </div>
-
-          <div class="grid-2">
             <div class="form-group">
               <label for="edit-email-aliases">Verified Email Aliases (comma-separated)</label>
               <input type="text" id="edit-email-aliases" placeholder="adam.r.myers02@gmail.com, adams.myers@techcraft.dev" />
+              <span class="hint">The gatekeeper accepts submissions from any verified alias registered here.</span>
             </div>
-            <div class="form-group">
-              <label for="edit-grad-date">College Graduation Date</label>
-              <input type="text" id="edit-grad-date" placeholder="5/18/2011" />
+
+            <div class="grid-2">
+              <div class="form-group">
+                <label for="edit-dob">Date of Birth (MM/DD/YYYY)</label>
+                <input type="text" id="edit-dob" placeholder="08/18/1988" />
+              </div>
+              <div class="form-group">
+                <label for="edit-grad-date">College Graduation Date (MM/DD/YYYY)</label>
+                <input type="text" id="edit-grad-date" placeholder="05/18/2011" />
+              </div>
             </div>
           </div>
 
-          <div class="grid-2">
-            <div class="form-group">
-              <label for="edit-address">Street Address</label>
-              <input type="text" id="edit-address" placeholder="3780 Northwest 22nd Avenue" />
+          <div class="subcard" style="margin-top: 16px;">
+            <div class="subcard-header">
+              <span class="subcard-icon">📍</span>
+              <div>
+                <h4>Address & Social Profiles</h4>
+                <p>Location residency and public portfolio links.</p>
+              </div>
             </div>
-            <div class="form-group">
-              <label for="edit-city">City</label>
-              <input type="text" id="edit-city" placeholder="Miami" />
+            <div class="grid-2">
+              <div class="form-group">
+                <label for="edit-address">Street Address</label>
+                <input type="text" id="edit-address" placeholder="3780 Northwest 22nd Avenue" />
+              </div>
+              <div class="form-group">
+                <label for="edit-city">City</label>
+                <input type="text" id="edit-city" placeholder="Miami" />
+              </div>
+            </div>
+
+            <div class="grid-3">
+              <div class="form-group">
+                <label for="edit-state">State / Province</label>
+                <input type="text" id="edit-state" placeholder="Florida" />
+              </div>
+              <div class="form-group">
+                <label for="edit-zip">Zip / Postal Code</label>
+                <input type="text" id="edit-zip" placeholder="33142" />
+              </div>
+              <div class="form-group">
+                <label for="edit-country">Country</label>
+                <input type="text" id="edit-country" placeholder="United States" />
+              </div>
+            </div>
+
+            <div class="grid-2">
+              <div class="form-group">
+                <label for="edit-linkedin">LinkedIn Profile URL</label>
+                <input type="text" id="edit-linkedin" placeholder="linkedin.com/in/adam-myers-6ab405428" />
+              </div>
+              <div class="form-group">
+                <label for="edit-github">GitHub / Portfolio URL</label>
+                <input type="text" id="edit-github" placeholder="github.com/adam-myers-dev" />
+              </div>
             </div>
           </div>
 
-          <div class="grid-3">
-            <div class="form-group">
-              <label for="edit-state">State / Province</label>
-              <input type="text" id="edit-state" placeholder="Florida" />
+          <div class="subcard" style="margin-top: 16px;">
+            <div class="subcard-header">
+              <span class="subcard-icon">🔑</span>
+              <div>
+                <h4>Hiring Portal Credentials</h4>
+                <p>Used to automatically complete applicant account creation forms.</p>
+              </div>
             </div>
             <div class="form-group">
-              <label for="edit-zip">Zip / Postal Code</label>
-              <input type="text" id="edit-zip" placeholder="33142" />
-            </div>
-            <div class="form-group">
-              <label for="edit-country">Country</label>
-              <input type="text" id="edit-country" placeholder="United States" />
-            </div>
-          </div>
-
-          <div class="grid-2">
-            <div class="form-group">
-              <label for="edit-linkedin">LinkedIn Profile URL</label>
-              <input type="text" id="edit-linkedin" placeholder="linkedin.com/in/adam-myers-6ab405428" />
-            </div>
-            <div class="form-group">
-              <label for="edit-github">GitHub / Portfolio URL</label>
-              <input type="text" id="edit-github" placeholder="github.com/adam-myers-dev" />
+              <label for="edit-hiring-password">Default Portal Password</label>
+              <input type="text" id="edit-hiring-password" placeholder="qweQWE123!@#" />
+              <span class="hint">Pre-fills account creation password inputs on Workday, Taleo, iCIMS, and Greenhouse portals.</span>
             </div>
           </div>
         </div>
 
         <!-- 2. Tech Stack & Skills -->
         <div class="modal-ptab" id="ptab-p-stack">
-          <div class="grid-2">
+          <div class="subcard">
+            <div class="subcard-header">
+              <span class="subcard-icon">🚀</span>
+              <div>
+                <h4>Target Stack Role & Experience</h4>
+                <p>Primary job title focus and engineering experience depth.</p>
+              </div>
+            </div>
+            <div class="grid-2">
+              <div class="form-group">
+                <label for="edit-target-stack">Target Tech Stack Role</label>
+                <input type="text" id="edit-target-stack" placeholder="Full Stack Python / AI / Cloud" />
+              </div>
+              <div class="form-group">
+                <label for="edit-years-exp">Years of Professional Experience</label>
+                <input type="text" id="edit-years-exp" placeholder="8+ years" />
+              </div>
+            </div>
+
             <div class="form-group">
-              <label for="edit-target-stack">Target Tech Stack Role</label>
-              <input type="text" id="edit-target-stack" placeholder="Full Stack Python / AI / Cloud" />
+              <label for="edit-stack-keywords">Primary Stack Keywords (comma-separated)</label>
+              <input type="text" id="edit-stack-keywords" placeholder="python, django, fastapi, aws, postgresql, react, typescript, docker" />
+              <span class="hint">Keywords used by the validator to check job postings against candidate capabilities.</span>
+            </div>
+          </div>
+
+          <div class="subcard" style="margin-top: 16px;">
+            <div class="subcard-header" style="display:flex; justify-content:space-between; align-items:center;">
+              <div style="display:flex; align-items:center; gap:10px;">
+                <span class="subcard-icon">🛠️</span>
+                <div>
+                  <h4>Engineering Frameworks & Tools</h4>
+                  <p>Languages, frontend libraries, and cloud architecture.</p>
+                </div>
+              </div>
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-reextract-skills" title="Re-extract and infer all technical skills from candidate resume">
+                <span>⚡ Re-Extract & Infer Skills</span>
+              </button>
             </div>
             <div class="form-group">
-              <label for="edit-years-exp">Years of Experience</label>
-              <input type="text" id="edit-years-exp" placeholder="8+ years" />
+              <label for="edit-backend-lang">Primary Backend Languages & Frameworks</label>
+              <input type="text" id="edit-backend-lang" placeholder="Python with FastAPI and Django, Node.js" />
+            </div>
+
+            <div class="form-group">
+              <label for="edit-frontend-lang">Primary Frontend Frameworks & Libraries</label>
+              <input type="text" id="edit-frontend-lang" placeholder="React, TypeScript, Next.js, Tailwind CSS" />
+            </div>
+
+            <div class="form-group">
+              <label for="edit-db-cloud">Databases & Cloud Infrastructure</label>
+              <input type="text" id="edit-db-cloud" placeholder="PostgreSQL (AWS RDS), Redis, Docker, Kubernetes, AWS (S3, Lambda, ECS)" />
             </div>
           </div>
 
-          <div class="form-group">
-            <label for="edit-stack-keywords">Stack Keywords (comma-separated)</label>
-            <input type="text" id="edit-stack-keywords" placeholder="python, django, fastapi, aws, postgresql, react, ai, machine learning" />
-            <span class="hint">Keywords used by the validator to match job postings to candidate resumes.</span>
-          </div>
-
-          <div class="form-group">
-            <label for="edit-backend-lang">Primary Backend Languages & Frameworks</label>
-            <input type="text" id="edit-backend-lang" placeholder="Python with FastAPI and Django" />
-          </div>
-
-          <div class="form-group">
-            <label for="edit-frontend-lang">Primary Frontend Frameworks & Libraries</label>
-            <input type="text" id="edit-frontend-lang" placeholder="React, TypeScript" />
-          </div>
-
-          <div class="form-group">
-            <label for="edit-db-cloud">Databases & Cloud Infrastructure</label>
-            <input type="text" id="edit-db-cloud" placeholder="PostgreSQL (including AWS RDS), Redis, Docker, AWS" />
-          </div>
-
-          <div class="form-group" style="margin-top:12px;">
-            <label for="edit-resume-text">Candidate Fixed Base Resume (Text / Markdown)</label>
-            <textarea id="edit-resume-text" style="height:120px; font-family:monospace; font-size:11.5px;" placeholder="Paste candidate full resume text / markdown here. For C# track, this fixed resume is stored once; for Python/PHP, appliers can tailor it per job directly from the HUD..."></textarea>
-            <span class="hint">Base resume text used for autofill and AI prompt tailoring (C# fixed base or Python/PHP base template).</span>
+          <div class="subcard" style="margin-top: 16px;">
+            <div class="subcard-header">
+              <span class="subcard-icon">📄</span>
+              <div>
+                <h4>Candidate Fixed Base Resume</h4>
+                <p>Stored markdown/plain-text resume used for autofilling form textareas and tailoring AI prompts.</p>
+              </div>
+            </div>
+            <div class="form-group">
+              <textarea id="edit-resume-text" class="resume-textarea" placeholder="Paste candidate full resume text / markdown here..."></textarea>
+              <span class="hint">Fixed base resume stored on candidate profile. For C#, this is fixed once; for Python/PHP, appliers can dynamically tailor it per job directly from the HUD.</span>
+            </div>
           </div>
         </div>
 
         <!-- 3. Education & Background -->
         <div class="modal-ptab" id="ptab-p-edu">
-          <div class="grid-3">
-            <div class="form-group">
-              <label for="edit-education-level">Highest Level of Education</label>
-              <select id="edit-education-level" class="custom-input">
-                <option value="Bachelor's Degree">Bachelor's Degree</option>
-                <option value="Master's Degree">Master's Degree</option>
-                <option value="Doctorate">Doctorate / Ph.D.</option>
-                <option value="Associate's Degree">Associate's Degree</option>
-                <option value="Some College">Some College</option>
-                <option value="High School Diploma / GED">High School Diploma / GED</option>
-              </select>
+          <div class="subcard">
+            <div class="subcard-header">
+              <span class="subcard-icon">🎓</span>
+              <div>
+                <h4>Academic Background</h4>
+                <p>Educational qualifications and institution credentials.</p>
+              </div>
             </div>
-            <div class="form-group">
-              <label for="edit-school">University / School Name</label>
-              <input type="text" id="edit-school" placeholder="University of Notre Dame" />
-            </div>
-            <div class="form-group">
-              <label for="edit-degree">Degree & Major / Field of Study</label>
-              <input type="text" id="edit-degree" placeholder="Bachelor of Science in Computer Science" />
+            <div class="grid-3">
+              <div class="form-group">
+                <label for="edit-education-level">Highest Degree Level</label>
+                <select id="edit-education-level" class="custom-input">
+                  <option value="Bachelor's Degree">Bachelor's Degree</option>
+                  <option value="Master's Degree">Master's Degree</option>
+                  <option value="Doctorate">Doctorate / Ph.D.</option>
+                  <option value="Associate's Degree">Associate's Degree</option>
+                  <option value="Some College">Some College</option>
+                  <option value="High School Diploma / GED">High School Diploma / GED</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="edit-school">University / School Name</label>
+                <input type="text" id="edit-school" placeholder="University of Notre Dame" />
+              </div>
+              <div class="form-group">
+                <label for="edit-degree">Degree & Major / Field of Study</label>
+                <input type="text" id="edit-degree" placeholder="Bachelor of Science in Computer Science" />
+              </div>
             </div>
           </div>
 
-          <div class="grid-2" style="margin-top:12px;">
-            <div class="form-group">
-              <label for="edit-former-employee">Former Employee / Affiliation?</label>
-              <select id="edit-former-employee" class="custom-input">
-                <option value="No">No (Never Worked for Company/Affiliate)</option>
-                <option value="Yes">Yes</option>
-              </select>
+          <div class="subcard" style="margin-top: 16px;">
+            <div class="subcard-header">
+              <span class="subcard-icon">🏢</span>
+              <div>
+                <h4>Company Affiliation & Referral</h4>
+                <p>Standard answers to employment history and referral questions.</p>
+              </div>
             </div>
-            <div class="form-group">
-              <label for="edit-how-heard">Default Referral Source</label>
-              <select id="edit-how-heard" class="custom-input">
-                <option value="LinkedIn">LinkedIn</option>
-                <option value="Job Board">Job Board / Indeed / Glassdoor</option>
-                <option value="Company Website">Company Career Website</option>
-                <option value="Other">Other</option>
-              </select>
+            <div class="grid-2">
+              <div class="form-group">
+                <label for="edit-former-employee">Former Employee / Affiliation?</label>
+                <select id="edit-former-employee" class="custom-input">
+                  <option value="No">No (Never Worked for Company/Affiliate)</option>
+                  <option value="Yes">Yes</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="edit-how-heard">Default Referral Source</label>
+                <select id="edit-how-heard" class="custom-input">
+                  <option value="LinkedIn">LinkedIn</option>
+                  <option value="Job Board">Job Board / Indeed / Glassdoor</option>
+                  <option value="Company Website">Company Career Website</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
             </div>
           </div>
         </div>
 
         <!-- 4. Work Auth & EEOC -->
         <div class="modal-ptab" id="ptab-p-compliance">
-          <div class="grid-2">
-            <div class="form-group">
-              <label for="edit-work-auth">Work Authorization Status</label>
-              <select id="edit-work-auth" class="custom-input">
-                <option value="US Citizen">US Citizen</option>
-                <option value="Green Card">Green Card / Permanent Resident</option>
-                <option value="EAD / OPT">EAD / OPT</option>
-                <option value="H-1B">H-1B Visa</option>
-                <option value="Other">Other</option>
-              </select>
+          <div class="subcard">
+            <div class="subcard-header">
+              <span class="subcard-icon">🛂</span>
+              <div>
+                <h4>Work Authorization & Clearances</h4>
+                <p>US employment eligibility and security clearances.</p>
+              </div>
             </div>
-            <div class="form-group">
-              <label for="edit-auth-us">Authorized to Work in US?</label>
-              <select id="edit-auth-us" class="custom-input">
-                <option value="Yes">Yes</option>
-                <option value="No">No</option>
-              </select>
+            <div class="grid-2">
+              <div class="form-group">
+                <label for="edit-work-auth">Work Authorization Status</label>
+                <select id="edit-work-auth" class="custom-input">
+                  <option value="US Citizen">US Citizen</option>
+                  <option value="Green Card">Green Card / Permanent Resident</option>
+                  <option value="EAD / OPT">EAD / OPT</option>
+                  <option value="H-1B">H-1B Visa</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="edit-auth-us">Authorized to Work in US?</label>
+                <select id="edit-auth-us" class="custom-input">
+                  <option value="Yes">Yes</option>
+                  <option value="No">No</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="grid-2">
+              <div class="form-group">
+                <label for="edit-requires-sponsorship">Requires Sponsorship?</label>
+                <select id="edit-requires-sponsorship" class="custom-input">
+                  <option value="No">No (Does Not Require Sponsorship)</option>
+                  <option value="Yes">Yes (Requires Sponsorship)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="edit-clearance">Security Clearance</label>
+                <select id="edit-clearance" class="custom-input">
+                  <option value="No">No / None</option>
+                  <option value="Yes">Yes (Active / Eligible)</option>
+                </select>
+              </div>
             </div>
           </div>
 
-          <div class="grid-2">
-            <div class="form-group">
-              <label for="edit-requires-sponsorship">Requires Sponsorship?</label>
-              <select id="edit-requires-sponsorship" class="custom-input">
-                <option value="No">No (Does Not Require)</option>
-                <option value="Yes">Yes (Requires Sponsorship)</option>
-              </select>
+          <div class="subcard" style="margin-top: 16px;">
+            <div class="subcard-header">
+              <span class="subcard-icon">📊</span>
+              <div>
+                <h4>EEOC Self-Identification Demographics</h4>
+                <p>Demographic self-identification responses used for federal compliance forms.</p>
+              </div>
             </div>
-            <div class="form-group">
-              <label for="edit-clearance">Security Clearance</label>
-              <select id="edit-clearance" class="custom-input">
-                <option value="No">No / None</option>
-                <option value="Yes">Yes (Active / Eligible)</option>
-              </select>
+            <div class="grid-3">
+              <div class="form-group">
+                <label for="edit-gender">Gender</label>
+                <select id="edit-gender" class="custom-input">
+                  <option value="Male">Male</option>
+                  <option value="Female">Female</option>
+                  <option value="I choose not to self-identify">Decline to State</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="edit-race">Race / Ethnicity</label>
+                <select id="edit-race" class="custom-input">
+                  <option value="Two or More Races">Two or More Races</option>
+                  <option value="White">White</option>
+                  <option value="Black or African American">Black or African American</option>
+                  <option value="Asian">Asian</option>
+                  <option value="Hispanic or Latino">Hispanic or Latino</option>
+                  <option value="Decline to identify">Decline to identify</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="edit-veteran">Veteran Status</label>
+                <select id="edit-veteran" class="custom-input">
+                  <option value="I am not a protected veteran">I am not a protected veteran</option>
+                  <option value="I identify as one or more protected veteran categories">Protected Veteran</option>
+                  <option value="I choose not to self-identify">Decline to identify</option>
+                </select>
+              </div>
             </div>
-          </div>
 
-          <div class="grid-3">
             <div class="form-group">
-              <label for="edit-gender">Gender</label>
-              <select id="edit-gender" class="custom-input">
-                <option value="Male">Male</option>
-                <option value="Female">Female</option>
-                <option value="I choose not to self-identify">Decline to State</option>
+              <label for="edit-disability">Disability Status</label>
+              <select id="edit-disability" class="custom-input">
+                <option value="No, I do not have a disability and have not had one in the past">No, I do not have a disability</option>
+                <option value="Yes, I have a disability, or have had one in the past">Yes, I have a disability</option>
+                <option value="I do not want to answer">Decline to state</option>
               </select>
             </div>
-            <div class="form-group">
-              <label for="edit-race">Race / Ethnicity</label>
-              <select id="edit-race" class="custom-input">
-                <option value="Two or More Races">Two or More Races</option>
-                <option value="White">White</option>
-                <option value="Black or African American">Black or African American</option>
-                <option value="Asian">Asian</option>
-                <option value="Hispanic or Latino">Hispanic or Latino</option>
-                <option value="Decline to identify">Decline to identify</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label for="edit-veteran">Veteran Status</label>
-              <select id="edit-veteran" class="custom-input">
-                <option value="I am not a protected veteran">I am not a protected veteran</option>
-                <option value="I identify as one or more protected veteran categories">Protected Veteran</option>
-                <option value="I choose not to self-identify">Decline to identify</option>
-              </select>
-            </div>
-          </div>
-
-          <div class="form-group">
-            <label for="edit-disability">Disability Status</label>
-            <select id="edit-disability" class="custom-input">
-              <option value="No, I do not have a disability and have not had one in the past">No, I do not have a disability</option>
-              <option value="Yes, I have a disability, or have had one in the past">Yes, I have a disability</option>
-              <option value="I do not want to answer">Decline to state</option>
-            </select>
           </div>
         </div>
 
         <!-- 5. Compensation & Terms -->
         <div class="modal-ptab" id="ptab-p-comp">
-          <div class="grid-2">
-            <div class="form-group">
-              <label for="edit-salary-floor">Salary Floor ($ / Year) *</label>
-              <input type="number" id="edit-salary-floor" required placeholder="120000" />
-              <span class="hint">Minimum acceptable rate. Lower entries trigger hard validation block.</span>
+          <div class="subcard">
+            <div class="subcard-header">
+              <span class="subcard-icon">💰</span>
+              <div>
+                <h4>Compensation Floors & Targets</h4>
+                <p>Enforced salary thresholds. Entering a lower rate triggers a gatekeeper validation block.</p>
+              </div>
             </div>
-            <div class="form-group">
-              <label for="edit-desired-salary">Desired Target Salary ($ / Year)</label>
-              <input type="number" id="edit-desired-salary" placeholder="130000" />
+            <div class="grid-2">
+              <div class="form-group">
+                <label for="edit-salary-floor">Minimum Salary Floor ($ / Year) *</label>
+                <div class="input-with-icon">
+                  <span class="input-icon">$</span>
+                  <input type="number" id="edit-salary-floor" required placeholder="120000" />
+                </div>
+                <span class="hint">Hard minimum. Applications offering less will be blocked.</span>
+              </div>
+              <div class="form-group">
+                <label for="edit-desired-salary">Desired Target Salary ($ / Year)</label>
+                <div class="input-with-icon">
+                  <span class="input-icon">$</span>
+                  <input type="number" id="edit-desired-salary" placeholder="130000" />
+                </div>
+                <span class="hint">Target rate entered when salary fields ask for expected compensation.</span>
+              </div>
             </div>
           </div>
 
-          <div class="grid-2">
-            <div class="form-group">
-              <label for="edit-availability">Availability to Start</label>
-              <input type="text" id="edit-availability" placeholder="Immediate / 2 weeks notice" />
+          <div class="subcard" style="margin-top: 16px;">
+            <div class="subcard-header">
+              <span class="subcard-icon">🚚</span>
+              <div>
+                <h4>Logistics & Availability</h4>
+                <p>Start date lead time and relocation willingness.</p>
+              </div>
             </div>
-            <div class="form-group">
-              <label for="edit-relocate">Willing to Relocate?</label>
-              <select id="edit-relocate" class="custom-input">
-                <option value="No">No</option>
-                <option value="Yes">Yes</option>
-              </select>
+            <div class="grid-2">
+              <div class="form-group">
+                <label for="edit-availability">Availability to Start</label>
+                <input type="text" id="edit-availability" placeholder="Immediate / 2 weeks notice" />
+              </div>
+              <div class="form-group">
+                <label for="edit-relocate">Willing to Relocate?</label>
+                <select id="edit-relocate" class="custom-input">
+                  <option value="No">No</option>
+                  <option value="Yes">Yes</option>
+                </select>
+              </div>
             </div>
           </div>
         </div>
 
-        <!-- 5. Dynamic Custom Fields & Q&A -->
+        <!-- 6. Dynamic Custom Fields & Q&A -->
         <div class="modal-ptab" id="ptab-p-custom">
-          <div class="custom-fields-header">
-            <div>
-              <h4 style="margin:0; color:#93c5fd;">⚡ Extensible Portal Q&A & Custom Fields</h4>
-              <p class="card-desc" style="margin:2px 0 0 0;">Add new question prompts and values here. The form restorer will automatically match and fill any new questions asked by ATS portals!</p>
+          <div class="custom-fields-card">
+            <div class="custom-fields-header">
+              <div>
+                <h4 style="margin:0; font-size:15px; font-weight:700; color:#fff;">Extensible Portal Q&A Bank</h4>
+                <p class="card-desc" style="margin:3px 0 0 0;">Add custom question prompts and standard answers. The gatekeeper matches new ATS form prompts against this bank automatically.</p>
+              </div>
+              <button type="button" class="btn btn-secondary btn-sm" id="add-custom-field-btn">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                <span>Add Question</span>
+              </button>
             </div>
-            <button class="btn btn-secondary btn-sm" id="add-custom-field-btn">+ Add Custom Field</button>
-          </div>
 
-          <div class="custom-fields-table-container">
-            <table class="custom-fields-table">
-              <thead>
-                <tr>
-                  <th style="width: 48%;">Question Prompt / Field Label</th>
-                  <th style="width: 44%;">Answer / Value to Fill</th>
-                  <th style="width: 8%;"></th>
-                </tr>
-              </thead>
-              <tbody id="custom-fields-tbody">
-                <!-- Dynamically populated custom field rows -->
-              </tbody>
-            </table>
+            <div class="custom-fields-table-container">
+              <table class="custom-fields-table">
+                <thead>
+                  <tr>
+                    <th style="width: 46%;">Question Prompt / Field Label</th>
+                    <th style="width: 46%;">Answer / Value to Auto-Fill</th>
+                    <th style="width: 8%; text-align:center;">Action</th>
+                  </tr>
+                </thead>
+                <tbody id="custom-fields-tbody">
+                  <!-- Dynamically populated custom field rows -->
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>
 
       <div class="modal-footer">
         <button class="btn btn-secondary" id="cancel-profile-btn">Cancel</button>
-        <button class="btn btn-primary" id="save-profile-btn">💾 Save Candidate Profile</button>
+        <button class="btn btn-primary" id="save-profile-btn">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+          <span>Save Candidate Profile</span>
+        </button>
       </div>
     </div>
   </div>
@@ -698,12 +1086,12 @@
 
         <div class="form-group">
           <label for="webhook-name">Webhook Endpoint Name *</label>
-          <input type="text" id="webhook-name" placeholder="Apply-Flow Backend" required />
+          <input type="text" id="webhook-name" placeholder="Apply-Flow Production Backend" required />
         </div>
 
         <div class="form-group">
           <label for="webhook-url">Endpoint URL (POST) *</label>
-          <input type="url" id="webhook-url" placeholder="http://localhost:3001/api/submissions/log" required />
+          <input type="url" id="webhook-url" placeholder="http://localhost:3000/api/submissions/log" required />
           <span class="hint">The HTTP REST endpoint receiving finalized submission payloads.</span>
         </div>
 
@@ -713,7 +1101,7 @@
           <span class="hint">Sent in Authorization and X-API-Key request headers.</span>
         </div>
 
-        <div class="grid-2" style="margin-top:8px;">
+        <div class="grid-2" style="margin-top:10px;">
           <div class="form-group toggle-group">
             <label class="switch-label">
               <input type="checkbox" id="webhook-active" checked />
@@ -725,18 +1113,18 @@
             <label class="switch-label">
               <input type="checkbox" id="webhook-live" checked />
               <span class="switch-custom"></span>
-              <span><strong>Live Typing</strong> (Receive live typing streams)</span>
+              <span><strong>Live Typing</strong> (Receive DOM events)</span>
             </label>
           </div>
         </div>
 
-        <div class="ping-status" id="webhook-ping-status" style="display:none; margin-top:10px;"></div>
+        <div class="ping-status" id="webhook-ping-status" style="display:none; margin-top:12px;"></div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" id="test-webhook-btn">⚡ Test Ping</button>
         <div style="display:flex; gap:8px;">
           <button class="btn btn-secondary" id="cancel-webhook-btn">Cancel</button>
-          <button class="btn btn-primary" id="save-webhook-btn">💾 Save Webhook</button>
+          <button class="btn btn-primary" id="save-webhook-btn">Save Webhook</button>
         </div>
       </div>
     </div>
@@ -759,7 +1147,88 @@
     </div>
   </div>
 
+  <!-- Station Unlock Modal -->
+  <div class="modal-overlay" id="station-unlock-modal" style="display:none;">
+    <div class="modal-box modal-sm">
+      <div class="modal-header">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="width:36px; height:36px; border-radius:10px; background:rgba(99,102,241,0.15); display:flex; align-items:center; justify-content:center; color:#a5b4fc;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/></svg>
+          </div>
+          <div>
+            <h2 style="font-size:16px;">Unlock Workstation</h2>
+            <p style="font-size:12px; color:var(--text-muted); margin-top:2px;">Administrator authentication required</p>
+          </div>
+        </div>
+        <button class="close-btn" id="close-station-unlock-modal">✕</button>
+      </div>
+      <div class="modal-body" style="padding-top:16px;">
+        <p style="font-size:13px; color:var(--text-muted); line-height:1.5; margin-bottom:16px;">
+          Enter the Master Admin Passkey to unlock candidate assignment for this workstation seat.
+        </p>
+        <div class="form-group">
+          <label for="unlock-passkey-input">Admin Master Passkey *</label>
+          <div class="input-with-icon">
+            <span class="input-icon">🔑</span>
+            <input type="password" id="unlock-passkey-input" placeholder="Enter master passkey" autocomplete="off" />
+            <button type="button" class="btn-toggle-eye" id="btn-toggle-unlock-eye" title="Show/Hide passkey">👁️</button>
+          </div>
+          <div id="unlock-error-msg" class="hint" style="color:var(--danger); display:none; margin-top:6px; font-weight:600;"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="cancel-station-unlock-btn">Cancel</button>
+        <button class="btn btn-primary" id="confirm-station-unlock-btn">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>
+          <span>Authenticate & Unlock</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Change Master Passkey Modal -->
+  <div class="modal-overlay" id="station-passkey-modal" style="display:none;">
+    <div class="modal-box modal-sm">
+      <div class="modal-header">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="width:36px; height:36px; border-radius:10px; background:rgba(99,102,241,0.15); display:flex; align-items:center; justify-content:center; color:#a5b4fc;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          </div>
+          <div>
+            <h2 style="font-size:16px;">Update Master Passkey</h2>
+            <p style="font-size:12px; color:var(--text-muted); margin-top:2px;">Set new authorization passkey</p>
+          </div>
+        </div>
+        <button class="close-btn" id="close-station-passkey-modal">✕</button>
+      </div>
+      <div class="modal-body" style="padding-top:16px;">
+        <div class="form-group">
+          <label for="new-passkey-input">New Admin Master Passkey *</label>
+          <div class="input-with-icon">
+            <span class="input-icon">🔑</span>
+            <input type="password" id="new-passkey-input" placeholder="Enter new passkey" autocomplete="off" />
+          </div>
+          <span class="hint">Minimum 6 characters. Required for live HUD and station unlocking.</span>
+        </div>
+        <div class="form-group" style="margin-top:12px;">
+          <label for="confirm-passkey-input">Confirm New Passkey *</label>
+          <div class="input-with-icon">
+            <span class="input-icon">🔒</span>
+            <input type="password" id="confirm-passkey-input" placeholder="Re-enter new passkey" autocomplete="off" />
+          </div>
+          <div id="passkey-error-msg" class="hint" style="color:var(--danger); display:none; margin-top:6px; font-weight:600;"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="cancel-station-passkey-btn">Cancel</button>
+        <button class="btn btn-primary" id="save-station-passkey-btn">Save Passkey</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="lib/jszip.min.js"></script>
   <script src="doc-parser.js"></script>
   <script src="options.js"></script>
 </body>
 </html>
+
