@@ -39,6 +39,10 @@ function fixture() {
       return { status: 200, ok: true, async json() { return { success: true, contractVersion: 2 }; } };
     }
     if (!signedIn) return { status: 401 };
+    if (url.endsWith('/files/expired.pdf')) return {status:401, ok:false};
+    if (url.endsWith('/files/resume.pdf')) return {status:200, ok:true,
+      headers: {get: key => key === 'content-type' ? 'application/pdf' : null},
+      async arrayBuffer() {return new TextEncoder().encode('%PDF-1.7\nVerified generated resume').buffer;} };
     let data;
     if (url.endsWith('/api/sqc/session')) data = { success: true, contractVersion: 2,
       session: { id: sessionId(), expiresAt: future(), passwordChangeRequired },
@@ -114,6 +118,61 @@ test('verified context locks identity, loads approved resume, and never exposes 
   assert.equal(f.calls[1].options.headers['X-SQC-CSRF'], 'server-csrf');
   assert.equal(f.calls[1].options.credentials, 'include');
   assert.equal(f.calls[0].options.headers['X-SQC-Extension-Id'], 'sqc');
+});
+
+test('a generated job resume is fetched with extension credentials and supplies its own skills', async () => {
+  const f=fixture();
+  const bytes=new TextEncoder().encode('%PDF-1.7\nVerified generated resume');
+  const sha256=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),b=>b.toString(16).padStart(2,'0')).join('');
+  f.mutate(c=>({...c,job:{...c.job,tailoringRequired:true},resume:{...c.resume,kind:'tailored',jobId:c.job.id,
+    skills:['TypeScript','PostgreSQL'],file:{url:'/files/resume.pdf',filename:'Candidate-generated.pdf',sha256}}}));
+  const result=await f.service.handle({type:'GET_CONFIG'},f.sender(1));
+  assert.equal(result.integration.state,'VERIFIED');
+  assert.equal(result.activeProfile.resumeIsTailored,true);
+  assert.equal(result.activeProfile.resumeTailoringRequired,true);
+  assert.deepEqual(result.activeProfile.primaryStackKeywords,['TypeScript','PostgreSQL']);
+  assert.ok(result.activeProfile.resumeBase64.startsWith('data:application/pdf;base64,'));
+  const download=f.calls.find(call=>call.url.endsWith('/files/resume.pdf'));
+  assert.equal(download.options.credentials,'include'); assert.equal(download.options.redirect,'error');
+  assert.equal(f.chrome.storage.session.data.sqcContexts[1].resume.file.dataUrl,undefined);
+});
+
+test('a wrong generated file or foreign-origin download cannot be attached, while candidate context stays available', async () => {
+  for(const file of [{url:'https://foreign.example/resume.pdf'}, {url:'/files/resume.pdf',sha256:'0'.repeat(64)}]) {
+    const f=fixture();f.mutate(c=>({...c,resume:{...c.resume,file}}));
+    const result=await f.service.handle({type:'GET_CONFIG'},f.sender(1));
+    assert.equal(result.integration.state,'VERIFIED');assert.equal(result.activeProfile.resumeBase64,'');
+    assert.ok(result.activeProfile.resumeFileError);
+    assert.equal(f.calls.some(call=>call.url.startsWith('https://foreign.example')),false);
+  }
+});
+
+test('a tailored resume for another job cannot establish a verified context', async () => {
+  const f=fixture();f.mutate(c=>({...c,resume:{...c.resume,kind:'tailored',jobId:'other-job'}}));
+  const result=await f.service.handle({type:'GET_CONFIG'},f.sender(1));
+  assert.equal(result.settings.verifiedContext,null);assert.equal(result.integration.state,'CONTEXT_MISMATCH');
+});
+
+test('expired authentication during resume download clears the verified identity', async () => {
+  const f=fixture();f.mutate(c=>({...c,resume:{...c.resume,file:{url:'/files/expired.pdf'}}}));
+  const result=await f.service.handle({type:'GET_CONFIG'},f.sender(1));
+  assert.equal(result.integration.state,'SIGNED_OUT');assert.equal(result.settings.verifiedContext,null);
+  assert.equal(result.activeProfile,null);assert.equal(f.chrome.storage.session.data.sqcAuth,undefined);
+});
+
+test('a later approved portal step can discover the existing job without URL launch parameters', async () => {
+  const f=fixture();await f.service.handle({type:'GET_CONFIG'},f.sender(1));
+  f.tabs[1].url='https://jobs.example/roles/1/step2';
+  const allowed=await f.service.handle({type:'SQC_PORTAL_ELIGIBILITY'},f.sender(1));
+  assert.equal(allowed.eligible,true);
+  f.tabs[1].url='https://unrelated.example/';
+  assert.equal((await f.service.handle({type:'SQC_PORTAL_ELIGIBILITY'},f.sender(1))).eligible,false);
+  f.advance(61000);f.tabs[1].url='https://jobs.example/roles/1/step2';
+  assert.equal((await f.service.handle({type:'SQC_PORTAL_ELIGIBILITY'},f.sender(1))).eligible,true);
+  const renewed=await f.service.handle({type:'GET_CONFIG'},f.sender(1));
+  assert.equal(renewed.integration.state,'VERIFIED');assert.ok(renewed.settings.verifiedContext.expiresAt>f.now());
+  await f.service.handle({type:'SQC_LOGOUT'},f.ui);
+  assert.equal((await f.service.handle({type:'SQC_PORTAL_ELIGIBILITY'},f.sender(1))).eligible,false);
 });
 test('two job tabs retain isolated job contexts under the applier locked profile across worker restart', async () => {
   const f = fixture();

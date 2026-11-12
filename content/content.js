@@ -45,13 +45,37 @@ window.SubmissionCheckerCore = (function () {
 
   let isCoreActive = false;
   let isRouteWatcherBound = false;
+  let initializing = false, discoveryObserver = null, discoveryTimer = null;
+  async function eligiblePortal() {
+    if (window.JobFormExtractor?.isJobApplicationPortal()) return true;
+    try {
+      const url = window.location.href;
+      const result = await chrome.runtime.sendMessage({type: 'SQC_PORTAL_ELIGIBILITY'});
+      if (result?.eligible && window.location.href === url) { window.__SQC_PORTAL_ELIGIBLE_URL = url; return true; }
+    } catch (_) {}
+    return false;
+  }
+  function watchForPortal() {
+    if (discoveryObserver || !document.documentElement) return;
+    discoveryObserver = new MutationObserver(mutations => {
+      if (isCoreActive || initializing) return;
+      if (!mutations.some(m => Array.from(m.addedNodes).some(node => node.nodeType === 1 &&
+        (node.matches?.('form, input, textarea, select, iframe') || node.querySelector?.('form, input, textarea, select, iframe'))))) return;
+      clearTimeout(discoveryTimer); discoveryTimer = setTimeout(() => init(), 200);
+    });
+    discoveryObserver.observe(document.documentElement, {childList: true, subtree: true});
+  }
+  chrome.runtime.onMessage.addListener(message => {
+    if (!isCoreActive && ['STATE_UPDATED', 'SQC_CONTEXT_AVAILABLE'].includes(message.type)) init();
+    else if (isCoreActive && message.type === 'SQC_CONTEXT_AVAILABLE') fetchConfig().then(() => { tryAutoRestore(); runExtractionAndValidation(); });
+  });
 
   function bindRouteWatcher() {
     if (isRouteWatcherBound) return;
     isRouteWatcherBound = true;
 
-    const handleRouteTransition = () => {
-      const isEligible = window.JobFormExtractor ? window.JobFormExtractor.isJobApplicationPortal() : false;
+    const handleRouteTransition = async () => {
+      const isEligible = await eligiblePortal();
       if (!isEligible) {
         if (window.JobFormExtractor) window.JobFormExtractor.cleanupNonJobSession();
         if (window.SubmissionHUD) window.SubmissionHUD.destroy();
@@ -102,8 +126,11 @@ window.SubmissionCheckerCore = (function () {
   }
 
   async function init() {
+    if (initializing) return;
+    initializing = true;
     try {
       bindRouteWatcher();
+      watchForPortal();
 
       // Don't inject or run on the backend dashboard command center itself
       if (window.location.hostname === 'localhost' && (window.location.pathname === '/' || window.location.pathname === '/index.html')) {
@@ -111,7 +138,7 @@ window.SubmissionCheckerCore = (function () {
       }
 
       // Strict Gate: Only activate on genuine ATS portals or pages with ApplyFlow tracking parameters
-      const isEligible = window.JobFormExtractor ? window.JobFormExtractor.isJobApplicationPortal() : false;
+      const isEligible = await eligiblePortal();
       if (!isEligible) {
         if (window.JobFormExtractor) window.JobFormExtractor.cleanupNonJobSession();
         if (window.SubmissionHUD) window.SubmissionHUD.destroy();
@@ -373,7 +400,7 @@ window.SubmissionCheckerCore = (function () {
       });
     } catch (err) {
       console.warn("[Submission Checker] Initialization notice:", err);
-    }
+    } finally { initializing = false; }
   }
 
   let lastHighlightedCaptcha = null;
@@ -564,6 +591,10 @@ window.SubmissionCheckerCore = (function () {
     }
     try {
       const res = JobFormExtractor.restoreSavedForm(activeProfile, currentSettings);
+      if ((activeProfile.resumeBase64 || SubmissionHUD.hasVerifiedResumeFile?.()) && (!activeProfile.resumeTailoringRequired || activeProfile.resumeIsTailored) &&
+          (!currentExtractedData?.resume_uploaded || /^no file|^none|^not uploaded/i.test(currentExtractedData.resume_uploaded))) {
+        SubmissionHUD.attachResumeToPortal(activeProfile.resumeText, activeProfile, null, {auto: true});
+      }
       if (res && res.count > 0) {
         console.log(`[Submission Checker] Restored ${res.count} form fields from saved session / candidate profile.`);
       }
@@ -653,9 +684,9 @@ window.SubmissionCheckerCore = (function () {
     }
   }
 
-  async function fetchConfig() {
+  async function fetchConfig(force = false) {
     return new Promise((resolve) => {
-      chrome.runtime.sendMessage({ type: "GET_CONFIG" }, (res) => {
+      chrome.runtime.sendMessage({ type: "GET_CONFIG", force }, (res) => {
         if (res && res.success) {
           const nextSession = res.settings?.verifiedContext?.applicationSessionId;
           const c = res.settings?.verifiedContext;
@@ -1712,6 +1743,7 @@ window.SubmissionCheckerCore = (function () {
   function scheduleLiveExtraction() {
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
+      tryAutoRestore();
       runExtractionAndValidation();
     }, 80);
   }
@@ -1756,15 +1788,17 @@ window.SubmissionCheckerCore = (function () {
           /browse\s*(resume|file|document)?/i.test(text) ||
           (/\bupload\b.*\b(resume|cv)\b/i.test(text) && text.length < 50)) {
         console.log("[SQC] Portal resume upload option clicked:", text);
-        const tailoredText = (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('sqc_tailored_resume') : null) || activeProfile?.resumeText || '';
+        const tailoredText = activeProfile?.resumeText || '';
         if (activeProfile && window.SubmissionHUD?.downloadResumeFile) {
           const candName = activeProfile.fullName || 'Candidate';
           const now = Date.now();
           const lastDl = parseInt(sessionStorage.getItem(`sqc_last_dl_${activeProfile.id}`) || '0', 10);
           if (now - lastDl > 8000) {
-            sessionStorage.setItem(`sqc_last_dl_${activeProfile.id}`, String(now));
-            window.SubmissionHUD.downloadResumeFile(tailoredText, activeProfile, { silent: true });
-            SubmissionHUD.showToast(`📥 '${candName}.pdf' ready in your Downloads! Select it in the file dialog.`);
+            const filename = window.SubmissionHUD.downloadResumeFile(tailoredText, activeProfile, { silent: true });
+            if (filename) {
+              sessionStorage.setItem(`sqc_last_dl_${activeProfile.id}`, String(now));
+              SubmissionHUD.showToast(`'${filename}' is ready in Downloads. Select it in the file dialog.`);
+            }
           }
         }
         if (window.SubmissionHUD?.attachResumeToPortal) {

@@ -116,6 +116,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (['SQC_CONNECT', 'SQC_DISCONNECT', 'SQC_LOGIN', 'SQC_LOGOUT', 'SQC_CHANGE_PASSWORD'].includes(message.type)) tabApplyFlowSessions.clear();
       if (integrated.integration?.state === 'SIGNED_OUT') tabApplyFlowSessions.clear();
       bindEvidenceContext(integrated, sender.tab?.id || message.tabId);
+      if (message.type === 'GET_CONFIG' && message.tabId && integrated.integration?.state === 'VERIFIED' &&
+          sender.url?.startsWith(chrome.runtime.getURL(''))) {
+        chrome.tabs.sendMessage(message.tabId, {type: 'SQC_CONTEXT_AVAILABLE'}).catch(() => {});
+      }
       if (['SQC_CONNECT', 'SQC_DISCONNECT', 'SQC_LOGIN', 'SQC_LOGOUT', 'SQC_CHANGE_PASSWORD', 'SAVE_SETTINGS', 'SET_INTERCEPTION_MODE'].includes(message.type)) notifyTabsAboutStateChange();
       return integrated;
     }

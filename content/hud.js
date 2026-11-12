@@ -36,6 +36,38 @@ window.SubmissionHUD = (function () {
   let isVerifyingWithApplyFlow = false;
   let verifyBannerEl = null;
   let verifyBannerTimer = null;
+  let hudRepairObserver = null, hudRepairTimer = null, localVerifiedResume = null;
+  let managedResumeDialog = null;
+  const injectedResumeFiles = new WeakMap();
+  function closeManagedResumeDialog() {
+    if (!managedResumeDialog) return;
+    managedResumeDialog.close(); managedResumeDialog.el.remove(); managedResumeDialog = null;
+  }
+  function resumeBinding() { const c = currentSettings?.verifiedContext; return c ? [c.applicationSessionId,c.profileId,c.jobId,c.resumeId,c.resumeVersion].join(':') : ''; }
+  function managedResumeFile(profile = currentProfile) {
+    const c = currentSettings?.verifiedContext;
+    if (!c || profile?.id !== c.profileId || profile?.resumeId !== c.resumeId || profile?.resumeVersion !== c.resumeVersion) return null;
+    if (profile?.resumeBase64) return base64ToFile(profile.resumeBase64, profile.resumeFilename || getCandidateCleanFileName(profile));
+    return localVerifiedResume?.binding === resumeBinding() ? localVerifiedResume.file : null;
+  }
+  function tailoredReady() { return currentSettings?.integrationMode === 'applyflow' ? currentProfile?.resumeIsTailored === true : Boolean(sessionStorage.getItem('sqc_tailored_resume')); }
+  function tailoringRequired() { return currentProfile?.resumeTailoringRequired === true || currentProfile?.tailoringMode === 'tailored'; }
+  function clampHUD() {
+    if (!containerEl || !pillEl || isDrawerOpen) return;
+    const rect = containerEl.getBoundingClientRect();
+    const width = Math.max(rect.width, pillEl.getBoundingClientRect().width);
+    if (rect.left < 4 || rect.left + width > window.innerWidth - 4) { containerEl.style.left = Math.max(4, Math.min(rect.left, window.innerWidth - width - 4)) + 'px'; containerEl.style.right = 'auto'; }
+    if (rect.top < 4 || rect.bottom > window.innerHeight - 4) containerEl.style.top = Math.max(4, Math.min(rect.top, window.innerHeight - rect.height - 4)) + 'px';
+  }
+  function watchHUD() {
+    if (hudRepairObserver || !document.documentElement) return;
+    hudRepairObserver = new MutationObserver(() => {
+      if (!containerEl || document.body?.contains(containerEl) || hudRepairTimer) return;
+      hudRepairTimer = setTimeout(() => { hudRepairTimer = null; if (currentSettings && window.JobFormExtractor?.isJobApplicationPortal()) { ensureContainer(); renderPill(); } }, 80);
+    });
+    hudRepairObserver.observe(document.documentElement, {childList:true, subtree:true});
+    window.addEventListener('resize', clampHUD);
+  }
 
   // ---------------------------------------------------------------------------
   // Icon set (inline SVG, stroke-based)
@@ -164,6 +196,8 @@ window.SubmissionHUD = (function () {
     pillEl = null;
     drawerEl = null;
     blockingDialog = null;
+    closeManagedResumeDialog();
+    localVerifiedResume = null;
     isDrawerOpen = false;
     lastValidation = null;
     lastExtracted = null;
@@ -190,7 +224,11 @@ window.SubmissionHUD = (function () {
     }
 
     if (currentSettings?.verifiedContext?.applicationSessionId !== settings?.verifiedContext?.applicationSessionId ||
+        currentSettings?.verifiedContext?.profileId !== settings?.verifiedContext?.profileId ||
+        currentSettings?.verifiedContext?.jobId !== settings?.verifiedContext?.jobId ||
+        currentSettings?.verifiedContext?.resumeId !== settings?.verifiedContext?.resumeId ||
         currentSettings?.verifiedContext?.resumeVersion !== settings?.verifiedContext?.resumeVersion) {
+      closeManagedResumeDialog();
       activeTailoredFile = null;
       currentScreenshots = [];
       currentDuplicateRecord = null;
@@ -198,6 +236,8 @@ window.SubmissionHUD = (function () {
     allProfiles = profiles || [];
     currentProfile = activeProfile;
     currentSettings = settings;
+    if (localVerifiedResume?.binding !== resumeBinding()) localVerifiedResume = null;
+    watchHUD();
 
     // Eagerly resolve Apply-Flow parameters from URL, session, or window storage
     if (window.JobFormExtractor) {
@@ -642,10 +682,11 @@ window.SubmissionHUD = (function () {
       </span>
       ${isAfLinked ? `<span class="sqc-pill-tag is-af" title="Linked to Apply-Flow">${icon('zap', 10)}AF</span>` : ''}
       ${Boolean((validationResult?.errors || []).some(e => e.rule === 'JOB_STACK_MISMATCH')) ? `<span class="sqc-pill-tag" style="background:rgba(239,68,68,0.25);color:#fca5a5;border:1px solid rgba(239,68,68,0.4);" title="Job tech stack mismatch">${icon('alertOctagon', 10)}Wrong Stack</span>` : ''}
-      ${(currentProfile?.tailoringMode === 'tailored' && !(typeof sessionStorage !== 'undefined' && sessionStorage.getItem('sqc_tailored_resume'))) ? `<span class="sqc-pill-tag" style="background:rgba(239,68,68,0.22);color:#fca5a5;border:1px solid rgba(239,68,68,0.4);" title="Job-tailored resume required">${icon('sparkles', 10)}Needs Resume</span>` : ''}
-      ${(currentProfile?.tailoringMode === 'tailored' && (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('sqc_tailored_resume'))) ? `<span class="sqc-pill-tag" style="background:rgba(16,185,129,0.22);color:#6ee7b7;" title="Job-tailored resume active">${icon('sparkles', 10)}Tailored</span>` : ''}
+      ${(tailoringRequired() && !tailoredReady()) ? `<span class="sqc-pill-tag" style="background:rgba(239,68,68,0.22);color:#fca5a5;border:1px solid rgba(239,68,68,0.4);" title="Job-tailored resume required">${icon('sparkles', 10)}Needs Resume</span>` : ''}
+      ${tailoredReady() ? `<span class="sqc-pill-tag" style="background:rgba(16,185,129,0.22);color:#6ee7b7;" title="Job-tailored resume active">${icon('sparkles', 10)}Tailored</span>` : ''}
       ${isAuditMode ? '<span class="sqc-pill-tag is-audit" title="Audit mode — submissions are not blocked">Audit</span>' : ''}
     `;
+    clampHUD();
   }
 
   let clickOutsideBound = false;
@@ -852,8 +893,8 @@ window.SubmissionHUD = (function () {
 
     // ---------- Checks ----------
     const stackMismatchErr = errs.find(e => rule(e) === 'JOB_STACK_MISMATCH');
-    const hasTailored = typeof sessionStorage !== 'undefined' && Boolean(sessionStorage.getItem('sqc_tailored_resume'));
-    const isTailoringMethod = p.tailoringMode === 'tailored';
+    const hasTailored = tailoredReady();
+    const isTailoringMethod = tailoringRequired();
     const resumeStatusText = stackMismatchErr
       ? `Stack Mismatch · Job: ${stackMismatchErr.meta?.jobStackLabel || 'Different Stack'} (Candidate: ${stackMismatchErr.meta?.candStackLabel || p.targetStack || 'Profile'})`
       : (hasTailored
@@ -1061,22 +1102,25 @@ window.SubmissionHUD = (function () {
     }
 
     // Tailoring Method & Fast Resume Attachment Callout
+    if (currentSettings?.integrationMode === 'applyflow' && !managedResumeFile(p) && !isTailoringMethod) {
+      callouts.push(callout('warn', 'file', 'Resume file needed', escapeHtml(p.resumeFileError || 'ApplyFlow supplied the resume text but not the original file. Sync it or choose the matching downloaded file.'), '<button class="sqc-btn sqc-btn-primary sqc-btn-sm" id="sqc-btn-open-tailor-banner">Open resume manager</button>'));
+    }
     if (isTailoringMethod && !hasTailored) {
       callouts.push(callout(
         'warn',
         'sparkles',
         'Tailoring Method Active · Tailored Resume Required',
-        `Candidate <strong>${escapeHtml(p.fullName)}</strong> requires a <strong>job-tailored resume</strong> for every application. Paste the tailored resume below to extract skills dynamically and attach it to this job portal before submitting.`,
+        `Candidate <strong>${escapeHtml(p.fullName)}</strong> requires a <strong>job-tailored resume</strong> for every application. Sync the generated resume for this job from ApplyFlow before submitting. Candidate details can still be autofilled.`,
         `<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
            <button class="sqc-btn sqc-btn-primary sqc-btn-sm" id="sqc-btn-open-tailor-banner">
-             ${icon('sparkles', 13)} Paste & Attach Tailored Resume
+             ${icon('sparkles', 13)} Sync job resume
            </button>
          </div>`
       ));
     } else if (hasTailored) {
-      let tailoredSkillCount = 0;
+      let tailoredSkillCount = currentSettings?.integrationMode === 'applyflow' ? (p.primaryStackKeywords || []).length : 0;
       try {
-        const raw = sessionStorage.getItem('sqc_tailored_resume_data');
+        const raw = currentSettings?.integrationMode === 'applyflow' ? null : sessionStorage.getItem('sqc_tailored_resume_data');
         if (raw) {
           const d = JSON.parse(raw);
           tailoredSkillCount = (d.primaryStackKeywords || []).length;
@@ -1087,12 +1131,12 @@ window.SubmissionHUD = (function () {
         'ok',
         'checkCircle',
         `Tailored Resume Active · ${tailoredSkillCount ? tailoredSkillCount + ' Skills Mapped' : 'Ready in Memory'}`,
-        `A custom-tailored resume is active for this job application. Skills have been dynamically extracted and verified against job requirements.`,
+        `The job-specific resume and skills supplied by ApplyFlow are active for this application.`,
         `<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
            <button class="sqc-btn sqc-btn-soft sqc-btn-sm" id="sqc-btn-reattach-portal">📎 Attach to Portal</button>
            <button class="sqc-btn sqc-btn-ghost sqc-btn-sm" id="sqc-btn-download-tailored">📥 Download File</button>
            <button class="sqc-btn sqc-btn-ghost sqc-btn-sm" id="sqc-btn-copy-tailored">📋 Copy Text</button>
-           <button class="sqc-btn sqc-btn-ghost sqc-btn-sm" id="sqc-btn-edit-tailored">✏️ Edit</button>
+           <button class="sqc-btn sqc-btn-ghost sqc-btn-sm" id="sqc-btn-edit-tailored">Resume manager</button>
          </div>`
       ));
     }
@@ -1493,7 +1537,7 @@ window.SubmissionHUD = (function () {
     $('#sqc-btn-open-tailor-banner')?.addEventListener('click', () => openResumeModal());
     $('#sqc-btn-edit-tailored')?.addEventListener('click', () => openResumeModal());
     $('#sqc-btn-reattach-portal')?.addEventListener('click', () => {
-      const tailoredText = (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('sqc_tailored_resume') : null) || p.resumeText || '';
+      const tailoredText = currentSettings?.integrationMode === 'applyflow' ? p.resumeText || '' : (sessionStorage.getItem('sqc_tailored_resume') || p.resumeText || '');
       const res = attachResumeToPortal(tailoredText, p, null, { userInitiated: true });
       if (res && res.fileInputsCount > 0) {
         showToast(`🎉 Attached "${res.filename}" to ${res.fileInputsCount} file input(s)!`);
@@ -1508,11 +1552,11 @@ window.SubmissionHUD = (function () {
       if (window.SubmissionCheckerCore) window.SubmissionCheckerCore.runLiveCheck();
     });
     $('#sqc-btn-download-tailored')?.addEventListener('click', () => {
-      const tailoredText = (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('sqc_tailored_resume') : null) || p.resumeText || '';
+      const tailoredText = currentSettings?.integrationMode === 'applyflow' ? p.resumeText || '' : (sessionStorage.getItem('sqc_tailored_resume') || p.resumeText || '');
       downloadResumeFile(tailoredText, p);
     });
     $('#sqc-btn-copy-tailored')?.addEventListener('click', () => {
-      const tailoredText = (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('sqc_tailored_resume') : null) || p.resumeText || '';
+      const tailoredText = currentSettings?.integrationMode === 'applyflow' ? p.resumeText || '' : (sessionStorage.getItem('sqc_tailored_resume') || p.resumeText || '');
       if (tailoredText) {
         navigator.clipboard.writeText(tailoredText).then(() => showToast("📋 Tailored resume copied to clipboard!"));
       }
@@ -1596,21 +1640,13 @@ window.SubmissionHUD = (function () {
       }
     });
 
-    // Autofill / restore
+    // Candidate details remain available while the job-specific resume is being generated.
     $('#sqc-btn-restore')?.addEventListener('click', () => {
-      if (currentProfile?.tailoringMode === 'tailored' && !(typeof sessionStorage !== 'undefined' && sessionStorage.getItem('sqc_tailored_resume'))) {
-        showToast('⚠️ Tailoring Method: Please upload or paste the job-tailored resume first to extract all required skills.');
-        openResumeModal();
-        return;
-      }
-      if (window.SubmissionCheckerCore) {
-        const res = window.SubmissionCheckerCore.restoreForm();
-        const tailoredText = (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('sqc_tailored_resume') : null) || currentProfile?.resumeText || '';
-        if (tailoredText) {
-          attachResumeToPortal(tailoredText, currentProfile);
-        }
-        showToast(`⚡ Filled ${res?.count || 0} field${res?.count === 1 ? '' : 's'} & verified resume attachment.`);
-      }
+      if (!window.SubmissionCheckerCore) return;
+      const res = window.SubmissionCheckerCore.restoreForm();
+      const attachment = attachResumeToPortal(currentProfile?.resumeText || '', currentProfile);
+      showToast('Filled ' + (res?.count || 0) + ' fields.' + (attachment.fileInputsCount ? ' Verified resume attached.' : ''));
+      if (currentSettings?.integrationMode === 'applyflow' && (!managedResumeFile() || (tailoringRequired() && !tailoredReady()))) openResumeModal();
     });
 
     // Copy payload
@@ -2380,8 +2416,7 @@ window.SubmissionHUD = (function () {
   function getStoredOrSynthesizedResumeFile(resumeText, profile) {
     if (currentSettings?.integrationMode === 'applyflow') {
       const p = profile || currentProfile;
-      if (!p?.resumeBase64) return null;
-      return base64ToFile(p.resumeBase64, p.resumeFilename || getCandidateCleanFileName(p, '.pdf'));
+      return managedResumeFile(p);
     }
     if (activeTailoredFile) return activeTailoredFile;
 
@@ -2456,10 +2491,10 @@ window.SubmissionHUD = (function () {
     }
     const p = profile || currentProfile || {};
     if (currentSettings?.integrationMode === 'applyflow') {
-      if (p.id !== currentSettings.verifiedContext.profileId || !p.resumeBase64) {
+      if (p.id !== currentSettings.verifiedContext.profileId || !managedResumeFile(p) || (tailoringRequired() && !tailoredReady())) {
         return { success: false, error: 'An original verified resume file is required.', fileInputsCount: 0 };
       }
-      customFile = null;
+      customFile = managedResumeFile(p);
       activeTailoredFile = null;
       resumeText = p.resumeText;
     }
@@ -2491,7 +2526,7 @@ window.SubmissionHUD = (function () {
     function collectAllFileInputs() {
       const inputs = Array.from(document.querySelectorAll('input[type="file"]')).filter(inp => {
         if (inp.closest('#sqc-hud-container, #sqc-modal-overlay, .sqc-ai-modal-overlay, .sqc-dialog-overlay')) return false;
-        return true;
+        return !/cover[ _-]*letter/i.test([inp.id, inp.name, inp.getAttribute('aria-label'), ...(Array.from(inp.labels || []).map(label => label.textContent))].join(' '));
       });
       try {
         document.querySelectorAll('*').forEach(el => {
@@ -2530,7 +2565,7 @@ window.SubmissionHUD = (function () {
     try {
       if (effectiveFile) {
         let allFileInputs = collectAllFileInputs();
-        const uploadTriggers = collectUploadTriggers();
+        const uploadTriggers = options.auto ? [] : collectUploadTriggers();
 
         // Check if any triggers enclose or point to an input
         uploadTriggers.forEach(trig => {
@@ -2545,16 +2580,22 @@ window.SubmissionHUD = (function () {
         const resumeInputs = allFileInputs.filter(inp => {
           const idName = `${inp.id} ${inp.name} ${inp.getAttribute('data-qa') || ''} ${inp.getAttribute('aria-label') || ''}`.toLowerCase();
           const parentText = (inp.closest('label, .form-group, .file-upload, [class*="upload"], [class*="resume"], fieldset, div') || inp.parentElement)?.innerText?.toLowerCase() || '';
+          if (/cover.?letter/.test(idName)) return false;
+          if (options.auto) return /resume|curriculum|\bcv\b/.test(idName + ' ' + parentText);
           return idName.includes('resume') || idName.includes('cv') || idName.includes('file') || idName.includes('upload') || parentText.includes('resume') || parentText.includes('cv') || parentText.includes('curriculum');
         });
 
-        const targets = resumeInputs.length > 0 ? resumeInputs : (allFileInputs.length > 0 ? [allFileInputs[0]] : []);
+        const targets = resumeInputs.length > 0 ? resumeInputs : (!options.auto && allFileInputs.length === 1 ? [allFileInputs[0]] : []);
 
         targets.forEach(inp => {
+          const previous = injectedResumeFiles.get(inp);
+          const staleAutomaticFile = previous && previous.binding !== resumeBinding() && previous.file === inp.files?.[0];
+          if (inp.disabled || (inp.files?.length && !options.userInitiated && !staleAutomaticFile)) return;
           try {
             const dt = new DataTransfer();
             dt.items.add(effectiveFile);
             inp.files = dt.files;
+            if (currentSettings?.integrationMode === 'applyflow') injectedResumeFiles.set(inp, {binding:resumeBinding(), file:inp.files[0]});
             inp.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
             inp.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
             fileInputsCount++;
@@ -2567,7 +2608,7 @@ window.SubmissionHUD = (function () {
               ...uploadTriggers
             ].filter(Boolean);
 
-            dropzoneTargets.forEach(dtTarget => {
+            if (!options.auto) dropzoneTargets.forEach(dtTarget => {
               try {
                 dtTarget.dispatchEvent(new DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer: dt }));
                 dtTarget.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt }));
@@ -2648,7 +2689,7 @@ window.SubmissionHUD = (function () {
         }
 
         // Cross-Frame Broadcast: Transmit real resume file to all iframes
-        broadcastResumeToFrames(effectiveFile, resumeText, p);
+        if (currentSettings?.integrationMode !== 'applyflow') broadcastResumeToFrames(effectiveFile, resumeText, p);
       }
     } catch (e) {
       console.warn("[SQC] DataTransfer / File generation notice:", e);
@@ -2661,7 +2702,8 @@ window.SubmissionHUD = (function () {
         if (ta.closest('#sqc-hud-container, #sqc-modal-overlay, .sqc-ai-modal-overlay, .sqc-dialog-overlay')) return;
         const lbl = (ta.getAttribute('aria-label') || ta.placeholder || ta.name || ta.id || '').toLowerCase();
         const parentLbl = (ta.closest('label, .form-group, fieldset, div')?.querySelector('label, h3, h4, span')?.innerText || '').toLowerCase();
-        if (lbl.includes('resume') || lbl.includes('cv') || lbl.includes('paste') || parentLbl.includes('resume') || parentLbl.includes('cv')) {
+        if (/resume|curriculum|\bcv\b/.test(lbl + ' ' + parentLbl)) {
+          if (ta.value === resumeText || (ta.value.trim() && !options.userInitiated)) return;
           ta.value = resumeText;
           ta.dispatchEvent(new Event('input', { bubbles: true }));
           ta.dispatchEvent(new Event('change', { bubbles: true }));
@@ -2671,13 +2713,13 @@ window.SubmissionHUD = (function () {
     }
 
     // 4. Update in-memory extractedData so HUD immediately reflects the attached resume
-    if (lastExtracted) {
+    if (lastExtracted && (fileInputsCount || textareasCount)) {
       lastExtracted.resume_uploaded = filename;
       lastExtracted.resume_size = effectiveFile?.size || resumeText?.length || 102400;
     }
 
-    // 5. Save to session storage
-    if (typeof sessionStorage !== 'undefined') {
+    // Legacy local tailoring storage is never the source of a managed resume.
+    if (currentSettings?.integrationMode !== 'applyflow' && typeof sessionStorage !== 'undefined') {
       if (resumeText) sessionStorage.setItem('sqc_tailored_resume', resumeText);
       sessionStorage.setItem('sqc_tailored_resume_filename', filename);
     }
@@ -2695,10 +2737,15 @@ window.SubmissionHUD = (function () {
     const p = profile || currentProfile || {};
     if (currentSettings?.integrationMode === 'applyflow') {
       if (!window.SQCContextPolicy?.ready(currentSettings, window.location.href) ||
-          p.id !== currentSettings.verifiedContext?.profileId || !p.resumeBase64) {
+          p.id !== currentSettings.verifiedContext?.profileId || !managedResumeFile(p) || (tailoringRequired() && !tailoredReady())) {
         showToast('The original verified resume file must be supplied by ApplyFlow.'); return;
       }
-      activeTailoredFile = null;
+      const file = managedResumeFile(p);
+      const url = URL.createObjectURL(file);
+      const a = document.createElement('a'); a.href = url; a.download = file.name; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      if (!options.silent) showToast('Downloaded the original ApplyFlow resume.');
+      return file.name;
     }
     const canonicalName = getCandidateCleanFileName(p, (activeTailoredFile?.name || '.pdf'));
 
@@ -2737,15 +2784,50 @@ window.SubmissionHUD = (function () {
   // Resume manager dialog
   function openResumeModal() {
     if (currentSettings?.integrationMode === 'applyflow') {
-      if (!window.SQCContextPolicy?.ready(currentSettings, window.location.href)) {
-        showToast('Verify the ApplyFlow assignment before attaching a resume.'); return;
-      }
-      const p = currentProfile;
-      if (!p.resumeBase64) { showToast('The verified resume file is unavailable. Add the original file in ApplyFlow.'); return; }
-      const dlg = openDialog({ title: 'Verified ApplyFlow resume', subtitle: 'Manage resume changes in ApplyFlow.',
-        body: `<pre style="white-space:pre-wrap;max-height:340px;overflow:auto">${escapeHtml(p.resumeText || '')}</pre>`,
-        footer: '<button class="sqc-btn sqc-btn-primary" id="sqc-attach-verified">Attach verified resume</button>' });
-      dlg.$('#sqc-attach-verified').onclick = () => { attachResumeToPortal(p.resumeText, p); dlg.close(); };
+      if (!window.SQCContextPolicy?.ready(currentSettings, window.location.href)) { showToast('Verify the ApplyFlow assignment before managing its resume.'); return; }
+      closeManagedResumeDialog();
+      const p = currentProfile, binding = resumeBinding();
+      const tailoredMissing = tailoringRequired() && !tailoredReady();
+      const file = managedResumeFile(p), canChoose = !tailoredMissing && /^[a-f0-9]{64}$/i.test(p.resumeSha256 || '');
+      const skills = (p.primaryStackKeywords || []).map(skill => '<span class="sqc-resume-skill">' + escapeHtml(skill) + '</span>').join('');
+      const dlg = openDialog({ title: tailoredMissing ? 'Job-tailored resume needed' : 'Your ApplyFlow resume',
+        subtitle: escapeHtml(p.fullName) + ' ? ' + escapeHtml(currentApplyFlowContext?.jobTitle || 'Verified application'),
+        body: '<div class="sqc-resume-source"><strong>' + (file ? 'Original file ready' : tailoredMissing ? 'Waiting for the generated job resume' : 'Original file not available') + '</strong><p>' + escapeHtml(file ? file.name : p.resumeFileError || (tailoredMissing ? 'Generate the tailored resume in ApplyFlow, then sync it here. Verified candidate details can still be autofilled.' : 'Sync the generated document from ApplyFlow, or choose the matching file you downloaded.')) + '</p></div>' +
+          (skills ? '<div class="sqc-resume-skills"><strong>Skills supplied by ApplyFlow</strong><div>' + skills + '</div></div>' : '') +
+          '<input type="file" id="sqc-verified-local-file" accept=".pdf,.docx,.doc,.txt" hidden><p id="sqc-verified-resume-status" class="sqc-resume-feedback" role="status" aria-live="polite"></p>' +
+          (!file && !canChoose && !tailoredMissing ? '<p class="sqc-dialog-lead">Ask your team to make the generated file available in ApplyFlow so it can be verified and attached here.</p>' : '') +
+          '<details class="sqc-resume-text"><summary>View verified resume text</summary><pre>' + escapeHtml(p.resumeText || '') + '</pre></details>',
+        footer: '<button class="sqc-btn sqc-btn-ghost" id="sqc-sync-verified">Sync from ApplyFlow</button>' +
+          (canChoose ? '<button class="sqc-btn sqc-btn-soft" id="sqc-choose-verified">Choose downloaded file</button>' : '') +
+          '<button class="sqc-btn sqc-btn-soft" id="sqc-download-verified" ' + (!file || tailoredMissing ? 'disabled' : '') + '>Download</button><button class="sqc-btn sqc-btn-primary" id="sqc-attach-verified" ' + (!file || tailoredMissing ? 'disabled' : '') + '>Attach to application</button>' });
+      managedResumeDialog = dlg;
+      dlg.$('#sqc-sync-verified').onclick = async event => {
+        const restore = setBtnBusy(event.currentTarget, 'Syncing?');
+        try { await window.SubmissionCheckerCore.reloadConfig(true); dlg.close(); openResumeModal(); }
+        catch (error) { dlg.$('#sqc-verified-resume-status').textContent = error.message; } finally { restore(); }
+      };
+      const chooser = dlg.$('#sqc-choose-verified');
+      if (chooser) chooser.onclick = () => dlg.$('#sqc-verified-local-file').click();
+      dlg.$('#sqc-verified-local-file').onchange = async event => {
+        const selected = event.target.files[0]; if (!selected) return;
+        const status = dlg.$('#sqc-verified-resume-status');
+        status.textContent = 'Checking that this is the resume verified by ApplyFlow?';
+        try {
+          if (selected.size > 10 * 1024 * 1024) throw new Error('Choose a resume smaller than 10 MB.');
+          const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await selected.arrayBuffer())), byte => byte.toString(16).padStart(2,'0')).join('');
+          if (digest !== p.resumeSha256.toLowerCase()) throw new Error('This file does not match the generated resume for this application. Choose the matching ApplyFlow download.');
+          if (binding !== resumeBinding() || !window.SQCContextPolicy.ready(currentSettings, window.location.href)) throw new Error('The application context changed. Reopen the resume manager.');
+          localVerifiedResume = {binding, file: new File([selected], p.resumeFilename || selected.name, {type:p.resumeMimeType || selected.type})};
+          status.textContent = 'File verified. Ready to attach to this application.';
+          dlg.$('#sqc-attach-verified').disabled = false; dlg.$('#sqc-download-verified').disabled = false;
+        } catch (error) { status.textContent = error.message; }
+      };
+      dlg.$('#sqc-download-verified').onclick = () => downloadResumeFile(p.resumeText, p);
+      dlg.$('#sqc-attach-verified').onclick = () => {
+        const result = attachResumeToPortal(p.resumeText, p, null, {userInitiated:true});
+        if (result.fileInputsCount || result.textareasCount) { showToast('Verified resume attached.'); dlg.close(); }
+        else dlg.$('#sqc-verified-resume-status').textContent = result.error || 'No resume field is available on this step. Download the verified file if the portal requires a file picker.';
+      };
       return;
     }
     const p = currentProfile || {};
@@ -3261,7 +3343,13 @@ window.SubmissionHUD = (function () {
   }
 
   function promptTailoredResumeIfNeeded() {
-    if (currentSettings?.integrationMode === 'applyflow') return;
+    if (currentSettings?.integrationMode === 'applyflow') {
+      if (window !== window.top || !window.SQCContextPolicy?.ready(currentSettings, window.location.href)) return;
+      if ((!tailoringRequired() || tailoredReady()) && managedResumeFile()) return;
+      const key = 'sqc_resume_prompted_' + resumeBinding();
+      if (sessionStorage.getItem(key)) return;
+      sessionStorage.setItem(key, '1'); openResumeModal(); return;
+    }
     if (window !== window.top) return;
     const p = currentProfile || {};
     if (p.tailoringMode !== 'tailored') return;
@@ -3297,6 +3385,7 @@ window.SubmissionHUD = (function () {
     init,
     destroy,
     getActiveProfile,
+    hasVerifiedResumeFile: () => Boolean(managedResumeFile()),
     updateState,
     updateApplyFlowInfo,
     setQuickApplyStatus,

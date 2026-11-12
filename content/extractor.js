@@ -706,6 +706,9 @@ window.JobFormExtractor = (function () {
       return true;
     }
 
+    const current = window.__SQC_CONTEXT_SETTINGS?.verifiedContext;
+    if (window.SQCContextPolicy?.matchesUrl(window.location.href, current?.allowedRoutes) ||
+        window.__SQC_PORTAL_ELIGIBLE_URL === window.location.href) return true;
     const ats = detectAtsPlatform();
     return Boolean(ats);
   }
@@ -3222,6 +3225,9 @@ window.JobFormExtractor = (function () {
       const key = getCanonicalLabelKey(label);
       const custom = (p.customFields || []).find(f => getCanonicalLabelKey(f.label || '') === key);
       if (settings.autoFillCustomQuestions !== false && custom?.value !== undefined) return custom.value;
+      const resumeReady = !p.resumeTailoringRequired || p.resumeIsTailored === true;
+      if (resumeReady && /^(resume|resume text|paste resume|paste your resume|cv|curriculum vitae)$/.test(key)) return p.resumeText;
+      if (resumeReady && /^(skills|technical skills|skills summary|primary skills|list your skills|technologies|programming languages)$/.test(key)) return (p.primaryStackKeywords || []).join(', ');
       if (/^(first name|legal first name|given name)$/.test(key)) return p.firstName;
       if (/^(last name|legal last name|family name|surname)$/.test(key)) return p.lastName;
       if (/^(name|full name|full legal name|first and last name)$/.test(key)) return p.legalName || p.fullName;

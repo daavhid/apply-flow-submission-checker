@@ -4,6 +4,8 @@
   function create({ chrome, fetch, policy, defaults = {}, now = Date.now }) {
     let revision = 0;
     let queue = Promise.resolve();
+    const resumeFiles = new Map();
+    const maxResumeBytes = 10 * 1024 * 1024;
     const forbidden = new Set(['SAVE_PROFILE', 'DELETE_PROFILE', 'ARCHIVE_PROFILE', 'TOGGLE_ARCHIVE_PROFILE',
       'SYNC_DEFAULT_PROFILES', 'SET_ACTIVE_PROFILE', 'ADMIN_UNLOCK_PROFILE', 'ADMIN_TOGGLE_LOCK', 'SAVE_WEBHOOKS']);
     const preferences = ['autoAutofillOnPageLoad', 'detectCaptchaAndAlert', 'autoFillDemographics',
@@ -39,7 +41,52 @@
     }
     async function clear() {
       revision++;
+      resumeFiles.clear();
       await chrome.storage.session.remove(['sqcAuth', 'sqcContexts']);
+    }
+    async function resumeFile(auth, context, force) {
+      const file = context.resume.file || {};
+      const key = [auth.sessionId, context.applicationSessionId, context.profile.id, context.resume.id, context.resume.version, file.url, file.sha256].join(':');
+      if (!force && resumeFiles.has(key)) return resumeFiles.get(key);
+      let controller, timer;
+      try {
+        let dataUrl = file.dataUrl || '';
+        let bytes, mime = file.mimeType || '';
+        if (!dataUrl && file.url) {
+          const url = new URL(file.url, auth.apiOrigin);
+          if (url.origin !== auth.apiOrigin || url.username || url.password || url.hash) throw new Error('ApplyFlow must provide a resume download on its configured API origin.');
+          controller = new AbortController(); timer = setTimeout(() => controller.abort(), 10000);
+          const response = await fetch(url.href, { method: 'GET', credentials: 'include', cache: 'no-store', redirect: 'error',
+            signal: controller.signal, headers: { Accept: 'application/pdf, application/vnd.openxmlformats-officedocument.wordprocessingml.document, application/msword, text/plain', 'X-SQC-Extension-Id': chrome.runtime.id } });
+          if (response.status === 401) throw failure('SIGNED_OUT', 'Your ApplyFlow session expired while downloading the resume. Sign in again.');
+          if (!response.ok) throw new Error('ApplyFlow could not deliver the generated resume file.');
+          if (Number(response.headers?.get('content-length')) > maxResumeBytes) throw new Error('The generated resume exceeds the 10 MB file limit.');
+          const chunks = []; let length = 0;
+          if (response.body?.getReader) {
+            const reader = response.body.getReader();
+            for (;;) { const {done, value} = await reader.read(); if (done) break; length += value.byteLength;
+              if (length > maxResumeBytes) { await reader.cancel(); throw new Error('The generated resume exceeds the 10 MB file limit.'); } chunks.push(value); }
+            bytes = new Uint8Array(length); let offset = 0; for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+          } else bytes = new Uint8Array(await response.arrayBuffer());
+          mime ||= (response.headers?.get('content-type') || '').split(';')[0];
+        } else if (dataUrl) {
+          const match = /^data:([^;,]+);base64,([a-z0-9+/=\s]+)$/i.exec(dataUrl);
+          if (!match || match[2].length > maxResumeBytes * 1.4) throw new Error('ApplyFlow returned an invalid resume file.');
+          mime = match[1]; bytes = Uint8Array.from(atob(match[2]), char => char.charCodeAt(0));
+        } else return {...file, dataUrl: '', error: ''};
+        if (!bytes.length || bytes.length > maxResumeBytes) throw new Error('ApplyFlow returned an empty or oversized resume file.');
+        if (!['application/pdf','application/vnd.openxmlformats-officedocument.wordprocessingml.document','application/msword','text/plain'].includes(mime)) throw new Error('ApplyFlow must return a PDF, Word document, or text resume.');
+        if (file.sha256) {
+          const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), byte => byte.toString(16).padStart(2,'0')).join('');
+          if (digest !== String(file.sha256).toLowerCase()) throw new Error('The resume file does not match the version verified by ApplyFlow.');
+        }
+        if (!dataUrl) { let binary = ''; for (let offset = 0; offset < bytes.length; offset += 8192) binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192)); dataUrl = `data:${mime};base64,${btoa(binary)}`; }
+        const result = {...file, dataUrl, mimeType: mime, error: ''};
+        // Keep binary files out of durable storage and bound the worker's memory cache.
+        while (resumeFiles.size >= 3) resumeFiles.delete(resumeFiles.keys().next().value);
+        resumeFiles.set(key, result); return result;
+      } catch (error) { if (error.state) throw error; return {...file, dataUrl: '', error: error.name === 'AbortError' ? 'The resume download timed out. Refresh to retry.' : error.message}; }
+      finally { if (timer) clearTimeout(timer); }
     }
     async function loginChallenge(apiOrigin) {
       const challenge = await request(apiOrigin, '/api/sqc/auth');
@@ -110,6 +157,7 @@
           c.assignment.profileAssignmentId !== auth.assignment?.id || c.assignment.profileAssignmentVersion !== auth.assignment?.version ||
           !c.profile?.version || !c.profile?.fullName || !c.job?.id || !c.job?.version ||
           c.resume?.verified !== true || !c.resume?.id || !c.resume?.version || !c.resume?.text || c.resume.profileId !== c.profile.id ||
+          (c.resume.kind === 'tailored' && c.resume.jobId !== c.job.id) ||
           !Number.isFinite(expiry) || expiry <= now() || !policy.matchesUrl(url, c.allowedRoutes) ||
           (requested.applicationSessionId && requested.applicationSessionId !== c.applicationSessionId) ||
           (requested.jobId && requested.jobId !== c.job.id) || (requested.profileId && requested.profileId !== c.profile.id)) {
@@ -154,6 +202,9 @@
           // Every frame is verified against its own URL; the context routes must authorize embedded forms too.
           const url = privileged(sender) ? tab.url : (sender.url || tab.url);
           context = await resolveContext(auth, tab, url, message.force === true);
+          const file = await resumeFile(auth, context, message.force === true);
+          if ((await chrome.tabs.get(tab.id)).url !== tab.url) throw failure('STALE_CONTEXT', 'The job page changed while loading its resume. Retry verification.');
+          context = {...context, resume: {...context.resume, file}};
           integration = { ...integration, state: 'VERIFIED', message: 'Assignment verified by ApplyFlow.' };
           settings.verifiedContext = { state: 'VERIFIED', applicationSessionId: context.applicationSessionId,
             profileAssignmentId: auth.assignment.id, profileAssignmentVersion: auth.assignment.version,
@@ -163,6 +214,7 @@
             status: context.status || 'PENDING' };
         }
       } catch (error) {
+        context = null; settings.verifiedContext = null;
         if (['SIGNED_OUT', 'FORBIDDEN'].includes(error.state)) { await clear(); auth = null; }
         integration = { state: error.state || 'UNAVAILABLE', message: error.message, apiOrigin,
           ...(auth ? { applier: auth.applier, profileAssignment: auth.assignment,
@@ -178,7 +230,12 @@
         profile = { ...context.profile, resumeText: context.resume.text, baseResumeText: context.resume.text,
           resumeBase64: context.resume.file?.dataUrl || '',
           resumeFilename: context.resume.file?.filename || '',
-          primaryStackKeywords: context.profile.primaryStackKeywords || [],
+          resumeId: context.resume.id, resumeVersion: context.resume.version, resumeJobId: context.resume.jobId || '',
+          resumeIsTailored: context.resume.kind === 'tailored' && context.resume.jobId === context.job.id,
+          resumeTailoringRequired: context.job.tailoringRequired === true || context.resume.tailoringRequired === true || context.profile.tailoringMode === 'tailored',
+          resumeSha256: context.resume.file?.sha256 || '', resumeFileError: context.resume.file?.error || '',
+          resumeMimeType: context.resume.file?.mimeType || '',
+          primaryStackKeywords: (Array.isArray(context.resume.skills) ? context.resume.skills : context.resume.skills?.primaryStackKeywords) || context.profile.primaryStackKeywords || [],
           salaryFloor: context.profile.salaryFloor ?? context.profile.compensation?.salaryFloor,
           desiredSalary: context.profile.desiredSalary ?? context.profile.compensation?.desiredSalary };
       }
@@ -264,6 +321,15 @@
         return { success: true };
       }
       if (action === 'GET_CONFIG') return config(message, sender);
+      if (action === 'SQC_PORTAL_ELIGIBILITY') {
+        const {sqcContexts = {}, sqcAuth} = await chrome.storage.session.get(['sqcContexts', 'sqcAuth']);
+        const url = sender.url || sender.tab?.url;
+        // This only decides whether to show the HUD. GET_CONFIG must renew expired leases
+        // before any autofill, file attachment, or application action is allowed.
+        return {success: true, eligible: Boolean(sqcAuth &&
+          Object.values(sqcContexts).some(context => context.authSessionId === sqcAuth.sessionId &&
+            policy.matchesUrl(url, context.allowedRoutes)))};
+      }
       if (forbidden.has(action)) return { success: false, isLocked: true, error: 'Candidate and applier assignments are managed in ApplyFlow.' };
       if (action === 'SAVE_SETTINGS' || action === 'SET_INTERCEPTION_MODE') {
         if (!privileged(sender)) return { success: false, error: 'Change preferences in extension settings.' };

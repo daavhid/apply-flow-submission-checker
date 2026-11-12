@@ -52,3 +52,28 @@ test('a different candidate cannot use the current assignment autofill lease', (
   assert.equal(f.window.JobFormExtractor.restoreSavedForm({ id: 'other', firstName: 'Wrong' }, f.settings).count, 0);
   assert.equal(name.value, '');
 });
+
+test('verified resume text and skills fill supported fields without replacing user edits', () => {
+  const f=page();const skills=f.field('Technical skills'),resume=f.field('Resume text');
+  const edited=f.field('Skills','My edited skills');
+  const profile={id:'profile-1',resumeIsTailored:true,resumeTailoringRequired:true,
+    resumeText:'Verified job-specific resume',primaryStackKeywords:['TypeScript','SQL']};
+  f.window.JobFormExtractor.restoreSavedForm(profile,f.settings);
+  assert.equal(skills.value,'TypeScript, SQL');assert.equal(resume.value,'Verified job-specific resume');
+  assert.equal(edited.value,'My edited skills');
+});
+
+test('candidate details remain fillable while a required tailored resume is unavailable', () => {
+  const f=page();const name=f.field('First name'),skills=f.field('Skills'),resume=f.field('Resume text');
+  f.window.JobFormExtractor.restoreSavedForm({id:'profile-1',firstName:'Verified',resumeTailoringRequired:true,
+    resumeIsTailored:false,resumeText:'Base resume',primaryStackKeywords:['Base skills']},f.settings);
+  assert.equal(name.value,'Verified');assert.equal(skills.value,'');assert.equal(resume.value,'');
+});
+
+test('a verified job route stays eligible when launch parameters and visible application fields disappear', () => {
+  const f=page();f.window.top=f.window;
+  f.window.location={href:'https://jobs.example/role/1/step2',hostname:'jobs.example',pathname:'/role/1/step2'};
+  f.settings.verifiedContext.allowedRoutes=[{url:'https://jobs.example/role/1',includeSubpaths:true}];
+  f.window.__SQC_CONTEXT_SETTINGS=f.settings;
+  assert.equal(f.window.JobFormExtractor.isJobApplicationPortal(),true);
+});

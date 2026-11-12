@@ -163,7 +163,9 @@ window.JobFormValidator = (function () {
     // Check for dynamic in-memory tailored resume data
     let tailoredData = null;
     try {
-      if (typeof window !== 'undefined' && window.__SQC_TAILORED_RESUME_DATA) {
+      if (settings.integrationMode === 'applyflow') {
+        tailoredData = profile.resumeIsTailored ? {text: profile.resumeText, primaryStackKeywords: profile.primaryStackKeywords || []} : null;
+      } else if (typeof window !== 'undefined' && window.__SQC_TAILORED_RESUME_DATA) {
         tailoredData = window.__SQC_TAILORED_RESUME_DATA;
       } else if (typeof sessionStorage !== 'undefined') {
         const raw = sessionStorage.getItem('sqc_tailored_resume_data');
@@ -486,21 +488,21 @@ window.JobFormValidator = (function () {
     // =========================================================================
     // 2. RESUME ATTACHMENT & STACK MATCH
     // =========================================================================
-    const isTailoringMethod = profile.tailoringMode === 'tailored';
-    const hasTailoredResume = Boolean(tailoredData?.text || (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('sqc_tailored_resume')));
+    const isTailoringMethod = profile.resumeTailoringRequired === true || profile.tailoringMode === 'tailored';
+    const hasTailoredResume = settings.integrationMode === 'applyflow' ? profile.resumeIsTailored === true : Boolean(tailoredData?.text || (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('sqc_tailored_resume')));
 
     // 2.1 Tailoring Profile Requirement Check
     if (isTailoringMethod && !hasTailoredResume) {
       addError(
         data._elements?.resume,
-        `Tailoring Method Required: Candidate "${profile.fullName}" is configured for the Tailoring Method. A job-tailored resume must be pasted into the Floating HUD before submitting to ensure all required skills are referenced.`,
+        `Tailoring Method Required: Candidate "${profile.fullName}" is configured for the Tailoring Method. Sync the job-specific generated resume from ApplyFlow before submitting.`,
         "TAILORING_RESUME_REQUIRED"
       );
     }
 
     // 2.2 Empty / Missing Resume Check
     const hasPortalResumeUploaded = Boolean(data.resume_uploaded && data.resume_uploaded !== 'No file chosen');
-    if (!hasPortalResumeUploaded && !hasTailoredResume) {
+    if (!hasPortalResumeUploaded && (settings.integrationMode === 'applyflow' || !hasTailoredResume)) {
       if (data._elements?.resume || document.querySelector('input[type="file"], textarea[name*="resume" i], [class*="resume-upload"]')) {
         addError(data._elements?.resume, "Missing Resume: No resume file or text has been attached to this job application. Candidate resume is required before submitting.", "MISSING_RESUME");
       }
