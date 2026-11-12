@@ -1807,7 +1807,7 @@ window.SubmissionCheckerCore = (function () {
       return true;
     }
 
-    const testId = (el.getAttribute('data-testid') || el.getAttribute('data-qa') || el.getAttribute('data-automation-id') || el.className || '').toLowerCase();
+    const testId = (el.getAttribute('data-testid') || el.getAttribute('data-qa') || el.getAttribute('data-automation-id') || el.getAttribute('class') || '').toLowerCase();
     if (testId.includes('quick-apply') || testId.includes('easy-apply') || testId.includes('one-click-apply')) {
       return true;
     }
@@ -1820,89 +1820,9 @@ window.SubmissionCheckerCore = (function () {
     return false;
   }
 
-  // Heuristic: Is this element a standard final form submit button?
-  function isSubmitTarget(el) {
-    if (!el) return false;
-    if (el.closest('#sqc-hud-container, #sqc-modal-overlay, #sqc-portal-lock-banner')) return false;
-
-    // Quick Apply is handled separately by the verification watcher
-    if (isQuickApplyTrigger(el)) return false;
-
-    // Intermediate wizard steps (e.g. Step 3 of 8) NEVER have a final submit target
-    const intermediateCheck = JobFormExtractor.detectIntermediateWizardStep?.();
-    if (intermediateCheck && intermediateCheck.isIntermediate) {
-      return false;
-    }
-
-    const text = (el.innerText || el.textContent || el.value || '').trim().toLowerCase();
-
-    // Navigation, login, modal close, and step progression buttons are NEVER final submit
-    if (/^(log in|login|sign in|signin|register|next|next step|continue|save & continue|save and continue|proceed|back|previous|prev|upload|choose file|browse|agree|i agree|accept|cancel|close|exit)$/i.test(text)) {
-      return false;
-    }
-
-    // External job board links are NOT final form submits
-    if (/apply\s+on\s+company\s+site|apply\s+externally|apply\s+on\s+website|apply\s+with\s+indeed|apply\s+on\s+ziprecruiter/i.test(text)) {
-      return false;
-    }
-
-    // Heuristic: Is the user on an introductory step, terms & agreement, or modal wizard?
-    const isIntroOrWizardStep = Boolean(
-      document.querySelector('[aria-label*="terms" i], [class*="terms" i], [class*="modal" i] h1, [class*="modal" i] h2') ||
-      /step\s+1\s+of|terms\s*&\s*agreement|welcome to the.*application/i.test(document.body?.innerText?.slice(0, 2000) || '')
-    );
-    if (isIntroOrWizardStep && /^(apply|apply now|start application|begin application)$/i.test(text)) {
-      return false;
-    }
-
-    // Check if the candidate has actually entered meaningful info
-    const hasCandidateInputs = Boolean(
-      currentExtractedData?.email_entered ||
-      currentExtractedData?.candidate_name ||
-      currentExtractedData?.resume_uploaded ||
-      (currentExtractedData?.all_entries && currentExtractedData.all_entries.some(e => e.value && String(e.value).trim().length > 0))
-    );
-
-    // Initial "Apply" or "Apply now" button that launches/opens the application form:
-    // If no candidate info has been entered yet, clicking "Apply" is starting the application, NOT submitting it!
-    if (/^(apply|apply now|start application|begin application|apply for this job|apply for job|apply to position)$/i.test(text)) {
-      if (!hasCandidateInputs) {
-        return false;
-      }
-    }
-
-    // Explicit Final Submit button text markers:
-    if (/^(submit application|submit|send application|complete application|submit profile|finish and submit|submit my application|confirm and submit|complete submission)$/i.test(text)) {
-      return true;
-    }
-
-    // On pages WITH candidate inputs entered, "apply" at the bottom of the form IS the final submit (e.g. Dover, Rippling)
-    if (hasCandidateInputs && /^(apply|apply now|apply for this job|apply for job)$/i.test(text)) {
-      return true;
-    }
-
-    // Automation IDs
-    const autoId = (el.getAttribute('data-automation-id') || el.getAttribute('data-qa') || el.id || '').toLowerCase();
-    if (autoId.includes('submit-button') || autoId.includes('submitapplication') || autoId.includes('submitbtn') || autoId === 'submit') {
-      if (!autoId.includes('next') && !autoId.includes('continue') && !autoId.includes('start') && !autoId.includes('login') && !autoId.includes('agree')) return true;
-    }
-
-    // Tag & type
-    const btn = el.closest('button, [role="button"], input[type="submit"]') || el;
-    const btnType = (btn.getAttribute('type') || '').toLowerCase();
-    const btnText = (btn.innerText || btn.textContent || btn.value || '').trim().toLowerCase();
-    if (btnType === 'submit' && !/^(next|continue|proceed|back|previous|prev|login|sign in|agree|save & continue|save and continue|save)/i.test(btnText)) {
-      if (/submit|send|finish|complete/i.test(btnText)) return true;
-      if (hasCandidateInputs && /apply/i.test(btnText)) return true;
-    }
-
-    // Check parent button wrapper
-    const parentBtn = el.closest('button, [role="button"], input[type="submit"]');
-    if (parentBtn && parentBtn !== el) {
-      return isSubmitTarget(parentBtn);
-    }
-
-    return false;
+  function submissionIntent(target, form = null, submitEvent = false) {
+    return window.SQCSubmitIntent.inspect(target, { form, submitEvent,
+      intermediate: Boolean(JobFormExtractor.detectIntermediateWizardStep?.()?.isIntermediate) });
   }
 
   // 2. SYNCHRONOUS CAPTURE-PHASE SUBMIT & QUICK APPLY INTERCEPTION
@@ -1947,11 +1867,14 @@ window.SubmissionCheckerCore = (function () {
 
       const target = event.target;
       if (!target) return;
+      const quickApply = isQuickApplyTrigger(target);
+      const intent = submissionIntent(target);
+      if (intent === 'ignore') return;
+      // Entry links and form-opening controls must not run submission validation or watchers.
+      if (!quickApply && !['final', 'step'].includes(intent)) return;
 
       if (!hasVerifiedContext()) {
-        const button = target.closest('button, input[type="submit"], [role="button"]');
-        const text = (button?.innerText || button?.value || '').trim();
-        if (isSubmitTarget(target) || isQuickApplyTrigger(target) || /^(next|continue|save & continue|save and continue|proceed)$/i.test(text)) {
+        if (quickApply || intent === 'final' || intent === 'step') {
           event.preventDefault(); event.stopImmediatePropagation();
           requireVerifiedContext();
         }
@@ -1959,7 +1882,7 @@ window.SubmissionCheckerCore = (function () {
       }
 
       // Handle Quick Apply / 1-Click Apply initiation
-      if (isQuickApplyTrigger(target)) {
+      if (quickApply) {
         console.log("[Submission Checker] Quick Apply button clicked. Validating candidate context...");
         runExtractionAndValidation();
 
@@ -1988,13 +1911,9 @@ window.SubmissionCheckerCore = (function () {
         return;
       }
 
-      // Multi-step intermediate navigation check (Next, Continue, Save & Continue, Proceed)
+      // Only step controls trigger step validation, not arbitrary page clicks.
       const clickedBtn = target.closest('button, input[type="submit"], input[type="button"], [role="button"]') || target;
-      const clickedBtnText = (clickedBtn.innerText || clickedBtn.textContent || clickedBtn.value || '').trim().toLowerCase();
-      const isIntermediateNav = /^(next|next step|continue|save & continue|save and continue|proceed)$/i.test(clickedBtnText);
-      const isIntermediate = Boolean(JobFormExtractor.detectIntermediateWizardStep?.()?.isIntermediate);
-
-      if (isIntermediateNav || (isIntermediate && !isSubmitTarget(target))) {
+      if (intent === 'step') {
         // Validate current step fields (Gatekeeper check)
         runExtractionAndValidation();
 
@@ -2018,7 +1937,7 @@ window.SubmissionCheckerCore = (function () {
         return;
       }
 
-      if (!isSubmitTarget(target)) return;
+      if (intent !== 'final') return;
 
       const submitBtn = target.closest('button, input[type="submit"], [role="button"]') || target;
 
@@ -2061,13 +1980,15 @@ window.SubmissionCheckerCore = (function () {
 
       // NEVER log submission on login / account activation / password reset pages
       if (isLoginOrActivationPage()) return;
+      const intent = submissionIntent(event.submitter || event.target, event.target, true);
+      if (!['final', 'step'].includes(intent)) return;
       if (!hasVerifiedContext()) {
         event.preventDefault(); event.stopImmediatePropagation();
         requireVerifiedContext();
         return;
       }
 
-      const isIntermediate = Boolean(JobFormExtractor.detectIntermediateWizardStep?.()?.isIntermediate);
+      const isIntermediate = intent === 'step';
 
       runExtractionAndValidation();
 
