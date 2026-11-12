@@ -77,9 +77,9 @@ submission-checker/
 │   ├── popup.css              # Popup styling
 │   └── popup.js               # Popup controller
 ├── options/
-│   ├── options.html           # Full Management Dashboard & Settings
+│   ├── options.html           # Preferences, Account & Connection, Audit History
 │   ├── options.css            # Options UI styling
-│   └── options.js             # Profiles CRUD, Webhook settings & Audit History table
+│   └── options.js             # Browser preferences, managed account, searchable audit history
 ├── test-bench/
 │   ├── index.html             # Interactive ATS Simulator (Workday, Greenhouse, Lever)
 │   ├── test-bench.css         # Simulator styling

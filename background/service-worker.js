@@ -59,6 +59,19 @@ async function openSetup(sourceTabId) {
   return { success: true };
 }
 
+async function openSettings(section) {
+  const base = chrome.runtime.getURL('options/options.html');
+  const target = ['account', 'history'].includes(section) ? section : 'preferences';
+  const url = base + '#' + target;
+  const tabs = await chrome.tabs.query({});
+  const existing = tabs.find(tab => tab.url?.split(/[?#]/)[0] === base);
+  if (existing) {
+    await chrome.tabs.update(existing.id, { active: true, url });
+    if (existing.windowId != null) await chrome.windows.update(existing.windowId, { focused: true });
+  } else await chrome.tabs.create({ url });
+  return { success: true };
+}
+
 importScripts('../content/context-policy.js', 'applyflow-session.js');
 const sqcApplyFlow = SQCApplyFlowSession.create({ chrome, fetch: (...args) => fetch(...args), policy: SQCContextPolicy, defaults: DEFAULT_SETTINGS });
 
@@ -107,10 +120,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return integrated;
     }
     // Only extension UI can invoke maintenance commands. Portal scripts get a narrow allowlist.
-    const contentActions = new Set(['OPEN_SETUP', 'PERSIST_REDIRECT_TRACKING', 'CAPTURE_PAGE_SCREENSHOT', 'GET_SESSION_SCREENSHOTS', 'DELETE_SESSION_SCREENSHOT', 'CLEAR_SESSION_SCREENSHOTS']);
+    const contentActions = new Set(['OPEN_SETUP', 'OPEN_OPTIONS', 'PERSIST_REDIRECT_TRACKING', 'CAPTURE_PAGE_SCREENSHOT', 'GET_SESSION_SCREENSHOTS', 'DELETE_SESSION_SCREENSHOT', 'CLEAR_SESSION_SCREENSHOTS']);
     const isPortalSender = sender.tab && !sender.url?.startsWith(chrome.runtime.getURL(''));
     if (isPortalSender && !contentActions.has(message.type)) return { success: false, error: 'Unsupported portal action' };
     if (message.type === 'OPEN_SETUP') return openSetup(isPortalSender ? sender.tab.id : message.tabId);
+    if (message.type === 'OPEN_OPTIONS') return openSettings(message.section);
     if (isPortalSender) {
       const verified = await sqcApplyFlow.handle({ type: 'GET_CONFIG' }, sender);
       if (!verified.settings.verifiedContext) return { success: false, error: verified.integration.message };
@@ -368,11 +382,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         } catch (err) {
           return { success: false, error: err.message || 'Endpoint unreachable' };
         }
-      }
-
-      case "OPEN_OPTIONS": {
-        chrome.runtime.openOptionsPage();
-        return { success: true };
       }
 
       default:

@@ -43,3 +43,20 @@ test('reopening setup focuses the existing tab and preserves its source applicat
   assert.equal(w.updated[0].url, undefined);
   assert.equal(w.focused[0].id, 3); assert.equal(w.focused[0].focused, true);
 });
+
+test('the portal HUD can open settings without a verified assignment or an external URL', async () => {
+  const w = worker();
+  const result = await w.send({type: 'OPEN_OPTIONS', section: 'history', url: 'https://untrusted.example'},
+    {url: 'https://jobs.example/apply', tab: {id: 7}});
+  assert.equal(result.success, true);
+  assert.equal(w.created[0].url, 'chrome-extension://sqc/options/options.html#history');
+  assert.deepEqual(w.actions, ['OPEN_OPTIONS']);
+});
+
+test('settings links reuse the existing settings tab and select the requested section', async () => {
+  const w = worker([{id: 21, windowId: 3, url: 'chrome-extension://sqc/options/options.html#preferences'}]);
+  await w.send({type: 'OPEN_OPTIONS', section: 'history'}, {url: 'chrome-extension://sqc/popup/popup.html'});
+  assert.equal(w.created.length, 0);
+  assert.equal(w.updated[0].url, 'chrome-extension://sqc/options/options.html#history');
+  assert.equal(w.updated[0].active, true);
+});

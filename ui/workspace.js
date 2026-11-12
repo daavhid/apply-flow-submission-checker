@@ -137,7 +137,10 @@ window.SQCWorkspace = (() => {
       on('review-profile', () => navigate('profile'));
       on('preferences', () => navigate('preferences'));
       on('password-settings', () => navigate('password'));
-      on('history', () => chrome.runtime.openOptionsPage());
+      on('history', () => perform(async () => {
+        const result = await send({ type: 'OPEN_OPTIONS', section: 'history' });
+        if (!result?.success) throw new Error(result?.error || 'Unable to open audit history.');
+      }));
       on('return-portal', () => perform(async () => { await chrome.tabs.update(portal.id, {active: true}); window.close(); }));
       on('refresh', () => perform(async () => {
         notify('Checking ApplyFlow for your latest assignment…', 'info');
