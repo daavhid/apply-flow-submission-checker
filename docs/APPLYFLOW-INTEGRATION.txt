@@ -2,14 +2,15 @@ ApplyFlow integration contract for SQC
 
 Implement this contract in the ApplyFlow backend to enable the SQC authentication,
 candidate profile, job context, and audit synchronization already implemented in
-this repository. Contract version: 1. These new authentication/context routes are
+this repository. Contract version: 2. These new authentication/context routes are
 requirements for the ApplyFlow agent; their existence is not assumed.
 
 Scope
 
-SQC now uses one user-selected ApplyFlow API origin. Applier identity comes from
-the authenticated server session. Candidate, job, and verified resume come from
-an authorized application assignment. Profiles are no longer seeded from JSON.
+SQC now uses one user-selected ApplyFlow API origin. The user signs in with their
+ApplyFlow applier email and password. The authenticated server session returns
+the candidate profile assigned to that applier, which is locked across SQC job
+tabs. Each job context must match this profile lock. Profiles are no longer seeded from JSON.
 Candidate editing, local reassignment, admin passkeys, and extra webhook targets
 are disabled. The existing ChatGPT copy/paste tools remain available only inside
 a verified assignment. Direct screening API and general chat UI integration are
@@ -19,8 +20,10 @@ Authentication transport
 
 The endpoint is the ONLY integration setting the installer/user supplies. Do not
 ask the user to enter candidate IDs, applier IDs, API keys, extension IDs, AI
-provider settings, or separate webhook URLs. Normal ApplyFlow sign-in is required
-if no authenticated browser session exists. Login credentials stay in ApplyFlow.
+provider settings, or separate webhook URLs. The applier supplies their assigned
+email and password in the SQC sign-in form if not already authenticated. SQC sends
+credentials to the configured ApplyFlow server and never stores them. ApplyFlow
+owns account creation, credential verification, password policy, and assignments.
 The extension opens its endpoint setup screen on first installation, persists
 the endpoint across browser restarts/extension updates, and uses the same flow
 for an unpacked local installation and a Chrome Web Store installation.
@@ -28,8 +31,9 @@ for an unpacked local installation and a Chrome Web Store installation.
 1. The user enters the API origin in the extension popup and clicks Connect.
    HTTPS is required, except HTTP on localhost/127.0.0.1/[::1]. Paths, credentials,
    query strings, and hashes are rejected. Portal URLs cannot select API origins.
-2. GET /api/sqc/login must serve or redirect to the normal ApplyFlow login.
-   This is opened in a browser tab, never fetched as an authentication workaround.
+2. SQC uses GET /api/sqc/auth and POST /api/sqc/login for email/password sign-in.
+   GET /api/sqc/login can still serve or redirect to the normal ApplyFlow login
+   as an alternative browser sign-in flow. GET login must not change credentials.
 3. All API calls originate in the service worker, use credentials: include,
    cache: no-store, and reject redirects. Use the existing authenticated browser
    cookie to identify the user. If ApplyFlow currently accepts only bearer tokens,
@@ -43,7 +47,8 @@ for an unpacked local installation and a Chrome Web Store installation.
    Configure credentialed responses
    for this origin explicitly; do not combine credentialed access with '*'.
    Test the actual Chrome cookie policy in the target deployment.
-5. GET /api/sqc/session returns a session-bound CSRF token. All POST requests
+5. GET /api/sqc/session returns a session-bound CSRF token. The login POST uses
+   the separate pre-authentication token from GET /api/sqc/auth. All POST requests
    include X-SQC-CSRF. Validate it, session access, and assignment ownership on
    the backend. No bearer token or CSRF token is exposed to portal content scripts.
 6. 401 means signed out/expired; 403 means access denied/revoked. Never redirect
@@ -55,15 +60,85 @@ GET /api/sqc/session
 Response (top-level shape, no data wrapper):
 {
   "success": true,
-  "contractVersion": 1,
-  "session": {"id":"auth_123","expiresAt":"2030-01-01T13:00:00.000Z"},
-  "applier": {"id":"user_123","name":"Applier Name"},
-  "csrfToken":"opaque_session_bound_csrf_value"
+  "contractVersion": 2,
+  "session": {"id":"auth_123","expiresAt":"2030-01-01T13:00:00.000Z","passwordChangeRequired":false},
+  "applier": {"id":"user_123","name":"Applier Name","email":"applier@example.com"},
+  "csrfToken":"opaque_session_bound_csrf_value",
+  "profileAssignment":{
+    "id":"profile_assignment_123","version":"4","status":"ACTIVE",
+    "applierId":"user_123","profileId":"profile_123","profileVersion":"7"
+  },
+  "profile":{
+    "id":"profile_123","version":"7","verified":true,"fullName":"Candidate Name"
+  }
 }
 
 Use the authenticated user, never a request applier ID. Session IDs must change
 when the user signs out/signs in as another account. Applier identity is locked in
 SQC. This endpoint must not return a list of unrelated candidate profiles.
+Return the assigned profile even when no job tab is open, so the user can see
+their locked assignment immediately after sign-in. Include the full verified
+profile fields needed for display; the per-job context includes the approved
+resume. Return profileAssignment:null and profile:null when no active assignment
+exists; SQC then shows UNASSIGNED and blocks application actions. Do not silently
+pick another candidate. Increment assignment.version on reassignment/revocation.
+
+Applier credentials and password lifecycle
+
+Provision the applier account and initial email/password in ApplyFlow using the
+existing authorized administration flow. SQC does not create users or carry a
+shared default password. A temporary password can be marked passwordChangeRequired
+in the session; SQC blocks all job contexts until the password is changed.
+
+GET /api/sqc/auth is available before login. It returns:
+{
+  "success":true,"contractVersion":2,
+  "csrfToken":"opaque_pre_authentication_token",
+  "expiresAt":"2030-01-01T12:05:00.000Z"
+}
+Bind this short-lived challenge to a pre-authentication HttpOnly cookie and
+validate the actual permitted extension origin. It must not expose an applier
+profile or create an authenticated user session. Return Cache-Control:no-store.
+
+POST /api/sqc/login
+Headers: Content-Type:application/json; X-SQC-CSRF:<pre-authentication token>
+Body: {"email":"applier@example.com","password":"user_supplied_password"}
+Response: {"success":true,"contractVersion":2}
+
+Validate credentials with ApplyFlow's existing account system and establish a
+rotated authenticated HttpOnly cookie. SQC then GETs /api/sqc/session, checks the
+returned email matches the submitted email, and obtains the locked profile.
+Invalid credentials return 401 with a generic error. Rate-limit login attempts.
+Do not echo passwords into responses or logs, or accept applier/profile IDs as
+credential substitutes. Passwords are cleared from the SQC form after submission
+and from worker message objects after completion. No password is saved in Chrome
+local/session storage or included in audit/event payloads.
+
+POST /api/sqc/password
+Headers: Content-Type:application/json; X-SQC-CSRF:<authenticated session token>
+Body: {"currentPassword":"user_current_password","newPassword":"user_new_password"}
+Response: {"success":true,"contractVersion":2}
+
+Verify the current password, enforce the existing backend password policy, change
+the password, and invalidate old authentication sessions. Rotate the current
+cookie into a new session and clear passwordChangeRequired. SQC clears its old
+context and fetches /api/sqc/session again. If the backend chooses not to preserve
+the current session, return 401 on the next session check and require sign-in with
+the new password. Wrong current password/policy failures return 400; missing or
+expired authentication returns 401. Never change the assigned profile as a side
+effect of a password change.
+
+POST /api/sqc/logout
+Headers: Content-Type:application/json; X-SQC-CSRF:<authenticated session token>
+Body: {}
+Response: {"success":true,"contractVersion":2}
+
+Revoke the backend session and expire its cookie, including the corresponding
+ApplyFlow browser session if they share it. SQC clears its cached identity and
+records local sign-out even if the server is unavailable; automatic reconnect
+must not silently reuse a leftover cookie. Sign-in explicitly clears this local
+lock only after credential verification. Disconnecting the endpoint is separate
+from signing out; use Sign out to revoke the authenticated session.
 
 Launching an assignment
 
@@ -82,7 +157,7 @@ POST /api/sqc/application-context
 Headers: Content-Type: application/json; X-SQC-CSRF: <session token>
 Request:
 {
-  "contractVersion":1,
+  "contractVersion":2,
   "applicationSessionId":"app_123",
   "url":"https://boards.greenhouse.io/example/jobs/12345#application_session_id=app_123",
   "jobId":"optional_explicit_applyflow_job_id",
@@ -98,7 +173,7 @@ unambiguous assignment that belongs to the authenticated applier. Return a
 Response:
 {
   "success":true,
-  "contractVersion":1,
+  "contractVersion":2,
   "context":{
     "applicationSessionId":"app_123",
     "authSessionId":"auth_123",
@@ -106,7 +181,8 @@ Response:
     "applier":{"id":"user_123","name":"Applier Name"},
     "assignment":{
       "status":"ACTIVE","applierId":"user_123",
-      "profileId":"profile_123","jobId":"job_123"
+      "profileId":"profile_123","jobId":"job_123",
+      "profileAssignmentId":"profile_assignment_123","profileAssignmentVersion":"4"
     },
     "profile":{
       "id":"profile_123","version":"7","verified":true,
@@ -144,6 +220,9 @@ Required validation:
 - Authenticate the applier and tenant, check active assignment ownership, and
   enforce equality among assignment IDs, profile ID, job ID, resume.profileId,
   and the returned authenticated session/applier IDs.
+- The job context profile ID/version must equal /api/sqc/session's locked profile
+  ID/version. Echo profileAssignmentId/version in context.assignment. A different
+  candidate for the same applier is rejected even if the URL requests that candidate.
 - Match the actual portal URL/requisition/platform identifier to the target job.
   Company/title alone are insufficient. Reject conflicting hints and ambiguity.
 - Build allowedRoutes from trusted job/ATS data. Do not echo arbitrary request
@@ -181,12 +260,13 @@ POST /api/submissions/live-event
 
 Requests retain the existing SQC evidence/validation fields and add:
 {
-  "contractVersion":1,
+  "contractVersion":2,
   "event_id":"random_event_uuid",
   "application_session_id":"app_123",
   "job_id":"job_123","job_version":"3",
   "profile_id":"profile_123","candidate_id":"profile_123","profile_version":"7",
-  "applier_id":"user_123","applier_name":"Applier Name",
+  "profile_assignment_id":"profile_assignment_123","profile_assignment_version":"4",
+  "applier_id":"user_123","applier_name":"Applier Name","applier_email":"applier@example.com",
   "profile_name":"Candidate Name","profile_assigned":"Candidate Name",
   "resume_id":"resume_123","resume_version":"2",
   "is_final_submission":true,
@@ -196,7 +276,8 @@ Requests retain the existing SQC evidence/validation fields and add:
   "timestamp":"2030-01-01T12:00:00.000Z"
 }
 
-Re-derive identity/ownership server-side, validate the versions, and deduplicate
+Re-derive identity/ownership and the applier profile lock server-side, validate
+profile assignment, profile, job, and resume versions, and deduplicate
 event_id within the assignment. Reject stale versions with 409. Do not treat
 PENDING/IN_PROGRESS, REJECTED, BLOCKED, or PORTAL_ACCESS_FAILED as a successful
 application. Prevent downgrading an already submitted application. Screenshot
@@ -242,7 +323,10 @@ verification endpoints. AI availability alone must never unlock SQC.
 
 Acceptance checks for the ApplyFlow agent
 
-Test valid login, expired login, wrong applier, wrong tenant, reassignment,
+Test email/password login, invalid credentials, temporary-password enforcement,
+password changes and old-password rejection, logout with failed server delivery,
+an authenticated applier with no assigned profile, expired login, wrong applier,
+wrong tenant, reassignment,
 candidate/profile/resume version updates, a resume belonging to another candidate,
 ambiguous standalone jobs, different jobs in two tabs, route redirects, embedded
 form URLs, and a logout during context retrieval. Verify that forged URL names,

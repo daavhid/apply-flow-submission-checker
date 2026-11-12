@@ -58,7 +58,7 @@ const sqcEvidenceReady = chrome.storage.session.get('sqcEvidence').then(({ sqcEv
 function bindEvidenceContext(config, tabId) {
   const c = config.settings?.verifiedContext;
   if (!tabId || !c) return;
-  const key = [c.applicationSessionId, c.applierId, c.profileId, c.profileVersion, c.jobVersion, c.resumeVersion].join(':');
+  const key = [c.applicationSessionId, c.applierId, c.profileAssignmentId, c.profileAssignmentVersion, c.profileId, c.profileVersion, c.jobVersion, c.resumeVersion].join(':');
   if (tabApplyFlowSessions.get(tabId)?.contextKey !== key) tabApplyFlowSessions.set(tabId, { contextKey: key, screenshots: [] });
   config.sessionScreenshots = tabApplyFlowSessions.get(tabId).screenshots || [];
 }
@@ -87,10 +87,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     await sqcEvidenceReady;
     const integrated = await sqcApplyFlow.handle(message, sender);
     if (integrated !== undefined) {
-      if (['SQC_CONNECT', 'SQC_DISCONNECT'].includes(message.type)) tabApplyFlowSessions.clear();
+      if (['SQC_CONNECT', 'SQC_DISCONNECT', 'SQC_LOGIN', 'SQC_LOGOUT', 'SQC_CHANGE_PASSWORD'].includes(message.type)) tabApplyFlowSessions.clear();
       if (integrated.integration?.state === 'SIGNED_OUT') tabApplyFlowSessions.clear();
       bindEvidenceContext(integrated, sender.tab?.id || message.tabId);
-      if (['SQC_CONNECT', 'SQC_DISCONNECT', 'SAVE_SETTINGS', 'SET_INTERCEPTION_MODE'].includes(message.type)) notifyTabsAboutStateChange();
+      if (['SQC_CONNECT', 'SQC_DISCONNECT', 'SQC_LOGIN', 'SQC_LOGOUT', 'SQC_CHANGE_PASSWORD', 'SAVE_SETTINGS', 'SET_INTERCEPTION_MODE'].includes(message.type)) notifyTabsAboutStateChange();
       return integrated;
     }
     // Only extension UI can invoke maintenance commands. Portal scripts get a narrow allowlist.
@@ -371,7 +371,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       await chrome.storage.session.set({ sqcEvidence: compactEvidence() });
       sendResponse(result);
     })
-    .catch(err => sendResponse({ success: false, error: err.message }));
+    .catch(async err => {
+      if (['SQC_LOGIN', 'SQC_LOGOUT', 'SQC_CHANGE_PASSWORD'].includes(message.type)) {
+        tabApplyFlowSessions.clear();
+        await chrome.storage.session.remove('sqcEvidence');
+        notifyTabsAboutStateChange();
+      }
+      sendResponse({ success: false, error: err.message, state: err.state });
+    });
 
   return true; // Keep message channel open for async response
 });

@@ -33,6 +33,7 @@ window.SubmissionCheckerCore = (function () {
   function contextStamp() {
     const c = currentSettings?.verifiedContext;
     return { application_session_id: c?.applicationSessionId, profile_version: c?.profileVersion,
+      profile_assignment_id: c?.profileAssignmentId, profile_assignment_version: c?.profileAssignmentVersion,
       job_version: c?.jobVersion, resume_id: c?.resumeId, resume_version: c?.resumeVersion };
   }
 
@@ -658,7 +659,7 @@ window.SubmissionCheckerCore = (function () {
         if (res && res.success) {
           const nextSession = res.settings?.verifiedContext?.applicationSessionId;
           const c = res.settings?.verifiedContext;
-          const nextKey = c ? [c.applicationSessionId, c.applierId, c.profileId, c.profileVersion, c.jobVersion, c.resumeVersion].join(':') : '';
+          const nextKey = c ? [c.applicationSessionId, c.applierId, c.profileAssignmentId, c.profileAssignmentVersion, c.profileId, c.profileVersion, c.jobVersion, c.resumeVersion].join(':') : '';
           const changed = sessionStorage.getItem('sqc_verified_context_key') !== nextKey;
           if (changed || !nextSession) {
             sessionScreenshots = [];

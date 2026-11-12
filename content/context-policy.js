@@ -44,6 +44,7 @@
     } catch (_) { return false; }
     return Boolean(settings?.integrationMode === 'applyflow' && c && c.state === 'VERIFIED' &&
       c.applicationSessionId && c.applierId && c.profileId && c.jobId &&
+      c.profileAssignmentId && c.profileAssignmentVersion &&
       Number(c.expiresAt) > now && matchesUrl(url, c.allowedRoutes));
   }
   const api = { origin, matchesUrl, ready, launchHints };

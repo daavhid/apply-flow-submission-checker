@@ -1,4 +1,4 @@
-/* ApplyFlow contract v1. No candidate defaults, URL-selected servers, or local identity overrides. */
+/* ApplyFlow contract v2. No candidate defaults, URL-selected servers, or local identity overrides. */
 (function (root) {
   'use strict';
   function create({ chrome, fetch, policy, defaults = {}, now = Date.now }) {
@@ -21,10 +21,16 @@
             ...(csrfToken ? { 'X-SQC-CSRF': csrfToken } : {}) },
           ...(body ? { body: JSON.stringify(body) } : {})
         });
-        if (res.status === 401) { await clear(); throw failure('SIGNED_OUT', 'Sign in to ApplyFlow, then reconnect SQC.'); }
+        if (res.status === 401) {
+          await clear();
+          throw failure(path === '/api/sqc/login' ? 'INVALID_CREDENTIALS' : 'SIGNED_OUT',
+            path === '/api/sqc/login' ? 'Email or password is incorrect.' : 'Sign in with your ApplyFlow email and password.');
+        }
         if (res.status === 403) throw failure('FORBIDDEN', 'ApplyFlow denied access. Refresh your assignment.');
         const data = await res.json();
-        if (!res.ok || data.success !== true) throw failure('UNAVAILABLE', data.error?.message || 'ApplyFlow could not verify this request.');
+        if (!res.ok || data.success !== true) throw failure('UNAVAILABLE',
+          ['/api/sqc/login', '/api/sqc/password'].includes(path) ? 'ApplyFlow could not complete this authentication request.' :
+            (data.error?.message || 'ApplyFlow could not verify this request.'));
         return data;
       } catch (error) {
         if (error.state) throw error;
@@ -41,21 +47,35 @@
       const stamp = revision;
       const data = await request(apiOrigin, '/api/sqc/session');
       const expiresAt = Date.parse(data.session?.expiresAt);
-      if (data.contractVersion !== 1 || !data.session?.id || !data.applier?.id || !data.applier?.name ||
+      if (data.contractVersion !== 2 || !data.session?.id || !data.applier?.id || !data.applier?.name ||
+          typeof data.applier?.email !== 'string' || !data.applier.email.trim() ||
           !data.csrfToken || !Number.isFinite(expiresAt) || expiresAt <= now()) {
         throw failure('INVALID_CONTEXT', 'ApplyFlow session response is incomplete or expired.');
       }
+      const assignment = data.profileAssignment;
+      const profile = data.profile;
+      if (assignment != null && (!assignment.id || !assignment.version || !assignment.profileId || !assignment.profileVersion || assignment.status !== 'ACTIVE' ||
+          assignment.applierId !== data.applier.id || assignment.profileId !== profile?.id ||
+          assignment.profileVersion !== profile?.version || profile?.verified !== true || !profile?.fullName)) {
+        throw failure('INVALID_CONTEXT', 'ApplyFlow returned an invalid applier profile assignment.');
+      }
+      if (!assignment && profile) throw failure('INVALID_CONTEXT', 'A profile requires a verified applier assignment.');
       if (stamp !== revision) throw failure('STALE_CONTEXT', 'Connection changed. Retry verification.');
-      if (cached && (cached.applier.id !== data.applier.id || cached.sessionId !== data.session.id)) {
+      if (cached && (cached.applier.id !== data.applier.id || cached.sessionId !== data.session.id ||
+          cached.assignment?.id !== assignment?.id || cached.assignment?.version !== assignment?.version ||
+          cached.profile?.version !== profile?.version || data.session.passwordChangeRequired === true)) {
         await chrome.storage.session.remove('sqcContexts');
       }
-      const auth = { apiOrigin, sessionId: data.session.id, applier: data.applier, csrfToken: data.csrfToken,
+      const applier = { id: data.applier.id, name: data.applier.name, email: data.applier.email };
+      const auth = { apiOrigin, sessionId: data.session.id, applier, csrfToken: data.csrfToken,
+        assignment: assignment || null, profile: assignment ? profile : null,
+        passwordChangeRequired: data.session.passwordChangeRequired === true,
         expiresAt, checkedAt: now() };
       await chrome.storage.session.set({ sqcAuth: auth });
       return auth;
     }
     function hints(url) {
-      return policy.launchHints(url);
+      return Object.fromEntries(Object.entries(policy.launchHints(url)).filter(([, value]) => value !== undefined));
     }
     async function resolveContext(auth, tab, url, force) {
       const { sqcContexts = {} } = await chrome.storage.session.get('sqcContexts');
@@ -68,16 +88,18 @@
       if (compatible && !force && previous.checkedAt + 30000 > now() && previous.expiresAt > now()) return previous;
       delete sqcContexts[tab.id];
       await chrome.storage.session.set({ sqcContexts });
-      const body = { contractVersion: 1, url,
+      const body = { contractVersion: 2, url,
         ...(compatible ? { applicationSessionId: previous.applicationSessionId } : {}), ...requested };
       const stamp = revision;
       const data = await request(auth.apiOrigin, '/api/sqc/application-context', 'POST', body, auth.csrfToken);
       const c = data.context;
       const expiry = Date.parse(c?.expiresAt);
-      if (data.contractVersion !== 1 || !c?.applicationSessionId || c.authSessionId !== auth.sessionId ||
+      if (data.contractVersion !== 2 || !c?.applicationSessionId || c.authSessionId !== auth.sessionId ||
           c.applier?.id !== auth.applier.id || c.assignment?.status !== 'ACTIVE' ||
           c.assignment.applierId !== auth.applier.id || c.assignment.profileId !== c.profile?.id ||
           c.assignment.jobId !== c.job?.id || c.profile?.verified !== true || !c.profile?.id ||
+          c.profile.id !== auth.assignment?.profileId || c.profile.version !== auth.assignment?.profileVersion ||
+          c.assignment.profileAssignmentId !== auth.assignment?.id || c.assignment.profileAssignmentVersion !== auth.assignment?.version ||
           !c.profile?.version || !c.profile?.fullName || !c.job?.id || !c.job?.version ||
           c.resume?.verified !== true || !c.resume?.id || !c.resume?.version || !c.resume?.text || c.resume.profileId !== c.profile.id ||
           !Number.isFinite(expiry) || expiry <= now() || !policy.matchesUrl(url, c.allowedRoutes) ||
@@ -100,7 +122,7 @@
       const settings = { ...defaults };
       for (const key of preferences) if (stored.settings?.[key] !== undefined) settings[key] = stored.settings[key];
       Object.assign(settings, { integrationMode: 'applyflow', isProfileLocked: true, allowOverride: false,
-        activeProfileId: '', applierId: '', applierName: '', activeStackKey: 'auto',
+        activeProfileId: '', applierId: '', applierName: '', applierEmail: '', activeStackKey: 'auto',
         mockBackendSuccess: false, webhooks: [], backendApiKey: '',
         backendWebhookUrl: apiOrigin ? apiOrigin + '/api/submissions/webhook' : '',
         verifiedContext: null });
@@ -112,32 +134,37 @@
           settings.integrationMessage = integration.message;
           return { success: true, settings, profiles: [], activeProfile: null, integration };
         }
+        if (stored.sqcConnection.signedOut) throw failure('SIGNED_OUT', 'Sign in with your ApplyFlow email and password.');
         auth = await authenticate(apiOrigin, message.force === true);
-        integration = { state: 'AUTHENTICATED', message: 'Open an assigned job from ApplyFlow.', apiOrigin,
-          applier: auth.applier, expiresAt: auth.expiresAt };
+        integration = { state: auth.passwordChangeRequired ? 'PASSWORD_CHANGE_REQUIRED' : auth.assignment ? 'AUTHENTICATED' : 'UNASSIGNED',
+          message: auth.passwordChangeRequired ? 'Change your temporary password before applying.' : auth.assignment ?
+            'Your assigned profile is locked. Open an assigned job from ApplyFlow.' : 'No active candidate profile is assigned to your ApplyFlow account.', apiOrigin,
+          applier: auth.applier, profileAssignment: auth.assignment, passwordChangeRequired: auth.passwordChangeRequired, expiresAt: auth.expiresAt };
         let tab = privileged(sender) ? null : sender.tab;
         if (!tab && privileged(sender) && Number.isInteger(message.tabId)) tab = await chrome.tabs.get(message.tabId);
-        if (tab) {
+        if (tab && auth.assignment && !auth.passwordChangeRequired) {
           // Every frame is verified against its own URL; the context routes must authorize embedded forms too.
           const url = privileged(sender) ? tab.url : (sender.url || tab.url);
           context = await resolveContext(auth, tab, url, message.force === true);
           integration = { ...integration, state: 'VERIFIED', message: 'Assignment verified by ApplyFlow.' };
           settings.verifiedContext = { state: 'VERIFIED', applicationSessionId: context.applicationSessionId,
+            profileAssignmentId: auth.assignment.id, profileAssignmentVersion: auth.assignment.version,
             applierId: auth.applier.id, profileId: context.profile.id, jobId: context.job.id,
             profileVersion: context.profile.version, jobVersion: context.job.version, resumeId: context.resume.id,
             resumeVersion: context.resume.version, expiresAt: context.expiresAt, allowedRoutes: context.allowedRoutes,
             status: context.status || 'PENDING' };
         }
       } catch (error) {
-        if (['SIGNED_OUT', 'FORBIDDEN'].includes(error.state)) await clear();
+        if (['SIGNED_OUT', 'FORBIDDEN'].includes(error.state)) { await clear(); auth = null; }
         integration = { state: error.state || 'UNAVAILABLE', message: error.message, apiOrigin,
           ...(auth ? { applier: auth.applier } : {}) };
       }
       settings.applierId = auth?.applier.id || '';
       settings.applierName = auth?.applier.name || '';
+      settings.applierEmail = auth?.applier.email || '';
       settings.integrationState = integration.state;
       settings.integrationMessage = integration.message;
-      let profile = null;
+      let profile = auth?.profile || null;
       if (context) {
         profile = { ...context.profile, resumeText: context.resume.text, baseResumeText: context.resume.text,
           resumeBase64: context.resume.file?.dataUrl || '',
@@ -145,8 +172,8 @@
           primaryStackKeywords: context.profile.primaryStackKeywords || [],
           salaryFloor: context.profile.salaryFloor ?? context.profile.compensation?.salaryFloor,
           desiredSalary: context.profile.desiredSalary ?? context.profile.compensation?.desiredSalary };
-        settings.activeProfileId = profile.id;
       }
+      settings.activeProfileId = profile?.id || '';
       return { success: true, settings, activeProfile: profile, profiles: profile ? [profile] : [], integration,
         applyFlowContext: context ? { jobId: context.job.id, jobTitle: context.job.title, company: context.job.company,
           currentStatus: context.status, applier: auth.applier, profileName: profile.fullName } : null };
@@ -156,9 +183,69 @@
       if (action === 'SQC_CONNECT') {
         if (!privileged(sender)) return { success: false, error: 'Configure ApplyFlow from the extension popup.' };
         const apiOrigin = policy.origin(message.apiOrigin);
+        const { sqcConnection } = await chrome.storage.local.get('sqcConnection');
         await clear();
-        await chrome.storage.local.set({ sqcConnection: { apiOrigin } });
+        await chrome.storage.local.set({ sqcConnection: { apiOrigin, ...(sqcConnection?.apiOrigin === apiOrigin && sqcConnection.signedOut ? { signedOut: true } : {}) } });
         return config({ force: true, tabId: message.tabId }, sender);
+      }
+      if (action === 'SQC_LOGIN') {
+        if (!privileged(sender)) return { success: false, error: 'Sign in from the extension popup.' };
+        const { sqcConnection } = await chrome.storage.local.get('sqcConnection');
+        if (!sqcConnection?.apiOrigin) return { success: false, error: 'Connect your ApplyFlow endpoint first.' };
+        const email = String(message.email || '').trim();
+        const password = typeof message.password === 'string' ? message.password : '';
+        try {
+          if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !password) throw failure('INVALID_CREDENTIALS', 'Enter your ApplyFlow email and password.');
+          await clear();
+          await chrome.storage.local.set({ sqcConnection: { apiOrigin: sqcConnection.apiOrigin, signedOut: true } });
+          // The unauthenticated challenge protects the login POST against login CSRF.
+          const challenge = await request(sqcConnection.apiOrigin, '/api/sqc/auth');
+          if (challenge.contractVersion !== 2 || !challenge.csrfToken || Date.parse(challenge.expiresAt) <= now() ||
+              !Number.isFinite(Date.parse(challenge.expiresAt))) throw failure('INVALID_CONTEXT', 'ApplyFlow login challenge is invalid or expired.');
+          await request(sqcConnection.apiOrigin, '/api/sqc/login', 'POST', { email, password }, challenge.csrfToken);
+          // Identity and the locked profile must always be fetched from the authenticated session endpoint.
+          await chrome.storage.local.set({ sqcConnection: { apiOrigin: sqcConnection.apiOrigin } });
+          const result = await config({ force: true, tabId: message.tabId }, sender);
+          if (result.integration?.applier && result.integration.applier.email.trim().toLowerCase() !== email.toLowerCase()) {
+            await clear();
+            await chrome.storage.local.set({ sqcConnection: { apiOrigin: sqcConnection.apiOrigin, signedOut: true } });
+            throw failure('CONTEXT_MISMATCH', 'ApplyFlow returned a different signed-in email. Sign in again.');
+          }
+          return result;
+        } finally { message.password = ''; }
+      }
+      if (action === 'SQC_CHANGE_PASSWORD') {
+        if (!privileged(sender)) return { success: false, error: 'Change your password from the extension popup.' };
+        const { sqcConnection } = await chrome.storage.local.get('sqcConnection');
+        try {
+          if (!sqcConnection?.apiOrigin || sqcConnection.signedOut) throw failure('SIGNED_OUT', 'Sign in before changing your password.');
+          if (!message.currentPassword || !message.newPassword || message.currentPassword === message.newPassword) {
+            throw failure('INVALID_PASSWORD', 'Enter your current password and a different new password.');
+          }
+          const auth = await authenticate(sqcConnection.apiOrigin, true);
+          await request(auth.apiOrigin, '/api/sqc/password', 'POST', {
+            currentPassword: message.currentPassword, newPassword: message.newPassword
+          }, auth.csrfToken);
+          await clear();
+          return await config({ force: true, tabId: message.tabId }, sender);
+        } finally { message.currentPassword = ''; message.newPassword = ''; }
+      }
+      if (action === 'SQC_LOGOUT') {
+        if (!privileged(sender)) return { success: false, error: 'Sign out from the extension popup.' };
+        const { sqcConnection } = await chrome.storage.local.get('sqcConnection');
+        let remoteSignedOut = false;
+        try {
+          if (sqcConnection?.apiOrigin && !sqcConnection.signedOut) {
+            const auth = await authenticate(sqcConnection.apiOrigin, true);
+            await request(auth.apiOrigin, '/api/sqc/logout', 'POST', {}, auth.csrfToken);
+            remoteSignedOut = true;
+          }
+        } catch (_) { /* Local sign-out must still lock SQC if the server is unavailable. */ }
+        finally {
+          await clear();
+          if (sqcConnection?.apiOrigin) await chrome.storage.local.set({ sqcConnection: { apiOrigin: sqcConnection.apiOrigin, signedOut: true } });
+        }
+        return { ...(await config({}, sender)), remoteSignedOut };
       }
       if (action === 'SQC_DISCONNECT') {
         if (!privileged(sender)) return { success: false, error: 'Disconnect from the extension popup.' };
@@ -193,15 +280,17 @@
         const { sqcAuth: auth } = await chrome.storage.session.get('sqcAuth');
         const payload = { ...(message.payload || {}) };
         const expected = { application_session_id: c.applicationSessionId, profile_version: c.profileVersion,
+          profile_assignment_id: c.profileAssignmentId, profile_assignment_version: c.profileAssignmentVersion,
           job_version: c.jobVersion, resume_id: c.resumeId, resume_version: c.resumeVersion };
         if (Object.entries(expected).some(([key, value]) => payload[key] !== value)) {
           return { success: false, error: 'Application context changed. Refresh SQC before reporting this event.' };
         }
         // Never forward client-specified destinations or identities.
         delete payload.serverUrl; delete payload.sqc_api_url;
-        Object.assign(payload, { contractVersion: 1, application_session_id: c.applicationSessionId,
+        Object.assign(payload, { contractVersion: 2, application_session_id: c.applicationSessionId,
           job_id: c.jobId, profile_id: c.profileId, candidate_id: c.profileId,
           applier_id: c.applierId, applier_name: cfg.integration.applier.name,
+          applier_email: cfg.integration.applier.email,
           profile_name: cfg.activeProfile.fullName, profile_assigned: cfg.activeProfile.fullName,
           profile_version: c.profileVersion, job_version: c.jobVersion, resume_id: c.resumeId, resume_version: c.resumeVersion });
         payload.extracted_data = { ...(payload.extracted_data || {}), job_id: c.jobId, profile_id: c.profileId,

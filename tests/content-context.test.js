@@ -18,6 +18,7 @@ function page() {
   }
   const settings = { integrationMode: 'applyflow', verifiedContext: { state: 'VERIFIED',
     applicationSessionId: 'application-1', applierId: 'user-1', profileId: 'profile-1', jobId: 'job-1',
+    profileAssignmentId: 'assignment-1', profileAssignmentVersion: '1',
     expiresAt: Date.now() + 60000, allowedRoutes: [{ url: window.location.href }] } };
   const field = (label, value = '') => {
     const f = { tagName: 'INPUT', type: 'text', value, events: [], ownerDocument: document,
