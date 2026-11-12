@@ -1610,3 +1610,18 @@
   user-select: none !important;
   filter: grayscale(0.65);
 }
+
+/* Authentication belongs to the extension workspace; the portal HUD provides a handoff. */
+.sqc-root .sqc-workspace-handoff { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 17px; padding: 28px; text-align: center; }
+.sqc-root .sqc-handoff-icon { display: grid; place-items: center; width: 72px; height: 76px; margin-bottom: 5px; border: 1px solid #a18cff40; border-radius: 23px; background: #7c6cff10; color: #c3b5ff; }
+.sqc-root .sqc-workspace-handoff h2 { margin: 0; padding: 0; border: 0; background: none; text-transform: none; font-size: 25px; font-weight: 600; line-height: 1.25; letter-spacing: -.6px; color: var(--sqc-text); }
+.sqc-root .sqc-handoff-copy { font-size: 13px; color: var(--sqc-muted); line-height: 1.75; }
+.sqc-root .sqc-handoff-steps { display: grid; gap: 14px; width: 100%; padding: 21px; border: 1px solid var(--sqc-line); border-radius: 14px; background: #ffffff03; text-align: left; }
+.sqc-root .sqc-handoff-steps span { display: flex; align-items: center; gap: 10px; font-size: 12px; color: #c1c8da; }
+.sqc-root .sqc-handoff-steps .sqc-ic { color: var(--sqc-accent); }
+.sqc-root .sqc-workspace-handoff > .sqc-btn { width: 100%; min-height: 42px; justify-content: center; flex-shrink: 0; }
+.sqc-root .sqc-handoff-footnote { color: var(--sqc-dim); font-size: 10px; }
+.sqc-root .sqc-handoff-identity { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; width: 100%; padding: 17px; border: 1px solid var(--sqc-line); border-radius: 12px; font-size: 12px; text-align: left; }
+.sqc-root .sqc-handoff-identity span { color: var(--sqc-muted); }
+.sqc-root .sqc-handoff-identity strong { text-align: right; overflow-wrap: anywhere; }
+.sqc-root .sqc-handoff-message { padding: 12px; background: #fbbf240a; border: 1px solid #fbbf2420; border-radius: 10px; color: #d6c5a2; font-size: 11px; line-height: 1.65; overflow-wrap: anywhere; }

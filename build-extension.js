@@ -18,6 +18,8 @@ const EXTENSION_FILES = [
   'background',
   'content',
   'popup',
+  'onboarding',
+  'ui',
   'options',
   'icons'
 ];

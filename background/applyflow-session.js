@@ -41,6 +41,14 @@
       revision++;
       await chrome.storage.session.remove(['sqcAuth', 'sqcContexts']);
     }
+    async function loginChallenge(apiOrigin) {
+      const challenge = await request(apiOrigin, '/api/sqc/auth');
+      if (challenge.contractVersion !== 2 || !challenge.csrfToken ||
+          !Number.isFinite(Date.parse(challenge.expiresAt)) || Date.parse(challenge.expiresAt) <= now()) {
+        throw failure('INVALID_CONTEXT', 'ApplyFlow login challenge is invalid or expired.');
+      }
+      return challenge;
+    }
     async function authenticate(apiOrigin, force = false) {
       const { sqcAuth: cached } = await chrome.storage.session.get('sqcAuth');
       if (!force && cached?.apiOrigin === apiOrigin && cached.checkedAt + 30000 > now() && cached.expiresAt > now()) return cached;
@@ -157,7 +165,8 @@
       } catch (error) {
         if (['SIGNED_OUT', 'FORBIDDEN'].includes(error.state)) { await clear(); auth = null; }
         integration = { state: error.state || 'UNAVAILABLE', message: error.message, apiOrigin,
-          ...(auth ? { applier: auth.applier } : {}) };
+          ...(auth ? { applier: auth.applier, profileAssignment: auth.assignment,
+            passwordChangeRequired: auth.passwordChangeRequired } : {}) };
       }
       settings.applierId = auth?.applier.id || '';
       settings.applierName = auth?.applier.name || '';
@@ -184,8 +193,11 @@
         if (!privileged(sender)) return { success: false, error: 'Configure ApplyFlow from the extension popup.' };
         const apiOrigin = policy.origin(message.apiOrigin);
         const { sqcConnection } = await chrome.storage.local.get('sqcConnection');
+        // A new workspace starts with explicit credentials, never an ambient website login.
+        const needsLogin = sqcConnection?.apiOrigin !== apiOrigin || message.requireLogin === true || sqcConnection?.signedOut;
+        if (needsLogin) await loginChallenge(apiOrigin);
         await clear();
-        await chrome.storage.local.set({ sqcConnection: { apiOrigin, ...(sqcConnection?.apiOrigin === apiOrigin && sqcConnection.signedOut ? { signedOut: true } : {}) } });
+        await chrome.storage.local.set({ sqcConnection: { apiOrigin, ...(needsLogin ? { signedOut: true } : {}) } });
         return config({ force: true, tabId: message.tabId }, sender);
       }
       if (action === 'SQC_LOGIN') {
@@ -199,9 +211,7 @@
           await clear();
           await chrome.storage.local.set({ sqcConnection: { apiOrigin: sqcConnection.apiOrigin, signedOut: true } });
           // The unauthenticated challenge protects the login POST against login CSRF.
-          const challenge = await request(sqcConnection.apiOrigin, '/api/sqc/auth');
-          if (challenge.contractVersion !== 2 || !challenge.csrfToken || Date.parse(challenge.expiresAt) <= now() ||
-              !Number.isFinite(Date.parse(challenge.expiresAt))) throw failure('INVALID_CONTEXT', 'ApplyFlow login challenge is invalid or expired.');
+          const challenge = await loginChallenge(sqcConnection.apiOrigin);
           await request(sqcConnection.apiOrigin, '/api/sqc/login', 'POST', { email, password }, challenge.csrfToken);
           // Identity and the locked profile must always be fetched from the authenticated session endpoint.
           await chrome.storage.local.set({ sqcConnection: { apiOrigin: sqcConnection.apiOrigin } });

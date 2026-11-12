@@ -2,68 +2,19 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <title>SQC | ApplyFlow</title>
+  <title>ApplyFlow · Quality Gatekeeper</title>
   <link rel="stylesheet" href="popup.css">
 </head>
-<body>
-  <div class="popup-container">
-    <header class="popup-header">
-      <div class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="m12 3 8 3v5c0 5-8 10-8 10S4 16 4 11V6l8-3Z"/><path d="m8.5 11.5 2.5 2.5 4.5-5"/></svg></div>
-      <div class="brand"><h1>ApplyFlow <span>SQC</span></h1><p>Application quality checker</p></div>
-      <span id="connection-badge" class="connection-badge" data-tone="neutral">Checking</span>
-    </header>
-    <main>
-      <section class="card connection-card" aria-labelledby="connection-heading">
-        <div class="card-heading"><h2 id="connection-heading">Your connection</h2><span class="eyebrow">APPLYFLOW</span></div>
-        <label class="field-label" for="api-origin">Server URL</label>
-        <input id="api-origin" class="custom-input" type="url" placeholder="https://api.your-applyflow.com" autocomplete="off" spellcheck="false" aria-describedby="connection-state">
-        <p id="connection-state" class="connection-message" role="status" aria-live="polite" data-tone="neutral">Checking your connection…</p>
-        <div class="auth-actions"><button id="connect" class="btn btn-primary" type="button">Connect to ApplyFlow</button><button id="disconnect" class="btn btn-secondary" type="button">Disconnect</button></div>
-        <button id="open-applyflow" class="btn btn-link" type="button">Open ApplyFlow sign-in <span aria-hidden="true">↗</span></button>
-      </section>
-      <section class="card" id="authentication" hidden aria-label="Account">
-        <form id="login-form">
-          <h2>Sign in to your account</h2>
-          <div class="form-field"><label class="field-label" for="login-email">ApplyFlow email</label><input id="login-email" class="custom-input" type="email" autocomplete="username" required></div>
-          <div class="form-field"><label class="field-label" for="login-password">Password</label><input id="login-password" class="custom-input" type="password" autocomplete="current-password" required></div>
-          <button id="sign-in" class="btn btn-primary btn-wide" type="submit">Sign in</button>
-        </form>
-        <div id="signed-in-controls" hidden>
-          <div class="card-heading"><h2>Your account</h2><button id="sign-out" class="btn btn-link" type="button">Sign out</button></div>
-          <p id="signed-in-email" class="account-email"></p>
-          <details id="password-settings">
-            <summary>Change password</summary>
-            <form id="password-form">
-              <div class="form-field"><label class="field-label" for="current-password">Current password</label><input id="current-password" class="custom-input" type="password" autocomplete="current-password" required></div>
-              <div class="form-field"><label class="field-label" for="new-password">New password</label><input id="new-password" class="custom-input" type="password" autocomplete="new-password" required></div>
-              <div class="form-field"><label class="field-label" for="confirm-password">Confirm new password</label><input id="confirm-password" class="custom-input" type="password" autocomplete="new-password" required></div>
-              <button id="change-password" class="btn btn-primary btn-wide" type="submit">Update password</button>
-            </form>
-          </details>
-        </div>
-        <p class="helper account-note">Your profile is managed by ApplyFlow. SQC never saves your password.</p>
-      </section>
-      <section class="card profile-card" aria-labelledby="assignment-heading">
-        <div class="card-heading"><h2 id="assignment-heading">Current assignment</h2><span id="assignment-badge" class="status-badge">Awaiting verification</span></div>
-        <dl class="profile-details">
-          <div class="detail-row"><dt>Applier</dt><dd id="applier">Not connected</dd></div>
-          <div class="detail-row"><dt>Candidate</dt><dd id="candidate">Unverified</dd></div>
-          <div class="detail-row"><dt>Job</dt><dd id="job">Unverified</dd></div>
-          <div class="detail-row"><dt>Profile version</dt><dd id="profile-version">—</dd></div>
-        </dl>
-        <p id="assignment-note" class="helper assignment-note">To verify, open an assigned job in ApplyFlow.</p>
-      </section>
-      <section class="card preferences-card" aria-labelledby="preferences-heading">
-        <h2 id="preferences-heading">Preferences</h2>
-        <label class="toggle-row" for="autofill"><span class="preference-title">Autofill verified candidate details</span><input type="checkbox" id="autofill" class="switch"></label>
-        <div class="mode-row"><label class="field-label" for="mode">Validation mode</label><select id="mode" class="custom-select" aria-describedby="mode-hint"><option value="active">Active gate</option><option value="audit">Passive audit</option></select></div>
-        <p id="mode-hint" class="helper">Both modes require a verified assignment.</p>
-      </section>
-    </main>
-    <footer class="popup-footer"><button class="btn btn-link" id="settings" type="button"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 7h16M4 17h16M8 4v6M16 14v6"/></svg>Settings &amp; audit history<span aria-hidden="true">→</span></button></footer>
-  </div>
+<body data-surface="popup">
+  <header class="app-header">
+    <div class="brand"><span class="brand-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></svg></span><span>ApplyFlow<small>QUALITY GATEKEEPER</small></span></div>
+    <span class="protected"><span class="status-dot"></span>Protected</span>
+  </header>
+  <main id="view" class="view" aria-busy="true"><div class="loading"><span class="loader"></span>Preparing your workspace…</div></main>
+  <script src="../ui/flow-model.js"></script>
+  <script src="../ui/workspace.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

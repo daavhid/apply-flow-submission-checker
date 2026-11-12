@@ -42,9 +42,22 @@ chrome.runtime.onInstalled.addListener(async details => {
   await chrome.storage.local.set({ settings: { ...settings, integrationMode: 'applyflow', isProfileLocked: true } });
   if (details.reason === 'install') {
     const { sqcConnection } = await chrome.storage.local.get('sqcConnection');
-    if (!sqcConnection?.apiOrigin) await chrome.tabs.create({ url: chrome.runtime.getURL('popup/popup.html?setup=1') });
+    if (!sqcConnection?.apiOrigin) await openSetup();
   }
 });
+
+async function openSetup(sourceTabId) {
+  const base = chrome.runtime.getURL('onboarding/onboarding.html');
+  const url = base + (Number.isInteger(sourceTabId) ? '?tabId=' + sourceTabId : '');
+  const tabs = await chrome.tabs.query({});
+  const existing = tabs.find(tab => tab.url?.split(/[?#]/)[0] === base);
+  if (existing) {
+    await chrome.tabs.update(existing.id, { active: true,
+      ...(Number.isInteger(sourceTabId) && existing.url !== url ? { url } : {}) });
+    if (existing.windowId != null) await chrome.windows.update(existing.windowId, { focused: true });
+  } else await chrome.tabs.create({ url });
+  return { success: true };
+}
 
 importScripts('../content/context-policy.js', 'applyflow-session.js');
 const sqcApplyFlow = SQCApplyFlowSession.create({ chrome, fetch: (...args) => fetch(...args), policy: SQCContextPolicy, defaults: DEFAULT_SETTINGS });
@@ -94,9 +107,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return integrated;
     }
     // Only extension UI can invoke maintenance commands. Portal scripts get a narrow allowlist.
-    const contentActions = new Set(['PERSIST_REDIRECT_TRACKING', 'CAPTURE_PAGE_SCREENSHOT', 'GET_SESSION_SCREENSHOTS', 'DELETE_SESSION_SCREENSHOT', 'CLEAR_SESSION_SCREENSHOTS']);
+    const contentActions = new Set(['OPEN_SETUP', 'PERSIST_REDIRECT_TRACKING', 'CAPTURE_PAGE_SCREENSHOT', 'GET_SESSION_SCREENSHOTS', 'DELETE_SESSION_SCREENSHOT', 'CLEAR_SESSION_SCREENSHOTS']);
     const isPortalSender = sender.tab && !sender.url?.startsWith(chrome.runtime.getURL(''));
     if (isPortalSender && !contentActions.has(message.type)) return { success: false, error: 'Unsupported portal action' };
+    if (message.type === 'OPEN_SETUP') return openSetup(isPortalSender ? sender.tab.id : message.tabId);
     if (isPortalSender) {
       const verified = await sqcApplyFlow.handle({ type: 'GET_CONFIG' }, sender);
       if (!verified.settings.verifiedContext) return { success: false, error: verified.integration.message };

@@ -21,22 +21,25 @@ Authentication transport
 The endpoint is the ONLY integration setting the installer/user supplies. Do not
 ask the user to enter candidate IDs, applier IDs, API keys, extension IDs, AI
 provider settings, or separate webhook URLs. The applier supplies their assigned
-email and password in the SQC sign-in form if not already authenticated. SQC sends
+email and password in the dedicated SQC setup page. SQC sends
 credentials to the configured ApplyFlow server and never stores them. ApplyFlow
 owns account creation, credential verification, password policy, and assignments.
-The extension opens its endpoint setup screen on first installation, persists
+The extension opens its centered setup page on first installation, persists
 the endpoint across browser restarts/extension updates, and uses the same flow
 for an unpacked local installation and a Chrome Web Store installation.
 
-1. The user enters the API origin in the extension popup and clicks Connect.
+1. The user enters the API origin in onboarding/onboarding.html and continues.
    HTTPS is required, except HTTP on localhost/127.0.0.1/[::1]. Paths, credentials,
    query strings, and hashes are rejected. Portal URLs cannot select API origins.
-2. SQC uses GET /api/sqc/auth and POST /api/sqc/login for email/password sign-in.
-   GET /api/sqc/login can still serve or redirect to the normal ApplyFlow login
-   as an alternative browser sign-in flow. GET login must not change credentials.
+2. SQC checks GET /api/sqc/auth before accepting a new server, then requires
+   explicit email/password sign-in through POST /api/sqc/login. It does not open
+   a website login or adopt an existing website session during initial setup.
+   ApplyFlow may be open in another Chrome profile or browser. No website login
+   is required in the browser profile where the extension is installed.
 3. All API calls originate in the service worker, use credentials: include,
-   cache: no-store, and reject redirects. Use the existing authenticated browser
-   cookie to identify the user. If ApplyFlow currently accepts only bearer tokens,
+   cache: no-store, and reject redirects. The login POST must establish the API
+   session cookie in the extension's browser profile; subsequent API calls use
+   that session. If ApplyFlow currently accepts only bearer tokens,
    add a supported cookie-based adapter for these routes before enabling SQC.
 4. Permit the deployed chrome-extension://<extension-id> origin and the
    Content-Type, X-SQC-CSRF, and X-SQC-Extension-Id request headers. SQC supplies
@@ -47,6 +50,8 @@ for an unpacked local installation and a Chrome Web Store installation.
    Configure credentialed responses
    for this origin explicitly; do not combine credentialed access with '*'.
    Test the actual Chrome cookie policy in the target deployment.
+   In particular, test credential sign-in in a fresh browser profile with no
+   ApplyFlow website cookies; a website session in another profile is irrelevant.
 5. GET /api/sqc/session returns a session-bound CSRF token. The login POST uses
    the separate pre-authentication token from GET /api/sqc/auth. All POST requests
    include X-SQC-CSRF. Validate it, session access, and assignment ownership on
@@ -54,6 +59,22 @@ for an unpacked local installation and a Chrome Web Store installation.
 6. 401 means signed out/expired; 403 means access denied/revoked. Never redirect
    API requests to login HTML. Return JSON errors for all other non-success cases:
    {"success":false,"error":{"code":"CONTEXT_MISMATCH","message":"..."}}
+
+Extension setup and ready state
+
+The setup page shows one step at a time: server, credentials, assigned profile
+review, then the ready workspace. A temporary password must be changed before
+profile review. Accounts without a candidate remain on an assignment waiting
+screen with a retry action. Profiles are supplied by the server, never selected
+or edited locally. Reviewing a profile records only a UI acknowledgement keyed
+to the server, applier, assignment, and profile versions. It grants no permission
+to autofill or submit; every portal still requires a backend-verified job context.
+
+After setup, the toolbar popup shows the HUD-style workspace and waits for an
+application. A verified active job tab shows its title and company. The portal
+HUD sends unauthenticated users to the dedicated setup tab using OPEN_SETUP;
+the service worker focuses an existing setup tab instead of opening duplicates.
+Signing out returns to credential sign-in and clears the UI acknowledgement.
 
 GET /api/sqc/session
 

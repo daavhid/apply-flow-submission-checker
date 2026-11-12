@@ -507,8 +507,10 @@ window.SubmissionHUD = (function () {
   // Compute overall status (shared by pill + hero)
   function computeStatus(validationResult, extractedData) {
     if (currentSettings?.integrationMode === 'applyflow' && !window.SQCContextPolicy?.ready(currentSettings, window.location.href)) {
-      return { tone: 'bad', label: currentSettings.integrationState === 'SIGNED_OUT' ? 'Sign in required' : 'Verify assignment',
-        headline: currentSettings.integrationMessage || 'Open SQC to connect to ApplyFlow.' };
+      const signedIn = Boolean(currentSettings.applierId);
+      const requiresPassword = currentSettings.integrationState === 'PASSWORD_CHANGE_REQUIRED';
+      return { tone: 'warn', label: requiresPassword ? 'Secure account' : signedIn ? 'Awaiting verification' : 'Set up workspace',
+        headline: currentSettings.integrationMessage || 'Sign in to your extension workspace to get started.' };
     }
     if (quickApplyState === 'sync_failed') {
       return { tone: 'warn', label: 'Sync failed', headline: 'ApplyFlow did not acknowledge this event. Refresh and retry from the HUD.' };
@@ -606,7 +608,7 @@ window.SubmissionHUD = (function () {
     if (extractedData) lastExtracted = extractedData;
 
     const status = computeStatus(validationResult || lastValidation, extractedData || lastExtracted);
-    const candidateName = currentProfile ? currentProfile.fullName : 'No profile';
+    const candidateName = currentProfile ? currentProfile.fullName : 'ApplyFlow';
     const firstName = String(candidateName).split(/\s+/)[0] || candidateName;
     const isAuditMode = currentSettings?.interceptionMode === 'audit';
     const isAfLinked = Boolean(getEffectiveJobId());
@@ -787,13 +789,35 @@ window.SubmissionHUD = (function () {
 
     if (!isDrawerOpen || !drawerEl) return;
     if (currentSettings?.integrationMode === 'applyflow' && !window.SQCContextPolicy?.ready(currentSettings, window.location.href)) {
-      drawerEl.innerHTML = `<div class="sqc-body" style="padding:20px">
-        <h3>ApplyFlow verification required</h3>
-        <p>${escapeHtml(currentSettings.integrationMessage || 'Connect using the SQC extension popup.')}</p>
-        <p>Applier: ${escapeHtml(currentSettings.applierName || 'Not connected')}</p>
-        <p>Candidate and job assignments are managed in ApplyFlow.</p>
-        <button class="sqc-btn" id="sqc-close-verification">Close</button></div>`;
+      const signedIn = Boolean(currentSettings.applierId);
+      const requiresPassword = currentSettings.integrationState === 'PASSWORD_CHANGE_REQUIRED';
+      drawerEl.innerHTML = `<header class="sqc-head"><div class="sqc-id"><span class="sqc-avatar">${icon('shieldCheck', 22)}</span><div><strong>ApplyFlow</strong><p class="sqc-section-meta">Quality Gatekeeper</p></div></div><button class="sqc-icon-btn" id="sqc-close-verification" aria-label="Close gatekeeper">${icon('x')}</button></header>
+        <div class="sqc-body sqc-workspace-handoff">
+          <span class="sqc-handoff-icon">${icon(signedIn ? 'briefcase' : 'lock', 32)}</span>
+          <span class="sqc-section-title">${signedIn ? 'WORKSPACE CONNECTED' : 'YOUR PROTECTED WORKSPACE'}</span>
+          <h2>${requiresPassword ? 'Secure your account first.' : signedIn ? 'Let’s verify this application.' : 'One sign-in. The right candidate.'}</h2>
+          <p class="sqc-handoff-copy">${requiresPassword ? 'Update your temporary password to finish setting up your workspace.' : signedIn ? 'Your account is connected. This page needs a verified job assignment before protection can begin.' : 'Connect your server, sign in with your ApplyFlow email and password, and sync your assigned profile.'}</p>
+          ${signedIn ? `<div class="sqc-handoff-identity"><span>Applier</span><strong>${escapeHtml(currentSettings.applierName)}</strong><span>Candidate</span><strong>${escapeHtml(currentProfile?.fullName || 'Awaiting assignment')}</strong></div><p class="sqc-handoff-message">${escapeHtml(currentSettings.integrationMessage || 'Open an assigned job in this browser to continue.')}</p>` : `<div class="sqc-handoff-steps"><span>${icon('link', 14)}Connect workspace</span><span>${icon('key', 14)}Sign in to the extension</span><span>${icon('shieldCheck', 14)}Sync assigned candidate</span></div>`}
+          <button class="sqc-btn sqc-btn-primary" id="sqc-open-workspace">${icon('shieldCheck', 16)}${requiresPassword ? 'Finish account setup' : signedIn ? 'Manage workspace' : 'Set up workspace'}${icon('chevron', 14)}</button>
+          ${signedIn && !requiresPassword ? '<button class="sqc-btn sqc-btn-ghost" id="sqc-recheck-context">Recheck this application</button>' : '<p class="sqc-handoff-footnote">ApplyFlow can stay in a different Chrome profile.</p>'}
+        </div>`;
       drawerEl.querySelector('#sqc-close-verification').onclick = () => toggleDrawer(false);
+      drawerEl.querySelector('#sqc-open-workspace').onclick = async event => {
+        const button = event.currentTarget;
+        button.disabled = true;
+        try {
+          const result = await chrome.runtime.sendMessage({ type: 'OPEN_SETUP' });
+          if (!result?.success) throw new Error(result?.error || 'Unable to open your workspace.');
+          toggleDrawer(false);
+        } catch (error) { showToast(error.message); }
+        finally { button.disabled = false; }
+      };
+      const recheck = drawerEl.querySelector('#sqc-recheck-context');
+      if (recheck) recheck.onclick = async () => {
+        recheck.disabled = true;
+        try { await window.SubmissionCheckerCore?.reloadConfig(); }
+        finally { recheck.disabled = false; }
+      };
       return;
     }
 

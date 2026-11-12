@@ -76,6 +76,7 @@ function fixture() {
   const sender = id => ({ url: tabs[id].url, tab: structuredClone(tabs[id]) });
   const ui = { url: 'chrome-extension://sqc/popup/popup.html' };
   return { service, chrome, calls, tabs, sender, ui, now: () => clock,
+    restart() { return create({ chrome, fetch, policy, now: () => clock }); },
     advance(ms) { clock += ms; }, signOut() { signedIn = false; }, changeApplier() { applier = 'applier-2'; },
     requirePasswordChange() { passwordChangeRequired = true; }, unassign() { assigned = false; },
     reassign() { lockedProfileId = 'profile-2'; assignmentVersion = '2'; },
@@ -226,14 +227,60 @@ test('an extension options tab is privileged without becoming an application tab
   assert.equal(r.integration.state, 'AUTHENTICATED'); assert.equal(r.activeProfile.id, 'profile-1');
 });
 
-test('first connection needs only the endpoint and discovers the authenticated applier', async () => {
+test('first connection checks the server but requires explicit credentials despite an existing website session', async () => {
   const f = fixture(); await f.chrome.storage.local.remove('sqcConnection');
   const r = await f.service.handle({ type: 'SQC_CONNECT', apiOrigin: 'https://applyflow.example' }, f.ui);
-  assert.equal(r.integration.state, 'AUTHENTICATED');
-  assert.equal(r.settings.applierId, 'applier-1');
-  assert.deepEqual(f.chrome.storage.local.data.sqcConnection, { apiOrigin: 'https://applyflow.example' });
+  assert.equal(r.integration.state, 'SIGNED_OUT');
+  assert.equal(r.settings.applierId, '');
+  assert.equal(r.activeProfile, null);
+  assert.deepEqual(f.chrome.storage.local.data.sqcConnection, { apiOrigin: 'https://applyflow.example', signedOut: true });
   assert.equal(f.calls.length, 1);
-  assert.equal(f.calls[0].url, 'https://applyflow.example/api/sqc/session');
+  assert.equal(f.calls[0].url, 'https://applyflow.example/api/sqc/auth');
+  const refreshed = await f.service.handle({ type: 'GET_CONFIG', force: true }, f.ui);
+  assert.equal(refreshed.integration.state, 'SIGNED_OUT');
+  assert.equal(f.calls.length, 1);
+});
+
+test('the guided setup can require credentials again on the same server without reusing website identity', async () => {
+  const f = fixture(); await f.service.handle({ type: 'GET_CONFIG' }, f.sender(1));
+  const r = await f.service.handle({ type: 'SQC_CONNECT', apiOrigin: 'https://applyflow.example', requireLogin: true }, f.ui);
+  assert.equal(r.integration.state, 'SIGNED_OUT');
+  assert.equal(f.chrome.storage.session.data.sqcAuth, undefined);
+  assert.equal(f.chrome.storage.session.data.sqcContexts, undefined);
+});
+
+test('the configured backend URL survives worker restart, sign-out, and assignment refresh', async () => {
+  const f = fixture();
+  await f.service.handle({ type: 'SQC_CONNECT', apiOrigin: 'https://saved.applyflow.example', requireLogin: true }, f.ui);
+  await f.chrome.storage.session.remove(['sqcAuth', 'sqcContexts']);
+  const restarted = f.restart();
+  const signedOut = await restarted.handle({ type: 'GET_CONFIG', force: true }, f.ui);
+  assert.equal(signedOut.integration.apiOrigin, 'https://saved.applyflow.example');
+  assert.equal(signedOut.integration.state, 'SIGNED_OUT');
+  await restarted.handle({ type: 'SQC_LOGIN', email: 'applier@example.com', password: 'temporary-test-password' }, f.ui);
+  const refreshed = await restarted.handle({ type: 'GET_CONFIG', force: true }, f.ui);
+  assert.equal(refreshed.integration.apiOrigin, 'https://saved.applyflow.example');
+  assert.equal(refreshed.integration.state, 'AUTHENTICATED');
+  await restarted.handle({ type: 'SQC_LOGOUT' }, f.ui);
+  assert.equal(f.chrome.storage.local.data.sqcConnection.apiOrigin, 'https://saved.applyflow.example');
+});
+
+test('an invalid server challenge preserves the previously configured workspace', async () => {
+  const f = fixture(); f.expireChallenge();
+  await assert.rejects(f.service.handle({ type: 'SQC_CONNECT', apiOrigin: 'https://new.example' }, f.ui), /challenge is invalid or expired/);
+  assert.equal(f.chrome.storage.local.data.sqcConnection.apiOrigin, 'https://applyflow.example');
+});
+
+test('setup signs in from a browser with no ApplyFlow website session and syncs its assigned profile', async () => {
+  const f = fixture(); f.signOut(); await f.chrome.storage.local.remove('sqcConnection');
+  const ui = { url: 'chrome-extension://sqc/onboarding/onboarding.html', tab: { id: 99 } };
+  await f.service.handle({ type: 'SQC_CONNECT', apiOrigin: 'https://applyflow.example' }, ui);
+  const r = await f.service.handle({ type: 'SQC_LOGIN', email: 'applier@example.com', password: 'temporary-test-password' }, ui);
+  assert.equal(r.integration.state, 'AUTHENTICATED');
+  assert.equal(r.integration.applier.email, 'applier@example.com');
+  assert.equal(r.activeProfile.id, 'profile-1');
+  assert.equal(r.applyFlowContext, null);
+  assert.equal(f.calls.filter(c => c.url.endsWith('/api/sqc/application-context')).length, 0);
 });
 
 test('the runtime extension ID is sent automatically for Store and local installations', async () => {

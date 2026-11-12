@@ -73,7 +73,7 @@ submission-checker/
 │   ├── hud.css                # HUD design system & glassmorphism styling
 │   └── injector.css           # In-page glowing field error highlights & tooltips
 ├── popup/
-│   ├── popup.html             # Quick candidate selector & mode toggle
+│   ├── popup.html             # Compact application workspace
 │   ├── popup.css              # Popup styling
 │   └── popup.js               # Popup controller
 ├── options/
@@ -111,8 +111,15 @@ pnpm dev
    ```
    c:\Users\debby\Desktop\submission-checker
    ```
-4. Click the extension icon in Chrome or open the built-in simulator:
-   - File path: `test-bench/index.html` (or click *"🧪 Open ATS Simulator"* in popup)
+4. The extension opens a centered setup page. Enter your ApplyFlow backend URL,
+   sign in with your applier email and password, then review the candidate assigned
+   to you. ApplyFlow can be open in a different Chrome profile; a website login
+   in this profile is not required.
+5. Continue to the workspace. It shows **Waiting for an application** until you
+   open an assigned job in this browser. The floating HUD appears on job portals,
+   and application actions require a server-verified candidate and job context.
+   Click the extension icon to reopen the workspace, manage your account, or
+   change protection preferences.
 
 
 ---
