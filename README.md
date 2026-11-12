@@ -1,5 +1,10 @@
 # 🛡️ Submission Quality Checker & Live Gatekeeper (Chrome Extension MV3)
 
+> ApplyFlow integration migration: SQC now requires an authenticated ApplyFlow session and a verified candidate/job assignment. Local candidate profiles and passkey-based reassignment are disabled. The backend must implement the [SQC integration contract](docs/APPLYFLOW-INTEGRATION.txt), including the new session/context endpoints and event acknowledgements. The historical standalone simulator and setup examples below do not authenticate this integrated build. Direct AI screening API calls are the next phase; the existing prompt/paste tools require a verified assignment.
+
+Build with `npm run build` and load `dist/extension`. Run `npm test` for the authentication, context isolation, and content autofill checks. On Windows PowerShell, use `npm.cmd` if script execution policy blocks `npm`.
+
+
 An intelligent, real-time ATS Quality Gatekeeper and DOM Extraction extension that intercepts job applications, prevents human error across all 6 core failure scenarios, provides a live floating HUD, and logs verified submission payloads directly to your backend.
 
 ---

@@ -189,6 +189,12 @@ window.SubmissionHUD = (function () {
       return; // Do not render on non-job portal pages like ChatGPT
     }
 
+    if (currentSettings?.verifiedContext?.applicationSessionId !== settings?.verifiedContext?.applicationSessionId ||
+        currentSettings?.verifiedContext?.resumeVersion !== settings?.verifiedContext?.resumeVersion) {
+      activeTailoredFile = null;
+      currentScreenshots = [];
+      currentDuplicateRecord = null;
+    }
     allProfiles = profiles || [];
     currentProfile = activeProfile;
     currentSettings = settings;
@@ -208,7 +214,7 @@ window.SubmissionHUD = (function () {
 
   function updateState(profiles, activeProfile, settings, duplicateRecord) {
     allProfiles = profiles || allProfiles;
-    currentProfile = activeProfile || currentProfile;
+    currentProfile = settings?.integrationMode === 'applyflow' ? (activeProfile || null) : (activeProfile || currentProfile);
     currentSettings = settings || currentSettings;
     currentDuplicateRecord = duplicateRecord !== undefined ? duplicateRecord : currentDuplicateRecord;
     lastDrawerFingerprint = '';
@@ -500,6 +506,13 @@ window.SubmissionHUD = (function () {
 
   // Compute overall status (shared by pill + hero)
   function computeStatus(validationResult, extractedData) {
+    if (currentSettings?.integrationMode === 'applyflow' && !window.SQCContextPolicy?.ready(currentSettings, window.location.href)) {
+      return { tone: 'bad', label: currentSettings.integrationState === 'SIGNED_OUT' ? 'Sign in required' : 'Verify assignment',
+        headline: currentSettings.integrationMessage || 'Open SQC to connect to ApplyFlow.' };
+    }
+    if (quickApplyState === 'sync_failed') {
+      return { tone: 'warn', label: 'Sync failed', headline: 'ApplyFlow did not acknowledge this event. Refresh and retry from the HUD.' };
+    }
     const errCount = validationResult ? validationResult.errorCount ?? (validationResult.errors || []).length : 0;
     const warnCount = validationResult ? validationResult.warningCount ?? (validationResult.warnings || []).length : 0;
 
@@ -773,6 +786,16 @@ window.SubmissionHUD = (function () {
     renderPill(validationResult, extractedData);
 
     if (!isDrawerOpen || !drawerEl) return;
+    if (currentSettings?.integrationMode === 'applyflow' && !window.SQCContextPolicy?.ready(currentSettings, window.location.href)) {
+      drawerEl.innerHTML = `<div class="sqc-body" style="padding:20px">
+        <h3>ApplyFlow verification required</h3>
+        <p>${escapeHtml(currentSettings.integrationMessage || 'Connect using the SQC extension popup.')}</p>
+        <p>Applier: ${escapeHtml(currentSettings.applierName || 'Not connected')}</p>
+        <p>Candidate and job assignments are managed in ApplyFlow.</p>
+        <button class="sqc-btn" id="sqc-close-verification">Close</button></div>`;
+      drawerEl.querySelector('#sqc-close-verification').onclick = () => toggleDrawer(false);
+      return;
+    }
 
     // Preserve scroll + focus across live re-renders
     const prevBody = drawerEl.querySelector('.sqc-body');
@@ -1226,6 +1249,7 @@ window.SubmissionHUD = (function () {
     `;
 
     const metaBits = [
+      currentSettings?.integrationMode === 'applyflow' ? `Applier: ${currentSettings.applierName}` : '',
       p.targetStack || 'Developer',
       isTailoringMethod ? '✨ Tailoring Method' : '📄 Base Method',
       `${formatMoney(p.salaryFloor || p.compensation?.salaryFloor || 0)} floor`
@@ -1902,6 +1926,10 @@ window.SubmissionHUD = (function () {
 
   // Admin reassignment dialog
   function openAdminDialog(preferredProfileId = null) {
+    if (currentSettings?.integrationMode === 'applyflow') {
+      showToast('Applier and candidate assignments are locked. Request reassignment in ApplyFlow.');
+      return;
+    }
     const p = currentProfile || {};
     const stackKey = currentSettings?.activeStackKey || 'dotnet';
     const profileOptions = allProfiles.map(prof => `
@@ -2326,6 +2354,11 @@ window.SubmissionHUD = (function () {
   }
 
   function getStoredOrSynthesizedResumeFile(resumeText, profile) {
+    if (currentSettings?.integrationMode === 'applyflow') {
+      const p = profile || currentProfile;
+      if (!p?.resumeBase64) return null;
+      return base64ToFile(p.resumeBase64, p.resumeFilename || getCandidateCleanFileName(p, '.pdf'));
+    }
     if (activeTailoredFile) return activeTailoredFile;
 
     const p = profile || currentProfile || {};
@@ -2393,12 +2426,25 @@ window.SubmissionHUD = (function () {
   }
 
   function attachResumeToPortal(resumeText, profile, customFile = null, options = {}) {
+    if (!window.SQCContextPolicy?.ready(currentSettings, window.location.href)) {
+      showToast('Verify the ApplyFlow assignment before attaching a resume.');
+      return { fileInputsCount: 0, triggerActivated: false };
+    }
     const p = profile || currentProfile || {};
+    if (currentSettings?.integrationMode === 'applyflow') {
+      if (p.id !== currentSettings.verifiedContext.profileId || !p.resumeBase64) {
+        return { success: false, error: 'An original verified resume file is required.', fileInputsCount: 0 };
+      }
+      customFile = null;
+      activeTailoredFile = null;
+      resumeText = p.resumeText;
+    }
     const hasCachedFile = typeof sessionStorage !== 'undefined' && Boolean(sessionStorage.getItem('sqc_tailored_resume_file_b64'));
     if ((!resumeText || !resumeText.trim()) && !customFile && !activeTailoredFile && !hasCachedFile && !p.resumeBase64) {
       return { success: false, error: "Empty resume content" };
     }
-    const canonicalName = getCandidateCleanFileName(p, (customFile?.name || activeTailoredFile?.name || '.pdf'));
+    const canonicalName = currentSettings?.integrationMode === 'applyflow' && p.resumeFilename
+      ? p.resumeFilename : getCandidateCleanFileName(p, (customFile?.name || activeTailoredFile?.name || '.pdf'));
 
     let effectiveFile = customFile || activeTailoredFile;
     if (!effectiveFile) {
@@ -2623,6 +2669,13 @@ window.SubmissionHUD = (function () {
 
   function downloadResumeFile(resumeText, profile, options = {}) {
     const p = profile || currentProfile || {};
+    if (currentSettings?.integrationMode === 'applyflow') {
+      if (!window.SQCContextPolicy?.ready(currentSettings, window.location.href) ||
+          p.id !== currentSettings.verifiedContext?.profileId || !p.resumeBase64) {
+        showToast('The original verified resume file must be supplied by ApplyFlow.'); return;
+      }
+      activeTailoredFile = null;
+    }
     const canonicalName = getCandidateCleanFileName(p, (activeTailoredFile?.name || '.pdf'));
 
     let fileToDownload = activeTailoredFile;
@@ -2659,6 +2712,18 @@ window.SubmissionHUD = (function () {
 
   // Resume manager dialog
   function openResumeModal() {
+    if (currentSettings?.integrationMode === 'applyflow') {
+      if (!window.SQCContextPolicy?.ready(currentSettings, window.location.href)) {
+        showToast('Verify the ApplyFlow assignment before attaching a resume.'); return;
+      }
+      const p = currentProfile;
+      if (!p.resumeBase64) { showToast('The verified resume file is unavailable. Add the original file in ApplyFlow.'); return; }
+      const dlg = openDialog({ title: 'Verified ApplyFlow resume', subtitle: 'Manage resume changes in ApplyFlow.',
+        body: `<pre style="white-space:pre-wrap;max-height:340px;overflow:auto">${escapeHtml(p.resumeText || '')}</pre>`,
+        footer: '<button class="sqc-btn sqc-btn-primary" id="sqc-attach-verified">Attach verified resume</button>' });
+      dlg.$('#sqc-attach-verified').onclick = () => { attachResumeToPortal(p.resumeText, p); dlg.close(); };
+      return;
+    }
     const p = currentProfile || {};
     const isTailoringMethod = p.tailoringMode === 'tailored';
     const existingTailored = (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('sqc_tailored_resume') : null) || '';
@@ -3172,6 +3237,7 @@ window.SubmissionHUD = (function () {
   }
 
   function promptTailoredResumeIfNeeded() {
+    if (currentSettings?.integrationMode === 'applyflow') return;
     if (window !== window.top) return;
     const p = currentProfile || {};
     if (p.tailoringMode !== 'tailored') return;

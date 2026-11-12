@@ -62,6 +62,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     return new Promise((resolve) => {
       chrome.runtime.sendMessage({ type: "GET_CONFIG" }, (res) => {
         config = res || {};
+        if (config.settings?.integrationMode === 'applyflow') {
+          renderCandidates(); renderWebhooks(); renderSettings();
+          for (const id of ['top-add-candidate-btn', 'top-parse-resume-btn', 'import-profiles-btn', 'export-profiles-btn',
+            'export-settings-btn', 'add-webhook-btn', 'btn-edit-station-name', 'btn-toggle-station-lock', 'btn-open-passkey-modal']) {
+            const element = document.getElementById(id);
+            if (element) element.hidden = true;
+          }
+          for (const id of ['applier-id', 'admin-passkey-setting', 'admin-active-assignment', 'admin-active-stack',
+            'profile-lock-toggle', 'mock-backend-toggle', 'allow-override-toggle', 'duplicate-days']) {
+            const element = document.getElementById(id);
+            if (element) { element.disabled = true; element.closest('.form-group')?.setAttribute('hidden', ''); }
+          }
+          resolve(); return;
+        }
         if (!config.profiles || config.profiles.length === 0) {
           chrome.runtime.sendMessage({ type: "SYNC_DEFAULT_PROFILES" }, (syncRes) => {
             if (syncRes && syncRes.profiles) {
@@ -170,6 +184,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   const closeStationPasskeyModal = document.getElementById('close-station-passkey-modal');
 
   function renderCandidates() {
+    if (config?.settings?.integrationMode === 'applyflow') {
+      const pane = document.getElementById('tab-candidates');
+      pane.innerHTML = `<div class="card" style="padding:24px"><h2>Managed by ApplyFlow</h2>
+        <p>Applier: ${escapeHtml(config.integration?.applier?.name || 'Not connected')}</p>
+        <p>${escapeHtml(config.integration?.message || 'Connect using the extension popup.')}</p>
+        <p>Open SQC on an assigned job tab to view the verified candidate and job. Profiles, resumes, and reassignment are managed in ApplyFlow.</p></div>`;
+      return;
+    }
     if (!config || !config.profiles) return;
     const profiles = config.profiles;
     const activeId = config.settings?.activeProfileId;
@@ -1382,6 +1404,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   const webhookModal = document.getElementById('webhook-modal');
 
   function renderWebhooks() {
+    if (config?.settings?.integrationMode === 'applyflow') {
+      document.getElementById('tab-webhooks').innerHTML = `<div class="card" style="padding:24px"><h2>ApplyFlow connection</h2>
+        <p>${escapeHtml(config.integration?.apiOrigin || 'Not connected')}</p>
+        <p>Use the extension popup to connect or refresh. Authenticated application events use this server exclusively.</p></div>`;
+      return;
+    }
     if (!config || !config.settings) return;
     const webhooks = config.settings.webhooks || [];
 

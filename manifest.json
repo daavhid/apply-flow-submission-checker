@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Apply-Flow Quality Gatekeeper",
   "version": "1.0.0",
-  "description": "An Apply-Flow Subsidiary Suite — Real-time ATS form extractor, submission quality validator, live HUD, and duplicate prevention gatekeeper.",
+  "description": "An Apply-Flow Subsidiary Suite \u2014 Real-time ATS form extractor, submission quality validator, live HUD, and duplicate prevention gatekeeper.",
   "permissions": [
     "storage",
     "activeTab",
@@ -32,10 +32,13 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
+      "matches": [
+        "<all_urls>"
+      ],
       "all_frames": true,
       "match_about_blank": true,
       "js": [
+        "content/context-policy.js",
         "options/doc-parser.js",
         "content/extractor.js",
         "content/validator.js",
@@ -56,7 +59,9 @@
         "content/*",
         "options/lib/*"
       ],
-      "matches": ["<all_urls>"]
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ]
 }

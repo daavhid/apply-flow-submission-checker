@@ -4,6 +4,7 @@
 
 window.SubmissionCheckerCore = (function () {
   'use strict';
+  window.__SQC_CONTEXT_SETTINGS = { integrationMode: 'applyflow' };
 
   let activeProfile = null;
   let currentSettings = null;
@@ -18,6 +19,22 @@ window.SubmissionCheckerCore = (function () {
   let screenshotDebounceTimer = null;
   let lastCapturedSignature = '';
   let isCapturingScreenshot = false;
+
+  function hasVerifiedContext() {
+    return window.SQCContextPolicy?.ready(currentSettings, window.location.href) === true;
+  }
+
+  function requireVerifiedContext() {
+    if (hasVerifiedContext()) return true;
+    SubmissionHUD.showToast(currentSettings?.integrationMessage || 'Verify this assignment in ApplyFlow before continuing.');
+    return false;
+  }
+
+  function contextStamp() {
+    const c = currentSettings?.verifiedContext;
+    return { application_session_id: c?.applicationSessionId, profile_version: c?.profileVersion,
+      job_version: c?.jobVersion, resume_id: c?.resumeId, resume_version: c?.resumeVersion };
+  }
 
   // Global initialization guard to prevent duplicate executions in the same frame
   if (window.__SQC_INITIALIZED) {
@@ -47,6 +64,12 @@ window.SubmissionCheckerCore = (function () {
         return;
       }
 
+      if (currentSettings?.integrationMode === 'applyflow') {
+        currentSettings = { ...currentSettings, verifiedContext: null };
+        window.__SQC_CONTEXT_SETTINGS = currentSettings;
+        activeProfile = null;
+        fetchConfig().then(() => { tryAutoRestore(); runExtractionAndValidation(); });
+      }
       setTimeout(() => {
         tryAutoRestore();
         runExtractionAndValidation();
@@ -96,7 +119,15 @@ window.SubmissionCheckerCore = (function () {
       }
 
       isCoreActive = true;
+      bindSubmitInterception();
       await fetchConfig();
+      // Refresh authentication and assignment leases, including sign-out/reassignment in ApplyFlow.
+      if (!window.__SQC_CONTEXT_REFRESH_TIMER) {
+        window.__SQC_CONTEXT_REFRESH_TIMER = setInterval(async () => {
+          await fetchConfig();
+          runExtractionAndValidation();
+        }, 30000);
+      }
 
       // Check bound tab session right away to restore already applied state before any async calls
       try {
@@ -148,6 +179,8 @@ window.SubmissionCheckerCore = (function () {
 
       // Cross-frame message handling: coordinates top window and child iframes seamlessly
       window.addEventListener('message', (event) => {
+        // Page postMessage is not an authentication channel. Each frame gets context from the worker.
+        if (currentSettings?.integrationMode === 'applyflow') return;
         if (!event.data || typeof event.data !== 'object') return;
 
         // CHILD IFRAME: Received instructions or sync from Top Window
@@ -515,6 +548,7 @@ window.SubmissionCheckerCore = (function () {
   }
 
   function tryAutoRestore() {
+    if (!hasVerifiedContext()) return;
     if (!activeProfile) return;
     if (hasContextMismatchCheck()) {
       console.warn("[Submission Checker] Auto-restore aborted: Context profile mismatch between URL and active workstation candidate.");
@@ -538,6 +572,7 @@ window.SubmissionCheckerCore = (function () {
   }
 
   function restoreFormManually() {
+    if (!requireVerifiedContext()) return { count: 0 };
     let res = { count: 0 };
     if (hasContextMismatchCheck() || (currentValidation?.errors || []).some(e => e.rule === 'CONTEXT_PROFILE_MISMATCH')) {
       SubmissionHUD.showToast("🚫 Autofill blocked: Active profile does not match the candidate assigned to this job in Apply-Flow.");
@@ -621,10 +656,43 @@ window.SubmissionCheckerCore = (function () {
     return new Promise((resolve) => {
       chrome.runtime.sendMessage({ type: "GET_CONFIG" }, (res) => {
         if (res && res.success) {
+          const nextSession = res.settings?.verifiedContext?.applicationSessionId;
+          const c = res.settings?.verifiedContext;
+          const nextKey = c ? [c.applicationSessionId, c.applierId, c.profileId, c.profileVersion, c.jobVersion, c.resumeVersion].join(':') : '';
+          const changed = sessionStorage.getItem('sqc_verified_context_key') !== nextKey;
+          if (changed || !nextSession) {
+            sessionScreenshots = [];
+            currentDuplicateRecord = null;
+            lastIframeExtractedData = null;
+            currentExtractedData = null;
+            applyFlowContext = null;
+            window.__SQC_TAILORED_RESUME_DATA = null;
+            window.__SQC_PERSISTED_AF_SESSION = null;
+            for (let i = sessionStorage.length - 1; i >= 0; i--) {
+              const key = sessionStorage.key(i);
+              if (/^(applyflow_|sqc_)/.test(key || '')) sessionStorage.removeItem(key);
+            }
+          }
           activeProfile = res.activeProfile;
           window.__SQC_ACTIVE_PROFILE = activeProfile;
           currentSettings = res.settings;
           allProfiles = res.profiles || [];
+          window.__SQC_CONTEXT_SETTINGS = currentSettings;
+          applyFlowContext = res.applyFlowContext;
+          window.__SQC_APPLYFLOW_CONTEXT = applyFlowContext;
+          const verified = currentSettings.verifiedContext;
+          if (verified) {
+            sessionStorage.setItem('sqc_verified_context_key', nextKey);
+            if (Array.isArray(res.sessionScreenshots)) sessionScreenshots = res.sessionScreenshots;
+            // Overwrite URL-derived values with verified identity, never fill gaps from URL names.
+            const authoritative = {
+              job_id: verified.jobId, profile_id: verified.profileId,
+              profile_name: activeProfile.fullName, applier_id: verified.applierId,
+              applier_name: currentSettings.applierName,
+              job_title: applyFlowContext?.jobTitle || '', company: applyFlowContext?.company || ''
+            };
+            for (const [key, value] of Object.entries(authoritative)) sessionStorage.setItem('applyflow_' + key, value);
+          }
           if (res.persistedSession) {
             const currentCanon = window.JobFormExtractor?.getCanonicalJobPath ? window.JobFormExtractor.getCanonicalJobPath(window.location.href) : '';
             const psCanon = res.persistedSession.sourceUrl && window.JobFormExtractor?.getCanonicalJobPath ? window.JobFormExtractor.getCanonicalJobPath(res.persistedSession.sourceUrl) : '';
@@ -673,6 +741,14 @@ window.SubmissionCheckerCore = (function () {
           if (SubmissionHUD.updateScreenshots) {
             SubmissionHUD.updateScreenshots(sessionScreenshots);
           }
+          if (changed && nextSession) tryAutoRestore();
+        } else {
+          activeProfile = null;
+          currentSettings = { integrationMode: 'applyflow', integrationState: 'UNAVAILABLE',
+            integrationMessage: res?.error || 'SQC could not verify the ApplyFlow connection.', verifiedContext: null };
+          window.__SQC_CONTEXT_SETTINGS = currentSettings;
+          window.__SQC_ACTIVE_PROFILE = null;
+          SubmissionHUD.init([], null, currentSettings);
         }
         resolve();
       });
@@ -956,6 +1032,7 @@ window.SubmissionCheckerCore = (function () {
         chrome.runtime.sendMessage({
           type: 'CAPTURE_PAGE_SCREENSHOT',
           meta: {
+            ...contextStamp(),
             trigger,
             step_label: stepLabel,
             page_url: window.location.href,
@@ -1067,6 +1144,13 @@ window.SubmissionCheckerCore = (function () {
   }
 
   function syncApplyFlowContext() {
+    if (currentSettings?.integrationMode === 'applyflow') {
+      SubmissionHUD.updateApplyFlowInfo(currentSettings.verifiedContext ? {
+        jobId: currentSettings.verifiedContext.jobId, profileId: currentSettings.verifiedContext.profileId,
+        applierId: currentSettings.verifiedContext.applierId
+      } : {}, applyFlowContext);
+      return;
+    }
     const params = JobFormExtractor.extractApplyFlowParams();
     const jobId = params.jobId || sessionStorage.getItem('applyflow_job_id') || window.__SQC_PERSISTED_AF_SESSION?.jobId || '';
     const profileId = params.profileId || sessionStorage.getItem('applyflow_profile_id') || window.__SQC_PERSISTED_AF_SESSION?.profileId || '';
@@ -1233,14 +1317,12 @@ window.SubmissionCheckerCore = (function () {
     const effectiveProfileId = sessionStorage.getItem('applyflow_profile_id') || applyFlowParams.profileId || window.__SQC_PERSISTED_AF_SESSION?.profileId || activeProfile?.id || "";
     const jobKey = `${effectiveJobId}_${effectiveProfileId}_${window.location.hostname}`;
 
-    // Immediately update floating button to "Submitted"
-    SubmissionHUD.setQuickApplyStatus('submitted');
-
     if (loggedSuccessJobKey === jobKey) return;
     loggedSuccessJobKey = jobKey;
 
     console.log("[Submission Checker] Verified submission confirmation on page! Logging to Apply-Flow...", data.submission_success_message);
     const res = await logPayloadToBackend("PASSED", val, false);
+    if (!res?.success) return;
     SubmissionHUD.updateState(allProfiles, activeProfile, currentSettings, { status: "SUBMITTED", message: data.submission_success_message });
     SubmissionHUD.showToast(`🎉 Application submitted & logged to Apply-Flow! (${data.submission_success_message || 'Confirmed'})`);
   }
@@ -1264,6 +1346,7 @@ window.SubmissionCheckerCore = (function () {
     loggedAlreadyAppliedJobKey = jobKey;
 
     const res = await logPayloadToBackend("ALREADY_APPLIED", val, false);
+    if (!res?.success) return;
     SubmissionHUD.updateState(allProfiles, activeProfile, currentSettings, { status: "ALREADY_APPLIED", message: data.already_applied_message });
     SubmissionHUD.showToast("📌 Portal indicates you already applied: Status synced to Apply-Flow as Already Applied!");
   }
@@ -1453,6 +1536,13 @@ window.SubmissionCheckerCore = (function () {
   // Synchronous extraction and validation
   function runExtractionAndValidation() {
     try {
+      if (!hasVerifiedContext()) {
+        currentExtractedData = null;
+        currentValidation = JobFormValidator.validate({}, null, currentSettings || { integrationMode: 'applyflow' });
+        SubmissionHUD.updateDrawer({}, currentValidation);
+        SubmissionHUD.updateFieldHighlights(new Map());
+        return;
+      }
       currentExtractedData = JobFormExtractor.extractAllFields();
       if (window === window.top) {
         if ((!currentExtractedData || currentExtractedData.total_fields_count === 0) && lastIframeExtractedData && lastIframeExtractedData.total_fields_count > 0) {
@@ -1577,6 +1667,7 @@ window.SubmissionCheckerCore = (function () {
       chrome.runtime.sendMessage({
         type: "DISPATCH_LIVE_FEEDBACK",
         payload: {
+          ...contextStamp(),
           applier_id: currentSettings?.applierId || "Applier",
           candidate_id: activeProfile?.id,
           profile_assigned: activeProfile?.fullName || "Unassigned",
@@ -1817,8 +1908,11 @@ window.SubmissionCheckerCore = (function () {
   let quickApplyWatcherTimer = null;
   let quickApplyPending = false;
   let loggedSubmissionUrl = null;
+  let submitInterceptionBound = false;
 
   function bindSubmitInterception() {
+    if (submitInterceptionBound) return;
+    submitInterceptionBound = true;
     // Detect if current page is a login / account activation / password reset page
     // These pages have submit buttons but are NOT job application submissions
     function isLoginOrActivationPage() {
@@ -1852,6 +1946,16 @@ window.SubmissionCheckerCore = (function () {
 
       const target = event.target;
       if (!target) return;
+
+      if (!hasVerifiedContext()) {
+        const button = target.closest('button, input[type="submit"], [role="button"]');
+        const text = (button?.innerText || button?.value || '').trim();
+        if (isSubmitTarget(target) || isQuickApplyTrigger(target) || /^(next|continue|save & continue|save and continue|proceed)$/i.test(text)) {
+          event.preventDefault(); event.stopImmediatePropagation();
+          requireVerifiedContext();
+        }
+        return;
+      }
 
       // Handle Quick Apply / 1-Click Apply initiation
       if (isQuickApplyTrigger(target)) {
@@ -1956,6 +2060,11 @@ window.SubmissionCheckerCore = (function () {
 
       // NEVER log submission on login / account activation / password reset pages
       if (isLoginOrActivationPage()) return;
+      if (!hasVerifiedContext()) {
+        event.preventDefault(); event.stopImmediatePropagation();
+        requireVerifiedContext();
+        return;
+      }
 
       const isIntermediate = Boolean(JobFormExtractor.detectIntermediateWizardStep?.()?.isIntermediate);
 
@@ -2018,14 +2127,7 @@ window.SubmissionCheckerCore = (function () {
         clearInterval(quickApplyWatcherTimer);
         quickApplyPending = false;
 
-        const currentUrl = window.location.href.split('#')[0];
-        if (loggedSubmissionUrl !== currentUrl) {
-          loggedSubmissionUrl = currentUrl;
-          const status = alreadyAppliedState.is_already_applied ? "ALREADY_APPLIED" : "PASSED";
-          logPayloadToBackend(status, currentValidation);
-        }
-
-        SubmissionHUD.setQuickApplyStatus('submitted', "🎉 Application verified & logged to Apply-Flow!");
+        // runExtractionAndValidation owns outcome delivery; it waits for the backend acknowledgement.
         return;
       }
 
@@ -2172,6 +2274,8 @@ window.SubmissionCheckerCore = (function () {
   }
 
   async function logPayloadToBackend(status, val, isManualConfirm = false) {
+    if (!requireVerifiedContext()) return { success: false, reason: 'UNVERIFIED_CONTEXT' };
+    const eventContext = contextStamp();
     const serverUrl = await getApplyFlowServerUrl();
     const applyFlowParams = JobFormExtractor.extractApplyFlowParams();
     const effectiveJobId = sessionStorage.getItem('applyflow_job_id') || applyFlowParams.jobId || window.__SQC_PERSISTED_AF_SESSION?.jobId || currentExtractedData?.portal_job_id || currentExtractedData?.req_id || "";
@@ -2180,7 +2284,7 @@ window.SubmissionCheckerCore = (function () {
     const effectiveProfileName = sessionStorage.getItem('applyflow_profile_name') || applyFlowParams.profileName || window.__SQC_PERSISTED_AF_SESSION?.profileName || activeProfile?.fullName || "Candidate";
     const effectiveApplierName = sessionStorage.getItem('applyflow_applier_name') || applyFlowParams.applierName || window.__SQC_PERSISTED_AF_SESSION?.applierName || currentSettings?.applierName || "";
 
-    const isAlreadyApplied = Boolean(currentExtractedData?.is_already_applied);
+    const isAlreadyApplied = status === 'ALREADY_APPLIED' || Boolean(currentExtractedData?.is_already_applied);
     const isSubmissionSuccess = Boolean(currentExtractedData?.is_submission_success || val?.isSubmissionSuccess);
     const jobStatus = isAlreadyApplied ? "ALREADY_APPLIED" : ((val?.isValid || isSubmissionSuccess) ? "SUBMITTED" : "REJECTED");
     const validationStatus = isAlreadyApplied ? "ALREADY_APPLIED" : ((val?.isValid || isSubmissionSuccess) ? "PASSED" : (status.includes("OVERRIDDEN") ? "OVERRIDDEN_FAILED" : (status.includes("FLAGGED") ? "WARNING" : "FAILED")));
@@ -2256,7 +2360,11 @@ window.SubmissionCheckerCore = (function () {
 
     const finalShotImg = (formattedScreenshots[formattedScreenshots.length - 1] || formattedScreenshots[0])?.data_url || "";
 
+    if (JSON.stringify(eventContext) !== JSON.stringify(contextStamp())) {
+      return { success: false, reason: 'CONTEXT_CHANGED' };
+    }
     const payload = {
+      ...eventContext,
       job_id: effectiveJobId,
       profile_id: effectiveProfileId,
       candidate_id: effectiveProfileId,
@@ -2323,7 +2431,7 @@ window.SubmissionCheckerCore = (function () {
         payload
       }, (res) => {
         const isOk = Boolean(res && (res.success || res.status === 200 || res.status === 201));
-        if (isOk) {
+        if (isOk && ['SUBMITTED', 'ALREADY_APPLIED'].includes(jobStatus)) {
           currentDuplicateRecord = {
             appliedAt: new Date().toISOString(),
             status: jobStatus === 'ALREADY_APPLIED' ? 'ALREADY_APPLIED' : 'APPLIED',
@@ -2343,8 +2451,8 @@ window.SubmissionCheckerCore = (function () {
 
           SubmissionHUD.setQuickApplyStatus('submitted', '🎉 Submitted successfully to Apply-Flow!');
           restrictPortalInteractions(true, currentDuplicateRecord);
-        } else {
-          SubmissionHUD.setQuickApplyStatus('idle');
+        } else if (!isOk) {
+          SubmissionHUD.setQuickApplyStatus('sync_failed', 'ApplyFlow did not acknowledge the application event.');
           SubmissionHUD.showToast(`⚠️ Apply-Flow did not confirm submission: ${res?.error || 'Server error'}`);
         }
         resolve(res);
@@ -2353,8 +2461,13 @@ window.SubmissionCheckerCore = (function () {
   }
 
   async function confirmAndLogSubmissionManually() {
+    if (!requireVerifiedContext()) return { success: false, reason: 'UNVERIFIED_CONTEXT' };
     // ── GUARD 0: Context Profile Mismatch Guard ──
     runExtractionAndValidation();
+    if (!currentValidation.isValid) {
+      SubmissionHUD.showToast('Resolve validation issues before confirming this application.');
+      return { success: false, reason: 'VALIDATION_FAILED' };
+    }
     const hasMismatch = (currentValidation?.errors || []).some(e => e.rule === 'CONTEXT_PROFILE_MISMATCH') || hasContextMismatchCheck();
     if (hasMismatch) {
       SubmissionHUD.showToast("🚫 Submission blocked: Active profile does not match the candidate assigned to this job in Apply-Flow.");
@@ -2411,6 +2524,7 @@ window.SubmissionCheckerCore = (function () {
   }
 
   async function markAsAlreadyAppliedManually() {
+    if (!requireVerifiedContext()) return { success: false };
     runExtractionAndValidation();
     const currentUrl = window.location.href.split('#')[0];
     loggedSubmissionUrl = currentUrl;
@@ -2423,12 +2537,14 @@ window.SubmissionCheckerCore = (function () {
     }
 
     const res = await logPayloadToBackend("ALREADY_APPLIED", currentValidation);
+    if (!res?.success) return res;
     SubmissionHUD.updateState(allProfiles, activeProfile, currentSettings, { status: "ALREADY_APPLIED" });
     SubmissionHUD.showToast("📌 Status updated to 'Already Applied' in Apply-Flow!");
     return res;
   }
 
   async function markAsPortalFailedManually(reasonKey = 'PORTAL_ACCESS_FAILED', failCount = 1) {
+    if (!requireVerifiedContext()) return { success: false };
     const applyFlowParams = JobFormExtractor.extractApplyFlowParams();
     const effectiveJobId = sessionStorage.getItem('applyflow_job_id') || applyFlowParams.jobId || window.__SQC_PERSISTED_AF_SESSION?.jobId || currentExtractedData?.req_id || "";
     const effectiveProfileId = sessionStorage.getItem('applyflow_profile_id') || applyFlowParams.profileId || window.__SQC_PERSISTED_AF_SESSION?.profileId || activeProfile?.id || "";
@@ -2446,6 +2562,7 @@ window.SubmissionCheckerCore = (function () {
     const humanReason = reasonLabels[reasonKey] || `Portal access failure: ${reasonKey}`;
 
     const payload = {
+      ...contextStamp(),
       job_id: effectiveJobId,
       profile_id: effectiveProfileId,
       applier_id: effectiveApplierId,
@@ -2485,6 +2602,7 @@ window.SubmissionCheckerCore = (function () {
         type: "LOG_SUBMISSION",
         payload
       }, (res) => {
+        if (!res?.success) { SubmissionHUD.showToast(res?.error || 'ApplyFlow did not acknowledge the failure report.'); resolve(res); return; }
         SubmissionHUD.showToast(`🔴 Portal access failure logged to Apply-Flow (${failCount} attempt${failCount > 1 ? 's' : ''}).`);
         resolve(res);
       });
@@ -2492,6 +2610,7 @@ window.SubmissionCheckerCore = (function () {
   }
 
   async function reportBlockedStatus(reasonKey, customMessage) {
+    if (!requireVerifiedContext()) return { success: false };
     runExtractionAndValidation();
     const applyFlowParams = JobFormExtractor.extractApplyFlowParams();
     const effectiveJobId = applyFlowParams.jobId || sessionStorage.getItem('applyflow_job_id') || window.__SQC_PERSISTED_AF_SESSION?.jobId || "";
@@ -2500,6 +2619,7 @@ window.SubmissionCheckerCore = (function () {
     const effectiveProfileName = applyFlowParams.profileName || sessionStorage.getItem('applyflow_profile_name') || window.__SQC_PERSISTED_AF_SESSION?.profileName || activeProfile?.fullName || "Candidate";
 
     const payload = {
+      ...contextStamp(),
       job_id: effectiveJobId,
       profile_id: effectiveProfileId,
       applier_id: effectiveApplierId,
@@ -2523,12 +2643,13 @@ window.SubmissionCheckerCore = (function () {
     chrome.runtime.sendMessage({
       type: "LOG_SUBMISSION",
       payload
-    }, () => {});
-
-    SubmissionHUD.showToast(`⚠️ Job flagged as '${reasonKey === "EMAIL_OTP_REQUIRED" ? "Needs Email OTP" : "Login Issue"}' in Apply-Flow!`);
+    }, res => {
+      SubmissionHUD.showToast(res?.success ? 'Application issue acknowledged by ApplyFlow.' : (res?.error || 'ApplyFlow did not acknowledge the report.'));
+    });
   }
 
   async function rejectJobManually(reasonKey = 'UNMET_REQUIREMENT_GITHUB', customNotes = '') {
+    if (!requireVerifiedContext()) return { success: false };
     runExtractionAndValidation();
     const applyFlowParams = JobFormExtractor.extractApplyFlowParams();
     const effectiveJobId = sessionStorage.getItem('applyflow_job_id') || applyFlowParams.jobId || window.__SQC_PERSISTED_AF_SESSION?.jobId || currentExtractedData?.req_id || "";
@@ -2544,6 +2665,7 @@ window.SubmissionCheckerCore = (function () {
     const defaultNotes = reasonDescriptions[reasonKey] || `Job application rejected due to unmet requirement: ${reasonKey}`;
 
     const payload = {
+      ...contextStamp(),
       job_id: effectiveJobId,
       profile_id: effectiveProfileId,
       applier_id: effectiveApplierId,
@@ -2577,6 +2699,7 @@ window.SubmissionCheckerCore = (function () {
         type: "LOG_SUBMISSION",
         payload
       }, (res) => {
+        if (!res?.success) { SubmissionHUD.showToast(res?.error || 'ApplyFlow did not acknowledge the rejection.'); resolve(res); return; }
         SubmissionHUD.updateState(allProfiles, activeProfile, currentSettings, { status: "REJECTED", message: "Job marked as Ineligible / Rejected in Apply-Flow." });
         SubmissionHUD.showToast(`🚫 Job rejected in Apply-Flow: ${reasonKey}`);
         resolve(res);

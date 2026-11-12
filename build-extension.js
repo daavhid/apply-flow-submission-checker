@@ -44,6 +44,10 @@ function copyRecursive(src, dest) {
 console.log('🚀 Building Submission Quality Checker Extension...');
 
 // 1. Clean dist directory
+const relativeDist = path.relative(path.resolve(ROOT_DIR), path.resolve(DIST_DIR));
+if (!relativeDist || relativeDist.startsWith('..') || path.isAbsolute(relativeDist) || fs.existsSync(DIST_DIR) && fs.lstatSync(DIST_DIR).isSymbolicLink()) {
+  throw new Error('Refusing to clean a build directory outside the workspace.');
+}
 if (fs.existsSync(DIST_DIR)) {
   fs.rmSync(DIST_DIR, { recursive: true, force: true });
 }
@@ -62,66 +66,7 @@ for (const item of EXTENSION_FILES) {
   }
 }
 
-// 2.5 Optional: Auto-inject profiles.json into DEFAULT_PROFILES if present
-const profilesJsonPath = path.join(ROOT_DIR, 'profiles.json');
-if (fs.existsSync(profilesJsonPath)) {
-  try {
-    const rawProfiles = fs.readFileSync(profilesJsonPath, 'utf8');
-    const parsed = JSON.parse(rawProfiles);
-    if (Array.isArray(parsed) && parsed.length > 0) {
-      const swDistPath = path.join(EXTENSION_DIST_DIR, 'background', 'service-worker.js');
-      const swSrcPath = path.join(ROOT_DIR, 'background', 'service-worker.js');
-      
-      const newConstCode = `// Default Initial Profiles (Synced from profiles.json)\nconst DEFAULT_PROFILES = ${JSON.stringify(parsed, null, 2)};`;
-      
-      [swDistPath, swSrcPath].forEach(targetSw => {
-        if (fs.existsSync(targetSw)) {
-          let content = fs.readFileSync(targetSw, 'utf8');
-          content = content.replace(/\/\/ Default Initial Profiles[\s\S]*?const DEFAULT_PROFILES\s*=\s*\[[\s\S]*?\];/, newConstCode);
-          fs.writeFileSync(targetSw, content, 'utf8');
-        }
-      });
-      console.log(`  ✓ Automatically bundled ${parsed.length} profile(s) from profiles.json into DEFAULT_PROFILES!`);
-    }
-  } catch (err) {
-    console.warn(`  ⚠️ Could not parse profiles.json: ${err.message}`);
-  }
-}
-
-// 2.6 Optional: Auto-inject default-settings.json into DEFAULT_SETTINGS & DEFAULT_WEBHOOKS
-const defaultSettingsJsonPath = path.join(ROOT_DIR, 'default-settings.json');
-if (fs.existsSync(defaultSettingsJsonPath)) {
-  try {
-    const rawSettings = fs.readFileSync(defaultSettingsJsonPath, 'utf8');
-    const parsedSettings = JSON.parse(rawSettings);
-    if (parsedSettings && typeof parsedSettings === 'object') {
-      const swDistPath = path.join(EXTENSION_DIST_DIR, 'background', 'service-worker.js');
-      const swSrcPath = path.join(ROOT_DIR, 'background', 'service-worker.js');
-      
-      const webhooksCode = parsedSettings.webhooks
-        ? `// Default Multi-Webhook Configuration\nconst DEFAULT_WEBHOOKS = ${JSON.stringify(parsedSettings.webhooks, null, 2)};`
-        : null;
-      
-      const settingsCopy = { ...parsedSettings };
-      delete settingsCopy.webhooks;
-      const settingsCode = `// Default Settings\nconst DEFAULT_SETTINGS = ${JSON.stringify({ ...settingsCopy, webhooks: parsedSettings.webhooks || [] }, null, 2)};`;
-
-      [swDistPath, swSrcPath].forEach(targetSw => {
-        if (fs.existsSync(targetSw)) {
-          let content = fs.readFileSync(targetSw, 'utf8');
-          if (webhooksCode) {
-            content = content.replace(/\/\/ Default Multi-Webhook Configuration[\s\S]*?const DEFAULT_WEBHOOKS\s*=\s*\[[\s\S]*?\];/, webhooksCode);
-          }
-          content = content.replace(/\/\/ Default Settings[\s\S]*?const DEFAULT_SETTINGS\s*=\s*\{[\s\S]*?\};/, settingsCode);
-          fs.writeFileSync(targetSw, content, 'utf8');
-        }
-      });
-      console.log(`  ✓ Automatically bundled default settings & webhooks (API: ${parsedSettings.backendWebhookUrl})!`);
-    }
-  } catch (err) {
-    console.warn(`  ⚠️ Could not parse default-settings.json: ${err.message}`);
-  }
-}
+// Profiles and connection identity are resolved from ApplyFlow at runtime.
 
 // 3. Create ZIP archive
 try {

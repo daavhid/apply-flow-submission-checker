@@ -651,7 +651,7 @@ window.JobFormExtractor = (function () {
     }
 
     // 3. Explicit Apply-Flow job parameters attached to URL
-    const hasExplicitJob = /[?&#](job_id|sqc_job_id|portal_job_id|jobId)=[^&#]+/i.test(window.location.href);
+    const hasExplicitJob = /[?&#](application_session_id|sqc_application_session_id|job_id|sqc_job_id|portal_job_id|jobId)=[^&#]+/i.test(window.location.href);
     if (hasExplicitJob) {
       return 'generic';
     }
@@ -1235,6 +1235,15 @@ window.JobFormExtractor = (function () {
 
   // 1. URL Extraction (Reading Apply-Flow Job & Profile IDs from Query, Hash, Session, or Persisted Background Storage)
   function extractApplyFlowParams() {
+    if (window.__SQC_CONTEXT_SETTINGS?.integrationMode === 'applyflow') {
+      const s = window.__SQC_CONTEXT_SETTINGS;
+      const c = s.verifiedContext;
+      if (!window.SQCContextPolicy?.ready(s, window.location.href)) return {};
+      return { jobId: c.jobId, profileId: c.profileId, applierId: c.applierId,
+        profileName: window.__SQC_ACTIVE_PROFILE?.fullName || '', applierName: s.applierName,
+        apiUrl: s.backendWebhookUrl ? new URL(s.backendWebhookUrl).origin : '',
+        canonicalPath: getCanonicalJobPath(window.location.href) };
+    }
     let searchParams, hashParams;
     try {
       const url = new URL(window.location.href);
@@ -3206,7 +3215,69 @@ window.JobFormExtractor = (function () {
   }
 
   // Restore form fields on the page from sessionStorage and active candidate profile
+  function restoreVerifiedForm(profile, settings) {
+    if (!window.SQCContextPolicy?.ready(settings, window.location.href) || profile?.id !== settings.verifiedContext.profileId) return { count: 0 };
+    const p = profile;
+    const valueFor = label => {
+      const key = getCanonicalLabelKey(label);
+      const custom = (p.customFields || []).find(f => getCanonicalLabelKey(f.label || '') === key);
+      if (settings.autoFillCustomQuestions !== false && custom?.value !== undefined) return custom.value;
+      if (/^(first name|legal first name|given name)$/.test(key)) return p.firstName;
+      if (/^(last name|legal last name|family name|surname)$/.test(key)) return p.lastName;
+      if (/^(name|full name|full legal name|first and last name)$/.test(key)) return p.legalName || p.fullName;
+      if (/^(email|email address|primary email)$/.test(key)) return p.primaryEmail;
+      if (/^(phone|phone number|mobile|mobile phone|telephone)$/.test(key)) return p.phone;
+      if (/^(address|street address|address line 1)$/.test(key)) return p.address;
+      if (/^(city|town)$/.test(key)) return p.city;
+      if (/^(state|province|state province)$/.test(key)) return p.state;
+      if (/^(zip|zip code|postal code)$/.test(key)) return p.zip;
+      if (/^(country|country of residence)$/.test(key)) return p.country;
+      if (/^(linkedin|linkedin profile|linkedin url|linkedin profile url)$/.test(key)) return p.linkedin;
+      if (/^(github|github url|github profile)$/.test(key)) return p.github;
+      if (/^(website|portfolio|portfolio url|personal website)$/.test(key)) return p.website || p.portfolio;
+      if (/legally authorized.*work|authorized to work/.test(key)) return p.workAuth?.authorizedInUS;
+      if (/sponsor|sponsorship/.test(key)) return p.workAuth?.requiresSponsorship;
+      if (settings.autoFillCompensation !== false && /^(desired salary|expected salary|salary expectation|salary expectations)$/.test(key)) return p.compensation?.desiredSalary ?? p.desiredSalary;
+      if (settings.autoFillDemographics !== false) {
+        if (/^(gender|gender identity)$/.test(key)) return p.eeoc?.gender;
+        if (/^(race|ethnicity|race ethnicity)$/.test(key)) return p.eeoc?.raceEthnicity;
+        if (/^(veteran status)$/.test(key)) return p.eeoc?.veteranStatus;
+        if (/^(disability status)$/.test(key)) return p.eeoc?.disability;
+      }
+      return undefined;
+    };
+    let count = 0;
+    const groups = new Set();
+    for (const field of queryAllDeep('input, textarea, select')) {
+      if (field.closest('#sqc-hud-container, #sqc-modal-overlay') || field.disabled || field.readOnly ||
+          ['hidden', 'file', 'submit', 'button', 'reset', 'password', 'checkbox'].includes(field.type)) continue;
+      let value;
+      if (field.type === 'radio') {
+        if (!field.name || groups.has(field.name)) continue;
+        groups.add(field.name);
+        const radios = queryAllDeep(`input[type="radio"][name="${CSS.escape(field.name)}"]`);
+        if (radios.some(r => r.checked)) continue;
+        value = valueFor(getRadioGroupQuestion(radios));
+        if (typeof value === 'boolean') value = value ? 'Yes' : 'No';
+        if (value !== undefined && value !== null && value !== '' && setNativeRadioValue(radios, String(value))) count++;
+        continue;
+      }
+      if (field.value && !isUnansweredPlaceholder(field.value)) continue;
+      value = valueFor(cleanFieldLabel(getElementLabel(field)));
+      if (typeof value === 'boolean') value = value ? 'Yes' : 'No';
+      if (value === undefined || value === null || value === '') continue;
+      const ok = field.tagName === 'SELECT' ? setNativeSelectValue(field, String(value)) :
+        field.tagName === 'TEXTAREA' ? setNativeTextareaValue(field, String(value)) : setNativeInputValue(field, String(value));
+      if (ok) count++;
+    }
+    return { count };
+  }
+
   function restoreSavedForm(profile, settings = {}) {
+    if (settings.integrationMode === 'applyflow') return restoreVerifiedForm(profile, settings);
+    if (settings.integrationMode === 'applyflow' && !window.SQCContextPolicy?.ready(settings, window.location.href)) {
+      return { count: 0, error: 'ApplyFlow assignment is not verified.' };
+    }
     const initScrollX = window.scrollX;
     const initScrollY = window.scrollY;
 
@@ -3739,6 +3810,9 @@ window.JobFormExtractor = (function () {
 
   // Generate a complete, context-aware prompt bundle for ChatGPT
   function generateChatGptPrompt(profile, jobContext = null, customQuestions = null) {
+    if (!window.SQCContextPolicy?.ready(window.__SQC_CONTEXT_SETTINGS, window.location.href)) {
+      throw new Error('Verify the ApplyFlow assignment before generating answers.');
+    }
     const p = profile || {};
     const job = jobContext || detectJobContext();
     const jdText = extractJdFullText();
@@ -3775,10 +3849,10 @@ window.JobFormExtractor = (function () {
 CANDIDATE RESUME & PROFILE CONTEXT:
 - Candidate Name: ${p.fullName || p.legalName || 'Candidate'}
 - Target Stack / Title: ${p.targetStack || techStack}
-- Location: ${p.city ? `${p.city}, ${p.state}, ${p.country}` : 'United States'}
-- Work Authorization: ${p.workAuth?.workAuthType || 'US Citizen'} (Requires Sponsorship: ${p.workAuth?.requiresSponsorship || 'No'})
-- Compensation Base Floor / Desired: $${(p.compensation?.desiredSalary || p.salaryFloor || 130000).toLocaleString()}/year
-${tailoredResume ? `- Active Resume Content (Tailored / Profile Base):\n${tailoredResume.slice(0, 3000)}` : `- Technical Experience Summary: ${expSummary || 'Experienced software engineer specialized in building high-scale distributed backend systems, REST/GraphQL APIs, cloud infrastructure, and modern web applications.'}`}
+- Location: ${[p.city, p.state, p.country].filter(Boolean).join(', ') || 'Not provided'}
+- Work Authorization: ${p.workAuth?.workAuthType || 'Not provided'} (Requires Sponsorship: ${p.workAuth?.requiresSponsorship || 'Not provided'})
+- Compensation Base Floor / Desired: $${(p.compensation?.desiredSalary || p.salaryFloor || 'Not provided').toLocaleString()}/year
+${tailoredResume ? `- Active Resume Content (Tailored / Profile Base):\n${tailoredResume.slice(0, 3000)}` : `- Technical Experience Summary: ${expSummary || 'Not provided'}`}
 ${skills ? `- Core Skills: ${skills}` : ''}
 ${projects ? `- Key Accomplishments / Projects:\n- ${projects}` : ''}
     `.trim();
@@ -3846,7 +3920,8 @@ GUIDELINES:
    - Avoid robotic filler phrases ("I am thrilled to apply...", "As a passionate engineer...").
 2. **Choice / Dropdown / Radio Questions**:
    - If [Available Choices] are listed, pick the exact matching choice (e.g. "Yes", "No", "US Citizen", "Hybrid", etc.) based on candidate profile.
-3. **Short Text / Number Fields**:
+3. Do not infer missing facts, work authorization, sponsorship, or compensation. Leave answers requiring unknown facts empty for applicant review.
+4. **Short Text / Number Fields**:
    - Return clean, direct values (e.g., years of experience, desired salary number, URLs).
 
 4. **Output Format**: Return your final output strictly as a valid JSON object matching the schema below:
@@ -3875,6 +3950,9 @@ ${targetQuestions.map((q, idx) => `    {
 
   // Apply parsed answers from ChatGPT output directly to page form inputs
   function applyParsedAnswers(input) {
+    if (!window.SQCContextPolicy?.ready(window.__SQC_CONTEXT_SETTINGS, window.location.href)) {
+      return { success: false, count: 0, error: 'Verify the ApplyFlow assignment before filling answers.' };
+    }
     if (!input) return { success: false, count: 0, error: "Empty input" };
 
     let answersList = [];

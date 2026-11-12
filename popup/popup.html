@@ -1,127 +1,24 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Submission Quality Checker</title>
-  <link rel="stylesheet" href="popup.css">
-</head>
-<body>
-  <div class="popup-container">
-    <!-- Header -->
-    <header class="popup-header">
-      <div class="brand">
-        <div class="brand-icon">🛡️</div>
-        <div>
-          <h1 class="brand-title">Apply-Flow Guard</h1>
-          <p class="brand-subtitle">Submission Quality Gatekeeper</p>
-        </div>
-      </div>
-      <button class="icon-btn" id="open-options-btn" title="Open Full Settings">⚙️</button>
-    </header>
-
-    <!-- Connection & Automation Quick Bar -->
-    <div class="quick-status-row">
-      <div class="status-pill applyflow-pill" id="applyflow-pill" title="Apply-Flow Job Sync Status">
-        <span class="status-dot green" id="af-status-dot"></span>
-        <span id="af-status-badge">Checking...</span>
-      </div>
-      <button id="toggle-autofill-quick" class="status-pill auto-pill" title="Toggle Auto-Fill on ATS page load">
-        <span class="pill-icon">⚡</span>
-        <span id="auto-fill-text">Auto: ON</span>
-      </button>
-    </div>
-
-    <!-- Active Candidate Profile Card -->
-    <section class="card profile-card">
-      <div class="card-header-row">
-        <div class="card-label">Active Candidate Assignment</div>
-        <span class="status-badge" id="lock-badge">🔒 Locked</span>
-      </div>
-      
-      <div class="profile-select-wrapper">
-        <select id="profile-select" class="custom-select"></select>
-        <button class="btn btn-secondary btn-sm" id="btn-admin-unlock">🔑 Admin Unlock & Reassign</button>
-      </div>
-
-      <div class="profile-details" id="profile-details">
-        <div class="detail-row">
-          <span class="label">Primary Email:</span>
-          <span class="val" id="profile-email">...</span>
-        </div>
-        <div class="detail-row">
-          <span class="label">Salary Floor:</span>
-          <span class="val highlight" id="profile-salary">...</span>
-        </div>
-        <div class="detail-row">
-          <span class="label">Target Stack:</span>
-          <span class="val" id="profile-stack">...</span>
-        </div>
-        <div class="detail-row">
-          <span class="label">Strategy:</span>
-          <span class="val" id="profile-strategy">📄 Base Method</span>
-        </div>
-      </div>
-
-      <!-- In-Popup Admin Passkey Prompt Modal -->
-      <div class="admin-auth-box" id="admin-auth-box" style="display:none;">
-        <div class="admin-auth-header">🔑 Admin Profile & Stack Reassignment</div>
-        <label class="input-label">Select Candidate Profile:</label>
-        <select id="admin-target-profile" class="custom-select auth-select"></select>
-        
-        <label class="input-label">Assigned Tech Stack Track:</label>
-        <select id="admin-target-stack" class="custom-select auth-select">
-          <option value="dotnet">Full Stack C# / .NET Track</option>
-          <option value="python">Full Stack Python / FastAPI Track</option>
-          <option value="php">Full Stack PHP / Laravel Track</option>
-          <option value="auto">Auto-Detect Stack per Job</option>
-        </select>
-        
-        <label class="input-label">Admin Passkey (Default: 1234567890):</label>
-        <input type="password" id="admin-passkey-input" placeholder="Enter admin passkey..." class="custom-input" />
-        
-        <div id="admin-auth-error" class="auth-error" style="display:none;"></div>
-        
-        <div class="auth-actions">
-          <button class="btn btn-secondary btn-sm" id="btn-cancel-admin">Cancel</button>
-          <button class="btn btn-primary btn-sm" id="btn-submit-admin">Reassign</button>
-        </div>
-      </div>
-    </section>
-
-    <!-- Interception Mode Toggle -->
-    <section class="card mode-card">
-      <div class="card-label">Interception Mode</div>
-      <div class="mode-toggles">
-        <button class="mode-btn active" id="mode-active" data-mode="active">
-          <span class="mode-icon">🛑</span>
-          <span class="mode-title">Active Gate</span>
-          <span class="mode-desc">Hard block invalid submissions</span>
-        </button>
-        <button class="mode-btn" id="mode-audit" data-mode="audit">
-          <span class="mode-icon">📊</span>
-          <span class="mode-title">Passive Audit</span>
-          <span class="mode-desc">Log without blocking</span>
-        </button>
-      </div>
-    </section>
-
-    <!-- Backend Webhook Status -->
-    <section class="card webhook-card">
-      <div class="card-header-row">
-        <div class="card-label">Backend Webhook</div>
-        <span class="status-badge" id="webhook-status">Active</span>
-      </div>
-      <div class="webhook-url" id="webhook-url">https://your-service.onrender.com/api/submissions/log</div>
-    </section>
-
-    <!-- Quick Footer Actions -->
-    <footer class="popup-footer">
-      <button class="btn btn-secondary" id="open-test-bench">🧪 ATS Simulator</button>
-      <button class="btn btn-primary" id="open-full-dashboard">⚙️ Extension Settings</button>
-    </footer>
-  </div>
-
-  <script src="popup.js"></script>
-</body>
-</html>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SQC | ApplyFlow</title><link rel="stylesheet" href="popup.css"></head>
+<body><div class="popup-container">
+<header class="popup-header"><div><h1 class="brand-title">ApplyFlow SQC</h1><p class="brand-subtitle">Verified application assignments</p></div></header>
+<section class="card"><label class="card-label" for="api-origin">ApplyFlow endpoint</label>
+<input id="api-origin" class="custom-input" type="url" placeholder="https://api.your-applyflow.com" autocomplete="off">
+<p>Enter your ApplyFlow server URL once. SQC loads your signed-in applier and each job's assigned candidate from ApplyFlow.</p>
+<p id="connection-state" role="status" aria-live="polite">Checking connection...</p>
+<div class="auth-actions"><button id="connect" class="btn btn-primary">Connect / Refresh</button><button id="disconnect" class="btn btn-secondary">Disconnect</button></div>
+<button id="open-applyflow" class="btn btn-secondary" style="margin-top:12px">Open ApplyFlow sign-in</button></section>
+<section class="card profile-card"><div class="card-header-row"><span class="card-label">Verified assignment</span><span class="status-badge">Locked</span></div>
+<div class="profile-details">
+<div class="detail-row"><span class="label">Applier</span><span class="val" id="applier">Not connected</span></div>
+<div class="detail-row"><span class="label">Candidate</span><span class="val" id="candidate">Unverified</span></div>
+<div class="detail-row"><span class="label">Job</span><span class="val" id="job">Unverified</span></div>
+<div class="detail-row"><span class="label">Profile version</span><span class="val" id="profile-version">-</span></div></div>
+<p>Open an assigned job from ApplyFlow. Candidate and applier changes are managed there.</p></section>
+<section class="card"><label><input type="checkbox" id="autofill"> Autofill verified candidate details</label>
+<p><label for="mode">Validation mode</label> <select id="mode" class="custom-select"><option value="active">Active gate</option><option value="audit">Passive audit</option></select></p>
+<p>Both modes require a verified ApplyFlow assignment.</p></section>
+<footer class="popup-footer"><button class="btn btn-secondary" id="settings">Settings & audit history</button></footer>
+</div><script src="popup.js"></script></body></html>

@@ -1,0 +1,255 @@
+ApplyFlow integration contract for SQC
+
+Implement this contract in the ApplyFlow backend to enable the SQC authentication,
+candidate profile, job context, and audit synchronization already implemented in
+this repository. Contract version: 1. These new authentication/context routes are
+requirements for the ApplyFlow agent; their existence is not assumed.
+
+Scope
+
+SQC now uses one user-selected ApplyFlow API origin. Applier identity comes from
+the authenticated server session. Candidate, job, and verified resume come from
+an authorized application assignment. Profiles are no longer seeded from JSON.
+Candidate editing, local reassignment, admin passkeys, and extra webhook targets
+are disabled. The existing ChatGPT copy/paste tools remain available only inside
+a verified assignment. Direct screening API and general chat UI integration are
+the next phase, described at the end of this contract.
+
+Authentication transport
+
+The endpoint is the ONLY integration setting the installer/user supplies. Do not
+ask the user to enter candidate IDs, applier IDs, API keys, extension IDs, AI
+provider settings, or separate webhook URLs. Normal ApplyFlow sign-in is required
+if no authenticated browser session exists. Login credentials stay in ApplyFlow.
+The extension opens its endpoint setup screen on first installation, persists
+the endpoint across browser restarts/extension updates, and uses the same flow
+for an unpacked local installation and a Chrome Web Store installation.
+
+1. The user enters the API origin in the extension popup and clicks Connect.
+   HTTPS is required, except HTTP on localhost/127.0.0.1/[::1]. Paths, credentials,
+   query strings, and hashes are rejected. Portal URLs cannot select API origins.
+2. GET /api/sqc/login must serve or redirect to the normal ApplyFlow login.
+   This is opened in a browser tab, never fetched as an authentication workaround.
+3. All API calls originate in the service worker, use credentials: include,
+   cache: no-store, and reject redirects. Use the existing authenticated browser
+   cookie to identify the user. If ApplyFlow currently accepts only bearer tokens,
+   add a supported cookie-based adapter for these routes before enabling SQC.
+4. Permit the deployed chrome-extension://<extension-id> origin and the
+   Content-Type, X-SQC-CSRF, and X-SQC-Extension-Id request headers. SQC supplies
+   its actual chrome.runtime.id automatically on every request, for both unpacked
+   and Store builds. Do not ask the user for this ID. Register permitted Store
+   and development extension origins centrally on the backend. The extension ID
+   is public client metadata, never proof of identity or assignment authorization.
+   Configure credentialed responses
+   for this origin explicitly; do not combine credentialed access with '*'.
+   Test the actual Chrome cookie policy in the target deployment.
+5. GET /api/sqc/session returns a session-bound CSRF token. All POST requests
+   include X-SQC-CSRF. Validate it, session access, and assignment ownership on
+   the backend. No bearer token or CSRF token is exposed to portal content scripts.
+6. 401 means signed out/expired; 403 means access denied/revoked. Never redirect
+   API requests to login HTML. Return JSON errors for all other non-success cases:
+   {"success":false,"error":{"code":"CONTEXT_MISMATCH","message":"..."}}
+
+GET /api/sqc/session
+
+Response (top-level shape, no data wrapper):
+{
+  "success": true,
+  "contractVersion": 1,
+  "session": {"id":"auth_123","expiresAt":"2030-01-01T13:00:00.000Z"},
+  "applier": {"id":"user_123","name":"Applier Name"},
+  "csrfToken":"opaque_session_bound_csrf_value"
+}
+
+Use the authenticated user, never a request applier ID. Session IDs must change
+when the user signs out/signs in as another account. Applier identity is locked in
+SQC. This endpoint must not return a list of unrelated candidate profiles.
+
+Launching an assignment
+
+Create or reuse an authorized applicationSessionId for the tuple of tenant,
+applier, candidate, and job. Launch the portal with this identifier in its hash:
+https://boards.greenhouse.io/example/jobs/12345#application_session_id=app_123
+
+Preserve any existing portal hash route and append parameters appropriately.
+Explicit sqc_application_session_id in the query is also supported. Hash job_id
+and profile_id, or query sqc_job_id and sqc_profile_id, are optional hints only.
+SQC ignores ordinary ATS job_id query values as ApplyFlow IDs to avoid collisions.
+Names, applier_id, server URLs, and stack labels in portal URLs are not authority.
+
+POST /api/sqc/application-context
+
+Headers: Content-Type: application/json; X-SQC-CSRF: <session token>
+Request:
+{
+  "contractVersion":1,
+  "applicationSessionId":"app_123",
+  "url":"https://boards.greenhouse.io/example/jobs/12345#application_session_id=app_123",
+  "jobId":"optional_explicit_applyflow_job_id",
+  "profileId":"optional_explicit_applyflow_profile_id"
+}
+
+Optional identifiers are omitted when absent. A previously verified tab can
+reuse applicationSessionId across authorized wizard/redirect routes. For a
+standalone portal URL without a launch identifier, resolve only a single
+unambiguous assignment that belongs to the authenticated applier. Return a
+409 error if no unique assignment is available; never choose the first candidate.
+
+Response:
+{
+  "success":true,
+  "contractVersion":1,
+  "context":{
+    "applicationSessionId":"app_123",
+    "authSessionId":"auth_123",
+    "expiresAt":"2030-01-01T12:05:00.000Z",
+    "applier":{"id":"user_123","name":"Applier Name"},
+    "assignment":{
+      "status":"ACTIVE","applierId":"user_123",
+      "profileId":"profile_123","jobId":"job_123"
+    },
+    "profile":{
+      "id":"profile_123","version":"7","verified":true,
+      "fullName":"Candidate Name","firstName":"Candidate","lastName":"Name",
+      "primaryEmail":"candidate@example.com","emailAliases":["candidate@example.com"],
+      "phone":"+15555550123","address":"Verified address","city":"City",
+      "state":"State","zip":"12345","country":"United States",
+      "targetStack":"Python","primaryStackKeywords":["python"],
+      "workAuth":{"authorizedInUS":"Yes","requiresSponsorship":"No"},
+      "compensation":{"salaryFloor":120000,"desiredSalary":140000},
+      "customFields":[{"label":"Exact screening question text","value":"Verified answer"}]
+    },
+    "job":{
+      "id":"job_123","version":"3","title":"Backend Engineer","company":"Example",
+      "url":"https://boards.greenhouse.io/example/jobs/12345"
+    },
+    "resume":{
+      "id":"resume_123","profileId":"profile_123","version":"2",
+      "verified":true,"text":"Verified resume text",
+      "file":{"filename":"Candidate_Name.pdf","dataUrl":"data:application/pdf;base64,..."}
+    },
+    "allowedRoutes":[
+      {"url":"https://boards.greenhouse.io/example/jobs/12345","includeSubpaths":true},
+      {"url":"https://boards.greenhouse.io/example/confirmation/12345","includeSubpaths":false}
+    ],
+    "status":"PENDING"
+  }
+}
+
+All IDs, versions, and flags in this example are real server-resolved values in
+production; timestamps must be future UTC ISO strings. Versions are nonempty
+strings and change whenever their underlying verified data changes.
+
+Required validation:
+- Authenticate the applier and tenant, check active assignment ownership, and
+  enforce equality among assignment IDs, profile ID, job ID, resume.profileId,
+  and the returned authenticated session/applier IDs.
+- Match the actual portal URL/requisition/platform identifier to the target job.
+  Company/title alone are insufficient. Reject conflicting hints and ambiguity.
+- Build allowedRoutes from trusted job/ATS data. Do not echo arbitrary request
+  URLs into this list. Prefix routes match only path segments. Include identifying
+  query parameters when a platform uses them to distinguish jobs.
+- Authorize each redirect, login, confirmation, and embedded application frame
+  explicitly. Do not whitelist an entire shared ATS host or '/' for subpaths.
+  Every frame verifies its own URL with the worker; page postMessage cannot
+  install identity or profile context. Cross-frame AI injection is not implemented.
+- Omit unknown optional profile facts; never supply invented defaults for
+  authorization, sponsorship, salary, demographic answers, or experience.
+- Resume text is required for a verified assignment. The optional file.dataUrl
+  enables attachment of the original verified file. Without it SQC does not
+  synthesize a replacement file. Keep responses small enough for session storage.
+- Existing profile sections such as eeoc, location, technicalExperience,
+  backgroundAndEducation, and customFields can be supplied as verified objects.
+
+Lease and synchronization behavior
+
+SQC refreshes active content configuration every 30 seconds and caches successful
+auth/context checks for at most 30 seconds. A content lease is capped at 60 seconds
+and never outlives the server context or authentication expiry. Sign-out and
+revocation therefore propagate within these polling/lease limits, not instantly.
+Event delivery forces fresh authentication and context verification. If profile,
+job, or resume versions changed since evidence was created, the event is rejected
+until SQC refreshes. Different tabs maintain independent contexts. Verified data
+is stored in trusted extension session storage, survives worker suspension, and
+expires on browser-session termination. There is no offline identity fallback.
+
+Submission and live-event synchronization
+
+Keep these existing endpoints and add authenticated ownership/version checks:
+POST /api/submissions/webhook
+POST /api/submissions/live-event
+
+Requests retain the existing SQC evidence/validation fields and add:
+{
+  "contractVersion":1,
+  "event_id":"random_event_uuid",
+  "application_session_id":"app_123",
+  "job_id":"job_123","job_version":"3",
+  "profile_id":"profile_123","candidate_id":"profile_123","profile_version":"7",
+  "applier_id":"user_123","applier_name":"Applier Name",
+  "profile_name":"Candidate Name","profile_assigned":"Candidate Name",
+  "resume_id":"resume_123","resume_version":"2",
+  "is_final_submission":true,
+  "submission_confirmed_by":"CONFIRMED_ON_PORTAL_SUCCESS_PAGE",
+  "job_status":"SUBMITTED","validation_status":"PASSED",
+  "extracted_data":{},"screening_qa":[],"screenshots":[],
+  "timestamp":"2030-01-01T12:00:00.000Z"
+}
+
+Re-derive identity/ownership server-side, validate the versions, and deduplicate
+event_id within the assignment. Reject stale versions with 409. Do not treat
+PENDING/IN_PROGRESS, REJECTED, BLOCKED, or PORTAL_ACCESS_FAILED as a successful
+application. Prevent downgrading an already submitted application. Screenshot
+evidence can include a generated form summary when browser capture is unavailable;
+it is not by itself proof that the portal accepted an application.
+
+Both endpoints MUST respond with this acknowledgement shape:
+{
+  "success":true,"accepted":true,
+  "eventId":"the_exact_request_event_id",
+  "applicationSessionId":"app_123",
+  "recordId":"stored_record_id"
+}
+
+SQC reports successful delivery only after this acknowledgement. Existing
+responses containing only success:true are insufficient. Local audit history
+stores acknowledged metadata; visual evidence is sent to ApplyFlow and retained
+in bounded extension session storage. No automatic durable retry queue is part
+of this phase. A failed or timed-out dispatch must be retried explicitly; the
+backend must never infer that failed delivery means the portal application failed.
+
+AI screening integration next phase
+
+Preserve POST /api/submissions/answer-questions (alias /api/ai/answer-questions).
+For SQC calls extend the documented batch API with applicationSessionId,
+profileVersion, jobVersion, resumeId, resumeVersion, and requestId. Resolve the
+candidate/job from the authenticated assignment, rather than arbitrary names.
+Return these identifiers unchanged with answers keyed by exact request question
+ID. Return an explicit needs-input result for unknown facts. Version mismatch,
+revoked assignment, and a wrong portal must fail before model execution.
+
+Proposed request extension, to be wired in the next SQC change:
+{
+  "applicationSessionId":"app_123","requestId":"batch_uuid",
+  "jobId":"job_123","jobVersion":"3","profileId":"profile_123","profileVersion":"7",
+  "resumeId":"resume_123","resumeVersion":"2",
+  "url":"https://boards.greenhouse.io/example/jobs/12345",
+  "questions":[{"id":"stable_field_uuid","question":"Why this role?","type":"textarea","maxLength":1000}]
+}
+
+Existing /api/ai/chat and /api/ai/status are not authentication or assignment
+verification endpoints. AI availability alone must never unlock SQC.
+
+Acceptance checks for the ApplyFlow agent
+
+Test valid login, expired login, wrong applier, wrong tenant, reassignment,
+candidate/profile/resume version updates, a resume belonging to another candidate,
+ambiguous standalone jobs, different jobs in two tabs, route redirects, embedded
+form URLs, and a logout during context retrieval. Verify that forged URL names,
+applier IDs, API origins, and candidate IDs do not change identity. Test duplicate
+event IDs, failed acknowledgements, and stale versions without marking jobs applied.
+
+SQC local checks: npm.cmd test; npm.cmd run build on Windows (npm on other systems).
+Load dist/extension as an unpacked Chrome extension. Connect to the implemented
+API origin, sign in, refresh the popup, then open an assignment from ApplyFlow.
+Live end-to-end acceptance requires these backend routes and a Chrome session.

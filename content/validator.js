@@ -96,6 +96,15 @@ window.JobFormValidator = (function () {
     const warnings = [];
     const fieldErrorMap = new Map();
 
+    // Authentication and assignment checks precede portal success messages and audit-mode rules.
+    if (settings.integrationMode === 'applyflow' && (!activeProfile ||
+        !window.SQCContextPolicy?.ready(settings, window.location.href) ||
+        activeProfile.id !== settings.verifiedContext?.profileId)) {
+      errors.push({ rule: 'APPLYFLOW_CONTEXT_UNVERIFIED', severity: 'BLOCKING',
+        message: settings.integrationMessage || 'Connect to ApplyFlow and verify this application assignment.' });
+      return { isValid: false, errors, warnings, fieldErrorMap, errorCount: 1, warningCount: 0 };
+    }
+
     // If the job has just been successfully submitted on the ATS portal, mark as SUBMISSION_SUCCESS and valid
     if (data && data.is_submission_success) {
       return {
@@ -146,25 +155,7 @@ window.JobFormValidator = (function () {
       };
     }
 
-    const profile = activeProfile || {
-      fullName: "Carlton Johnson",
-      legalName: "Carlton Johnson",
-      firstName: "Carlton",
-      lastName: "Johnson",
-      primaryEmail: "carlton.johnson.dev@gmail.com",
-      emailAliases: ["carlton.johnson.dev@gmail.com"],
-      phone: "7276010870",
-      formattedPhone: "(727) 601 0870",
-      address: "32520 Midsummer Night Ln",
-      city: "Wesley Chapel",
-      state: "Florida",
-      zip: "33543",
-      country: "United States",
-      linkedin: "linkedin.com/in/carl-j-108bb127/",
-      salaryFloor: 120000,
-      desiredSalary: 130000,
-      targetStack: "Full Stack C# / .NET / Cloud"
-    };
+    const profile = activeProfile || {};
 
     const effectiveStack = getEffectiveStack(profile, settings.activeStackKey, data.job_title);
     const minScreeningLen = settings.minScreeningLength || 15;
