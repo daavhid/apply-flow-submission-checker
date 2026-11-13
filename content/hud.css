@@ -1638,3 +1638,8 @@
 .sqc-root .sqc-resume-text summary { cursor:pointer; color:var(--sqc-accent); font-size:12px; }
 .sqc-root .sqc-resume-text pre { margin-top:12px; white-space:pre-wrap; max-height:260px; overflow:auto; color:var(--sqc-muted); font-size:11px; line-height:1.7; }
 .sqc-root .sqc-dialog-foot:has(#sqc-sync-verified) { flex-wrap:wrap; }
+.sqc-root [hidden] { display:none !important; }
+.sqc-root .sqc-screening-status { color:var(--sqc-muted); font-size:11px; line-height:1.7; margin-top:10px; overflow-wrap:anywhere; }
+.sqc-root .sqc-screening-status:empty { display:none; }
+.sqc-ai-filled { outline:2px solid #6bdfb570; outline-offset:2px; }
+.sqc-ai-needs-input { outline:2px solid #e0b97090; outline-offset:2px; }

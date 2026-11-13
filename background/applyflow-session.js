@@ -1,10 +1,12 @@
 /* ApplyFlow contract v2. No candidate defaults, URL-selected servers, or local identity overrides. */
 (function (root) {
   'use strict';
-  function create({ chrome, fetch, policy, defaults = {}, now = Date.now }) {
+  function create({ chrome, fetch, policy, screening = root.SQCScreeningPolicy, localResume = root.SQCLocalResume,
+    localResumes = localResume?.createStore({session:chrome.storage.session}), defaults = {}, now = Date.now, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)) }) {
     let revision = 0;
     let queue = Promise.resolve();
     const resumeFiles = new Map();
+    const pendingAnswers = new Map();
     const maxResumeBytes = 10 * 1024 * 1024;
     const forbidden = new Set(['SAVE_PROFILE', 'DELETE_PROFILE', 'ARCHIVE_PROFILE', 'TOGGLE_ARCHIVE_PROFILE',
       'SYNC_DEFAULT_PROFILES', 'SET_ACTIVE_PROFILE', 'ADMIN_UNLOCK_PROFILE', 'ADMIN_TOGGLE_LOCK', 'SAVE_WEBHOOKS']);
@@ -12,10 +14,13 @@
       'autoFillCompensation', 'autoFillCustomQuestions', 'minScreeningLength', 'streamLiveEvents', 'interceptionMode'];
     const privileged = sender => sender.url?.startsWith(chrome.runtime.getURL('')) === true;
     const failure = (state, error) => Object.assign(new Error(error), { state });
-    async function request(apiOrigin, path, method = 'GET', body, csrfToken) {
+    async function request(apiOrigin, path, method = 'GET', body, csrfToken, options = {}) {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 10000);
+      const timer = setTimeout(() => controller.abort(), options.timeoutMs || 10000);
+      const abort = () => controller.abort();
+      options.signal?.addEventListener('abort', abort, {once:true});
       try {
+        if (options.signal?.aborted) throw failure('CANCELLED', 'Answer generation was stopped.');
         const res = await fetch(apiOrigin + path, {
           method, credentials: 'include', cache: 'no-store', redirect: 'error', signal: controller.signal,
           headers: { Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}),
@@ -30,19 +35,24 @@
         }
         if (res.status === 403) throw failure('FORBIDDEN', 'ApplyFlow denied access. Refresh your assignment.');
         const data = await res.json();
+        if (res.status === 409) throw failure('VERSION_MISMATCH', 'The application versions changed. Refresh SQC and try again.');
         if (!res.ok || data.success !== true) throw failure('UNAVAILABLE',
           ['/api/sqc/login', '/api/sqc/password'].includes(path) ? 'ApplyFlow could not complete this authentication request.' :
             (data.error?.message || 'ApplyFlow could not verify this request.'));
         return data;
       } catch (error) {
         if (error.state) throw error;
+        if (options.signal?.aborted) throw failure('CANCELLED', 'Answer generation was stopped.');
+        if (controller.signal.aborted) throw failure('TIMEOUT', 'The request timed out. Please try again.');
         throw failure('UNAVAILABLE', 'ApplyFlow is unreachable or returned an invalid response.');
-      } finally { clearTimeout(timer); }
+      } finally { clearTimeout(timer); options.signal?.removeEventListener('abort', abort); }
     }
     async function clear() {
       revision++;
       resumeFiles.clear();
+      for (const operation of pendingAnswers.values()) operation.controller.abort();
       await chrome.storage.session.remove(['sqcAuth', 'sqcContexts']);
+      try { await localResumes?.clear(); } catch (_) { /* Storage errors must never prevent identity invalidation. */ }
     }
     async function resumeFile(auth, context, force) {
       const file = context.resume.file || {};
@@ -156,8 +166,8 @@
           c.profile.id !== auth.assignment?.profileId || c.profile.version !== auth.assignment?.profileVersion ||
           c.assignment.profileAssignmentId !== auth.assignment?.id || c.assignment.profileAssignmentVersion !== auth.assignment?.version ||
           !c.profile?.version || !c.profile?.fullName || !c.job?.id || !c.job?.version ||
-          c.resume?.verified !== true || !c.resume?.id || !c.resume?.version || !c.resume?.text || c.resume.profileId !== c.profile.id ||
-          (c.resume.kind === 'tailored' && c.resume.jobId !== c.job.id) ||
+          (c.resume !== null && (c.resume?.verified !== true || !c.resume?.id || !c.resume?.version || !c.resume?.text || c.resume.profileId !== c.profile.id ||
+          (c.resume.kind === 'tailored' && c.resume.jobId !== c.job.id))) ||
           !Number.isFinite(expiry) || expiry <= now() || !policy.matchesUrl(url, c.allowedRoutes) ||
           (requested.applicationSessionId && requested.applicationSessionId !== c.applicationSessionId) ||
           (requested.jobId && requested.jobId !== c.job.id) || (requested.profileId && requested.profileId !== c.profile.id)) {
@@ -172,7 +182,7 @@
       await chrome.storage.session.set({ sqcContexts: { ...(latest.sqcContexts || {}), [tab.id]: previous } });
       return previous;
     }
-    async function config(message, sender) {
+    async function config(message, sender, includeResumeFile = true) {
       const stored = await chrome.storage.local.get(['sqcConnection', 'settings']);
       const apiOrigin = stored.sqcConnection?.apiOrigin || '';
       const settings = { ...defaults };
@@ -202,7 +212,13 @@
           // Every frame is verified against its own URL; the context routes must authorize embedded forms too.
           const url = privileged(sender) ? tab.url : (sender.url || tab.url);
           context = await resolveContext(auth, tab, url, message.force === true);
-          const file = await resumeFile(auth, context, message.force === true);
+          let uploaded;
+          try { uploaded = await localResumes?.get(tab.id, localResume.binding(auth, context)); } catch (_) { /* The verified base profile remains usable if local document storage is unavailable. */ }
+          const baseResume = context.resume;
+          context = {...context, resume: uploaded ? {...uploaded, jobId:context.job.id,
+            baseResumeId:baseResume?.id || null,baseResumeVersion:baseResume?.version || null} :
+            (baseResume || {id:'none',version:'none',text:'',source:'missing',file:{}})};
+          const file = includeResumeFile ? await resumeFile(auth, context, message.force === true) : context.resume.file || {};
           if ((await chrome.tabs.get(tab.id)).url !== tab.url) throw failure('STALE_CONTEXT', 'The job page changed while loading its resume. Retry verification.');
           context = {...context, resume: {...context.resume, file}};
           integration = { ...integration, state: 'VERIFIED', message: 'Assignment verified by ApplyFlow.' };
@@ -210,6 +226,7 @@
             profileAssignmentId: auth.assignment.id, profileAssignmentVersion: auth.assignment.version,
             applierId: auth.applier.id, profileId: context.profile.id, jobId: context.job.id,
             profileVersion: context.profile.version, jobVersion: context.job.version, resumeId: context.resume.id,
+            resumeSource:context.resume.source || 'applyflow', resumeSha256:context.resume.file?.sha256 || '',
             resumeVersion: context.resume.version, expiresAt: context.expiresAt, allowedRoutes: context.allowedRoutes,
             status: context.status || 'PENDING' };
         }
@@ -231,8 +248,12 @@
           resumeBase64: context.resume.file?.dataUrl || '',
           resumeFilename: context.resume.file?.filename || '',
           resumeId: context.resume.id, resumeVersion: context.resume.version, resumeJobId: context.resume.jobId || '',
-          resumeIsTailored: context.resume.kind === 'tailored' && context.resume.jobId === context.job.id,
-          resumeTailoringRequired: context.job.tailoringRequired === true || context.resume.tailoringRequired === true || context.profile.tailoringMode === 'tailored',
+          resumeSource:context.resume.source || 'applyflow',
+          resumeBaseId:context.resume.source === 'sqc_upload' ? context.resume.baseResumeId : context.resume.id,
+          resumeBaseVersion:context.resume.source === 'sqc_upload' ? context.resume.baseResumeVersion : context.resume.version,
+          resumeIsTailored: context.resume.source === 'sqc_upload' && context.resume.jobId === context.job.id,
+          resumeTailoringRequired: true,
+          resumeContext:context.resume.facts || null,
           resumeSha256: context.resume.file?.sha256 || '', resumeFileError: context.resume.file?.error || '',
           resumeMimeType: context.resume.file?.mimeType || '',
           primaryStackKeywords: (Array.isArray(context.resume.skills) ? context.resume.skills : context.resume.skills?.primaryStackKeywords) || context.profile.primaryStackKeywords || [],
@@ -246,6 +267,23 @@
     }
     async function handleInternal(message, sender) {
       const action = message.action || message.type;
+      if (['SQC_SET_LOCAL_RESUME', 'SQC_CLEAR_LOCAL_RESUME'].includes(action)) {
+        if (!sender.tab || privileged(sender) || !localResumes) return {success:false,error:'Upload a resume from a verified application HUD.'};
+        const cfg = await config({force:true}, sender, false), c = cfg.settings.verifiedContext;
+        if (!c) return {success:false,error:cfg.integration.message};
+        if (!screening.same(message.context, c) || ['applierId','profileAssignmentId','profileAssignmentVersion'].some(key => message.context?.[key] !== c[key])) {
+          return {success:false,error:'The application changed. Reopen the resume manager.'};
+        }
+        const {sqcAuth:auth, sqcContexts = {}} = await chrome.storage.session.get(['sqcAuth','sqcContexts']);
+        if (action === 'SQC_CLEAR_LOCAL_RESUME') await localResumes.remove(sender.tab.id);
+        else {
+          const resume = await localResume.validate(message.resume, cfg.activeProfile);
+          if ((await chrome.tabs.get(sender.tab.id)).url !== sender.tab.url) return {success:false,error:'The job page changed during upload. Try again.'};
+          await localResumes.put(sender.tab.id, localResume.binding(auth, sqcContexts[sender.tab.id]), resume);
+        }
+        for (const [key, operation] of pendingAnswers) if (key.startsWith(sender.tab.id + ':')) operation.controller.abort();
+        return config({}, sender);
+      }
       if (action === 'SQC_CONNECT') {
         if (!privileged(sender)) return { success: false, error: 'Configure ApplyFlow from the extension popup.' };
         const apiOrigin = policy.origin(message.apiOrigin);
@@ -348,33 +386,6 @@
         return { success: true, already_applied: applied, has_applied: applied, can_apply: !applied,
           existingRecord: applied ? cfg.applyFlowContext : null };
       }
-      if (['ANSWER_QUESTIONS', 'SQC_ANSWER_QUESTIONS'].includes(action)) {
-        if (!sender.tab || privileged(sender)) return { success: false, error: 'Question answering requires a verified job tab.' };
-        const cfg = await config({ force: false }, sender);
-        const c = cfg.settings.verifiedContext;
-        if (!c) return { success: false, error: cfg.integration.message };
-        const { sqcAuth: auth } = await chrome.storage.session.get('sqcAuth');
-        const questions = Array.isArray(message.questions) ? message.questions : [];
-        if (questions.length === 0) return { success: false, error: 'No questions provided to answer.' };
-
-        const payload = {
-          contractVersion: 2,
-          applicationSessionId: c.applicationSessionId,
-          requestId: crypto.randomUUID(),
-          jobId: c.jobId,
-          jobVersion: c.jobVersion,
-          profileId: c.profileId,
-          profileVersion: c.profileVersion,
-          resumeId: c.resumeId,
-          resumeVersion: c.resumeVersion,
-          url: sender.url || sender.tab.url,
-          questions,
-          customInstructions: message.customInstructions || '',
-        };
-
-        const result = await request(auth.apiOrigin, '/api/sqc/answer-questions', 'POST', payload, auth.csrfToken);
-        return { success: true, answers: result.answers, meta: result.meta };
-      }
       if (['LOG_SUBMISSION', 'APPLYFLOW_WEBHOOK', 'DISPATCH_LIVE_FEEDBACK'].includes(action)) {
         if (!sender.tab || privileged(sender)) return { success: false, error: 'Application events require a verified job tab.' };
         const cfg = await config({ force: true }, sender);
@@ -396,6 +407,10 @@
           applier_email: cfg.integration.applier.email,
           profile_name: cfg.activeProfile.fullName, profile_assigned: cfg.activeProfile.fullName,
           profile_version: c.profileVersion, job_version: c.jobVersion, resume_id: c.resumeId, resume_version: c.resumeVersion });
+        payload.resume_source = cfg.activeProfile.resumeSource;
+        payload.resume_sha256 = cfg.activeProfile.resumeSha256;
+        payload.base_resume_id = cfg.activeProfile.resumeBaseId;
+        payload.base_resume_version = cfg.activeProfile.resumeBaseVersion;
         payload.extracted_data = { ...(payload.extracted_data || {}), job_id: c.jobId, profile_id: c.profileId,
           applier_id: c.applierId, job_url: sender.url || sender.tab.url };
         const live = action === 'DISPATCH_LIVE_FEEDBACK';
@@ -417,11 +432,84 @@
       }
       return undefined;
     }
+    const answerKey = sender => sender.tab?.id + ':' + (sender.frameId || 0);
+    const contextIdentity = c => JSON.stringify([screening.stamp(c), c.applierId, c.profileAssignmentId, c.profileAssignmentVersion]);
+    async function answerQuestions(message, sender) {
+      if (!sender.tab || privileged(sender)) return {success:false,error:'Question answering requires a verified job tab.'};
+      const key = answerKey(sender);
+      if (pendingAnswers.has(key)) return {success:false,error:'Questions are already being generated for this page.'};
+      const operation = {controller:new AbortController(),requestId:message.requestId};
+      pendingAnswers.set(key,operation);
+      try {
+        const snapshot = await serialize(async () => {
+          const url = sender.url || sender.tab.url;
+          if (message.url !== url || typeof message.requestId !== 'string' || !/^[a-z0-9_-]{8,128}$/i.test(message.requestId)) throw failure('INVALID_REQUEST','Refresh the question fields and try again.');
+          const questions = screening.questions(message.questions);
+          const cfg = await config({force:true},sender,false), c = cfg.settings.verifiedContext;
+          if (!c) throw failure(cfg.integration.state, cfg.integration.message);
+          if (!screening.same(message.context,c) || ['applierId','profileAssignmentId','profileAssignmentVersion'].some(key => message.context?.[key] !== c[key])) throw failure('VERSION_MISMATCH','The application changed before generation started. Refresh SQC and try again.');
+          if (!cfg.activeProfile.resumeIsTailored) throw failure('TAILORING_REQUIRED','Upload the tailored resume for this application before requesting screening answers.');
+          if (!cfg.activeProfile.resumeText) throw failure('RESUME_REQUIRED','Upload a tailored resume or sync one from ApplyFlow before generating answers.');
+          const {sqcAuth:auth} = await chrome.storage.session.get('sqcAuth');
+          const resumeContext = cfg.activeProfile.resumeSource === 'sqc_upload' ? {
+            source:'sqc_upload', verified:false, id:c.resumeId, version:c.resumeVersion, sha256:cfg.activeProfile.resumeSha256,
+            filename:cfg.activeProfile.resumeFilename,text:cfg.activeProfile.resumeText,skills:cfg.activeProfile.primaryStackKeywords,
+            facts:cfg.activeProfile.resumeContext,
+            baseResumeId:cfg.activeProfile.resumeBaseId,baseResumeVersion:cfg.activeProfile.resumeBaseVersion
+          } : undefined;
+          return {auth,c,url,questions,resumeContext,revision,identity:contextIdentity(c),topUrl:(await chrome.tabs.get(sender.tab.id)).url};
+        });
+        const payload = {contractVersion:2,...screening.stamp(snapshot.c),requestId:message.requestId,url:snapshot.url,
+          ...(snapshot.resumeContext ? {resumeContext:snapshot.resumeContext} : {}),
+          questions:snapshot.questions,customInstructions:typeof message.customInstructions==='string' ? message.customInstructions.slice(0,4000) : ''};
+        const expected = {...screening.stamp(snapshot.c),requestId:payload.requestId};
+        const deadline = now() + 120000;
+        const assertCurrent = async () => {
+          if (operation.controller.signal.aborted || revision !== snapshot.revision) throw failure('CANCELLED','The account or application changed. Answers were discarded.');
+          if ((await chrome.tabs.get(sender.tab.id)).url !== snapshot.topUrl) throw failure('STALE_CONTEXT','The application page changed. Answers were discarded.');
+        };
+        await assertCurrent();
+        const options = () => ({timeoutMs:Math.max(1,Math.min(25000,deadline-now())),signal:operation.controller.signal});
+        let result = await request(snapshot.auth.apiOrigin,'/api/sqc/answer-questions','POST',payload,snapshot.auth.csrfToken,options());
+        let statusUrl;
+        for (let poll=0; ['PENDING','QUEUED','RUNNING'].includes(String(result.status || '').toUpperCase()); poll++) {
+          screening.envelope(result,expected);
+          if (poll >= 40 || now() >= deadline) throw failure('TIMEOUT','Answer generation took too long. Please try again.');
+          statusUrl = result.statusUrl || statusUrl;
+          if (typeof statusUrl !== 'string') throw failure('INVALID_RESPONSE','ApplyFlow did not supply an answer-status URL.');
+          const url = new URL(statusUrl,snapshot.auth.apiOrigin);
+          if (url.origin !== snapshot.auth.apiOrigin || url.username || url.password || url.hash) throw failure('INVALID_RESPONSE','The answer-status URL must use your saved ApplyFlow server.');
+          await sleep(3000); await assertCurrent();
+          if (now() >= deadline) throw failure('TIMEOUT','Answer generation took too long. Please try again.');
+          result = await request(snapshot.auth.apiOrigin,url.pathname+url.search,'GET',undefined,undefined,options());
+        }
+        await assertCurrent();
+        if (['FAILED','CANCELLED'].includes(String(result.status || '').toUpperCase())) throw failure('GENERATION_FAILED','ApplyFlow could not complete these answers. Try again.');
+        const answers = screening.answers(result,expected,snapshot.questions);
+        return await serialize(async () => {
+          await assertCurrent();
+          const current = await config({force:true},sender,false);
+          const {sqcAuth:auth} = await chrome.storage.session.get('sqcAuth');
+          if (!current.settings.verifiedContext || contextIdentity(current.settings.verifiedContext) !== snapshot.identity || auth?.sessionId !== snapshot.auth.sessionId) throw failure('VERSION_MISMATCH','The assignment or resume changed during generation. Answers were discarded.');
+          await assertCurrent();
+          return {success:true,contractVersion:2,...expected,answers,meta:{questionsCount:snapshot.questions.length}};
+        });
+      } finally { if (pendingAnswers.get(key) === operation) pendingAnswers.delete(key); }
+    }
+    function serialize(work) {
+      const result = queue.then(work); queue = result.catch(() => {}); return result;
+    }
     // Serialize context updates so concurrent frames, sign-out, and reconnect cannot resurrect stale state.
     function handle(message, sender) {
-      const work = queue.then(() => handleInternal(message, sender));
-      queue = work.catch(() => {});
-      return work;
+      const action=message.action || message.type;
+      // Generation runs outside the mutation queue so logout and lease refresh stay responsive.
+      if (['ANSWER_QUESTIONS','SQC_ANSWER_QUESTIONS'].includes(action)) return answerQuestions(message,sender);
+      if (action === 'SQC_CANCEL_QUESTIONS') {
+        const operation = pendingAnswers.get(answerKey(sender));
+        if (!privileged(sender) && sender.tab && operation?.requestId === message.requestId) operation.controller.abort();
+        return Promise.resolve({success:true});
+      }
+      return serialize(() => handleInternal(message,sender));
     }
     return { handle, clear };
   }

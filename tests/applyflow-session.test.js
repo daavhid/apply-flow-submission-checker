@@ -2,6 +2,9 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const policy = require('../content/context-policy');
+const screening = require('../content/screening-policy');
+require('../content/resume-context');
+const localResume = require('../background/local-resume');
 const { create } = require('../background/applyflow-session');
 
 function fixture() {
@@ -27,8 +30,10 @@ function fixture() {
   const assignedProfile = () => ({ id: lockedProfileId, version: 'v1', verified: true, fullName: 'Candidate ' + lockedProfileId.slice(-1) });
   const assignment = () => ({ id: 'assignment-1', version: assignmentVersion, status: 'ACTIVE', applierId: applier, profileId: lockedProfileId, profileVersion: 'v1' });
   const calls = [];
+  let interceptFetch = null;
   const fetch = async (url, options) => {
     calls.push({ url, options });
+    if (interceptFetch) {const intercepted=await interceptFetch(url,options);if(intercepted)return intercepted;}
     if (url.endsWith('/api/sqc/auth')) return { status: 200, ok: true, async json() {
       return { success: true, contractVersion: 2, csrfToken: 'login-challenge', expiresAt: challengeExpired ? '2020-01-01T00:00:00Z' : future() };
     } };
@@ -76,6 +81,7 @@ function fixture() {
         contractVersion: 2,
         applicationSessionId: b.applicationSessionId,
         requestId: b.requestId,
+        jobId:b.jobId,jobVersion:b.jobVersion,profileId:b.profileId,profileVersion:b.profileVersion,resumeId:b.resumeId,resumeVersion:b.resumeVersion,
         answers: (b.questions || []).map(q => ({
           id: q.id,
           question: q.question,
@@ -92,11 +98,13 @@ function fixture() {
     if (url.endsWith('/api/sqc/session')) data = mutateSession(data);
     return { status: 200, ok: true, async json() { return data; } };
   };
-  const service = create({ chrome, fetch, policy, now: () => clock });
+  const localResumes = localResume.memoryStore();
+  const service = create({ chrome, fetch, policy, screening, localResume, localResumes, sleep:async()=>{}, now: () => clock });
   const sender = id => ({ url: tabs[id].url, tab: structuredClone(tabs[id]) });
   const ui = { url: 'chrome-extension://sqc/popup/popup.html' };
-  return { service, chrome, calls, tabs, sender, ui, now: () => clock,
-    restart() { return create({ chrome, fetch, policy, now: () => clock }); },
+  return { service, chrome, calls, tabs, sender, ui, localResumes, now: () => clock,
+    restart() { return create({ chrome, fetch, policy, screening, localResume, localResumes, sleep:async()=>{}, now: () => clock }); },
+    intercept(fn) {interceptFetch=fn;},
     advance(ms) { clock += ms; }, signOut() { signedIn = false; }, changeApplier() { applier = 'applier-2'; },
     requirePasswordChange() { passwordChangeRequired = true; }, unassign() { assigned = false; },
     reassign() { lockedProfileId = 'profile-2'; assignmentVersion = '2'; },
@@ -144,7 +152,7 @@ test('a generated job resume is fetched with extension credentials and supplies 
     skills:['TypeScript','PostgreSQL'],file:{url:'/files/resume.pdf',filename:'Candidate-generated.pdf',sha256}}}));
   const result=await f.service.handle({type:'GET_CONFIG'},f.sender(1));
   assert.equal(result.integration.state,'VERIFIED');
-  assert.equal(result.activeProfile.resumeIsTailored,true);
+  assert.equal(result.activeProfile.resumeIsTailored,false);
   assert.equal(result.activeProfile.resumeTailoringRequired,true);
   assert.deepEqual(result.activeProfile.primaryStackKeywords,['TypeScript','PostgreSQL']);
   assert.ok(result.activeProfile.resumeBase64.startsWith('data:application/pdf;base64,'));
@@ -196,7 +204,7 @@ test('two job tabs retain isolated job contexts under the applier locked profile
   const b = await f.service.handle({ type: 'GET_CONFIG' }, f.sender(2));
   assert.equal(b.activeProfile.id, 'profile-1');
   assert.equal(b.settings.verifiedContext.jobId, 'job-2');
-  const restarted = create({ chrome: f.chrome, fetch: async () => { throw new Error('Unexpected fetch'); }, policy, now: f.now });
+  const restarted = create({ chrome: f.chrome, fetch: async () => { throw new Error('Unexpected fetch'); }, policy, localResumes:f.localResumes, now: f.now });
   const a = await restarted.handle({ type: 'GET_CONFIG' }, f.sender(1));
   assert.equal(a.activeProfile.id, 'profile-1');
   assert.equal(a.settings.verifiedContext.jobId, 'job-1');
@@ -489,9 +497,10 @@ test('a wizard route without launch parameters preserves its verified applicatio
 
 test('screening questions can be answered via /api/sqc/answer-questions with verified context', async () => {
   const f = fixture();
-  await f.service.handle({ type: 'GET_CONFIG' }, f.sender(1));
+  const cfg=await uploadLocal(f);
   const res = await f.service.handle({
     action: 'ANSWER_QUESTIONS',
+    requestId:'batch_test_123',context:cfg.settings.verifiedContext,url:f.tabs[1].url,
     questions: [
       { id: 'q_why', question: 'Why this role?', type: 'textarea' },
     ],
@@ -509,6 +518,114 @@ test('screening questions can be answered via /api/sqc/answer-questions with ver
   assert.equal(payload.applicationSessionId, 'application-1');
   assert.equal(payload.jobId, 'job-1');
   assert.equal(payload.profileId, 'profile-1');
-  assert.equal(payload.resumeId, 'resume-1');
+  assert.equal(payload.resumeId, cfg.activeProfile.resumeId);
   assert.equal(payload.questions.length, 1);
+});
+
+async function screeningMessage(f) {
+  const cfg=await uploadLocal(f);
+  return {type:'ANSWER_QUESTIONS',requestId:'batch_test_uuid',context:cfg.settings.verifiedContext,url:f.tabs[1].url,
+    questions:[{id:'why',question:'Why this role?',type:'textarea',maxLength:1000}]};
+}
+const answerResponse = (payload, extra={}) => ({success:true,contractVersion:2,...screening.stamp(payload),requestId:payload.requestId,
+  answers:[{id:'why',status:'ANSWERED',answer:'My verified experience fits this role.'}],...extra});
+const jsonResponse = (data,status=200) => ({status,ok:status>=200&&status<300,async json(){return data;}});
+
+test('stale client assignments fail before the screening provider is called',async()=>{
+  const f=fixture(),message=await screeningMessage(f);f.reassign();
+  await assert.rejects(f.service.handle(message,f.sender(1)),/changed before generation/);
+  assert.equal(f.calls.some(call=>call.url.endsWith('/answer-questions')),false);
+});
+test('answer responses must echo the original request and all version identifiers',async()=>{
+  const f=fixture(),message=await screeningMessage(f);
+  f.intercept((url,options)=>url.endsWith('/answer-questions')?jsonResponse(answerResponse(JSON.parse(options.body),{resumeVersion:'different'})):undefined);
+  await assert.rejects(f.service.handle(message,f.sender(1)),/does not match/);
+});
+test('navigation or reassignment during generation discards the answer batch',async()=>{
+  for(const change of [f=>{f.tabs[1].url='https://jobs.example/roles/2';},f=>f.reassign()]){
+    const f=fixture(),message=await screeningMessage(f);
+    f.intercept((url,options)=>{if(!url.endsWith('/answer-questions'))return;change(f);return jsonResponse(answerResponse(JSON.parse(options.body)));});
+    await assert.rejects(f.service.handle(message,f.sender(1)),/changed|discarded/);
+  }
+});
+test('pending generation is polled only on the configured backend and returns a verified final batch',async()=>{
+  const f=fixture(),message=await screeningMessage(f);let payload,polls=0;
+  f.intercept((url,options)=>{
+    if(url.endsWith('/answer-questions')){payload=JSON.parse(options.body);return jsonResponse(answerResponse(payload,{status:'PENDING',answers:undefined,statusUrl:'/api/sqc/answer-questions/requests/test'}),202);}
+    if(url.endsWith('/requests/test')){polls++;return jsonResponse(answerResponse(payload));}
+  });
+  const result=await f.service.handle(message,f.sender(1));
+  assert.equal(result.success,true);assert.equal(polls,1);assert.equal(result.requestId,message.requestId);
+  const poll=f.calls.find(call=>call.url.endsWith('/requests/test'));assert.equal(poll.options.credentials,'include');
+});
+test('foreign answer-status URLs are rejected before sending credentials',async()=>{
+  const f=fixture(),message=await screeningMessage(f);
+  f.intercept((url,options)=>url.endsWith('/answer-questions')?jsonResponse(answerResponse(JSON.parse(options.body),{status:'PENDING',statusUrl:'https://foreign.example/status'})):undefined);
+  await assert.rejects(f.service.handle(message,f.sender(1)),/saved ApplyFlow server/);
+  assert.equal(f.calls.some(call=>call.url.startsWith('https://foreign.example')),false);
+});
+test('sign-out remains responsive and cancels an in-flight generation request',async()=>{
+  const f=fixture(),message=await screeningMessage(f);let started;const waiting=new Promise(resolve=>{started=resolve;});
+  f.intercept((url,options)=>{
+    if(!url.endsWith('/answer-questions'))return;
+    started();return new Promise((resolve,reject)=>options.signal.addEventListener('abort',()=>reject(Object.assign(new Error('Aborted'),{name:'AbortError'})),{once:true}));
+  });
+  const pending=f.service.handle(message,f.sender(1));const rejected=assert.rejects(pending,/stopped|discarded|changed/);
+  await waiting;const logout=await f.service.handle({type:'SQC_LOGOUT'},f.ui);
+  assert.equal(logout.integration.state,'SIGNED_OUT');await rejected;
+});
+test('backend version mismatches are reported as refreshable errors',async()=>{
+  const f=fixture(),message=await screeningMessage(f);
+  f.intercept(url=>url.endsWith('/answer-questions')?jsonResponse({success:false,error:{code:'VERSION_MISMATCH'}},409):undefined);
+  await assert.rejects(f.service.handle(message,f.sender(1)),error=>error.state==='VERSION_MISMATCH');
+});
+
+const localText = 'Candidate 1\nSoftware engineer building Python APIs and SQL data systems.\nSkills\nPython, SQL';
+async function uploadLocal(f) {
+  const cfg = await f.service.handle({type:'GET_CONFIG'},f.sender(1));
+  return f.service.handle({type:'SQC_SET_LOCAL_RESUME',context:cfg.settings.verifiedContext,
+    resume:{filename:'Candidate_Tailored.txt',dataUrl:'data:text/plain;base64,'+btoa(localText),text:localText,
+      skills:['Python','SQL'],confirmed:true}},f.sender(1));
+}
+test('a local upload works without a server resume and survives worker restart',async()=>{
+  const f=fixture();f.mutate(c=>({...c,resume:null}));
+  const uploaded=await uploadLocal(f);
+  assert.equal(uploaded.success,true);assert.equal(uploaded.activeProfile.resumeSource,'sqc_upload');
+  assert.equal(uploaded.activeProfile.resumeIsTailored,true);assert.equal(uploaded.activeProfile.resumeBaseId,null);
+  assert.equal(uploaded.activeProfile.resumeText,localText);assert.match(uploaded.activeProfile.resumeId,/^sqc-upload:/);
+  assert.equal(uploaded.activeProfile.id,'profile-1');
+  const restored=await f.restart().handle({type:'GET_CONFIG'},f.sender(1));
+  assert.equal(restored.activeProfile.resumeText,localText);
+  const otherJob=await f.service.handle({type:'GET_CONFIG'},f.sender(2));
+  assert.equal(otherJob.activeProfile.resumeSource,'missing');
+});
+test('screening receives the selected local resume text and base-version provenance, not the binary file',async()=>{
+  const f=fixture();await uploadLocal(f);
+  const message=await screeningMessage(f);
+  const answer=await f.service.handle(message,f.sender(1));
+  assert.equal(answer.success,true);
+  const sent=JSON.parse(f.calls.findLast(c=>c.url.endsWith('/api/sqc/answer-questions')).options.body);
+  assert.equal(sent.resumeContext.text,localText);assert.equal(sent.resumeContext.verified,false);
+  assert.equal(sent.resumeContext.baseResumeId,'resume-1');assert.equal(sent.resumeContext.dataUrl,undefined);
+});
+test('uploads cannot change the assigned candidate and are removed on sign-out or reassignment',async()=>{
+  const f=fixture();await uploadLocal(f);f.reassign();
+  const reassigned=await f.service.handle({type:'GET_CONFIG',force:true},f.sender(1));
+  assert.equal(reassigned.activeProfile.id,'profile-2');assert.notEqual(reassigned.activeProfile.resumeSource,'sqc_upload');
+  await f.service.handle({type:'SQC_LOGOUT'},f.ui);
+  assert.equal(await f.localResumes.get(1,'anything'),null);
+});
+test('clearing a local upload restores the server resume and unverified upload messages are rejected',async()=>{
+  const f=fixture(),uploaded=await uploadLocal(f);
+  const cleared=await f.service.handle({type:'SQC_CLEAR_LOCAL_RESUME',context:uploaded.settings.verifiedContext},f.sender(1));
+  assert.equal(cleared.activeProfile.resumeSource,'applyflow');assert.equal(cleared.activeProfile.resumeId,'resume-1');
+  const noJob=await f.service.handle({type:'SQC_SET_LOCAL_RESUME'},f.ui);assert.equal(noJob.success,false);
+  const stale=await f.service.handle({type:'SQC_SET_LOCAL_RESUME',context:uploaded.settings.verifiedContext},f.sender(1));
+  assert.equal(stale.success,false);
+});
+test('screening waits for the per-application upload even when a server resume exists',async()=>{
+  const f=fixture(),cfg=await f.service.handle({type:'GET_CONFIG'},f.sender(1));
+  await assert.rejects(f.service.handle({type:'ANSWER_QUESTIONS',requestId:'batch_without_upload',url:f.tabs[1].url,
+    context:cfg.settings.verifiedContext,questions:[{id:'q1',question:'Why this role?',type:'textarea'}]},f.sender(1)),/Upload the tailored resume/);
+  assert.equal(f.calls.some(c=>c.url.endsWith('/api/sqc/answer-questions')),false);
 });

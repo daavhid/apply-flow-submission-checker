@@ -156,8 +156,19 @@ window.JobFormValidator = (function () {
     }
 
     const profile = activeProfile || {};
+    if (settings.integrationMode === 'applyflow' && profile.resumeSource !== 'sqc_upload' && data.total_fields_count > 0) {
+      errors.push({rule:'TAILORED_RESUME_UPLOAD_REQUIRED',severity:'BLOCKING',
+        message:'Upload the tailored resume for this application before continuing. Candidate identity is verified against ApplyFlow.'});
+    }
 
     const effectiveStack = getEffectiveStack(profile, settings.activeStackKey, data.job_title);
+    if (profile.resumeSource === 'sqc_upload' && window.SQCResumeContext) {
+      for (const entry of data.screening_qa || []) {
+        const fact=window.SQCResumeContext.numberMismatch(entry.q,entry.a,profile.resumeContext);
+        if(fact) errors.push({rule:'RESUME_EXPERIENCE_NUMBER_MISMATCH',severity:'BLOCKING',
+          message:`Experience answer conflicts with the uploaded resume: ${fact.evidence}`});
+      }
+    }
     const minScreeningLen = settings.minScreeningLength || 15;
 
     // Check for dynamic in-memory tailored resume data

@@ -917,7 +917,7 @@ window.JobFormExtractor = (function () {
 
       // 3. Check for wizard buttons: presence of "Next", "Continue", "Save & Continue" without any final "Submit Application" button
       const allButtons = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"], a[role="button"]'))
-        .filter(b => !b.closest('#sqc-hud-container, #sqc-modal-overlay') && b.offsetParent !== null);
+        .filter(b => !b.closest('#sqc-hud-container, #sqc-modal-overlay, .sqc-root') && b.offsetParent !== null);
 
       const hasNextButton = allButtons.some(b => {
         const t = (b.innerText || b.textContent || b.value || '').trim();
@@ -997,7 +997,7 @@ window.JobFormExtractor = (function () {
       'button, [role="button"], .applied-badge, .application-status, [data-automation-id*="applied"], [data-testid*="applied"], [class*="applied"]'
     );
     for (const b of appliedButtons) {
-      if (b.closest && b.closest('#sqc-hud-container, #sqc-modal-overlay')) continue;
+      if (b.closest && b.closest('#sqc-hud-container, #sqc-modal-overlay, .sqc-root')) continue;
       const txt = clean(b.innerText || b.textContent || '');
       if (/^(applied|applied\s*✓|application\s*submitted|application\s*sent)$/i.test(txt)) {
         return { is_success: true, message: txt };
@@ -1030,7 +1030,7 @@ window.JobFormExtractor = (function () {
       'h1, h2, h3, h4, h5, [role="heading"], .alert, .banner, .notification, .modal-body, .modal-title, .status-message, [class*="success"], [class*="confirmation"], [class*="applied"], p, span, strong, div, section, main'
     );
     for (const el of elements) {
-      if (el.closest && el.closest('#sqc-hud-container, #sqc-modal-overlay')) continue;
+      if (el.closest && el.closest('#sqc-hud-container, #sqc-modal-overlay, .sqc-root')) continue;
       if (el.children.length > 8 && el.innerText.length > 500) continue;
 
       const txt = clean(el.innerText || '');
@@ -1050,7 +1050,7 @@ window.JobFormExtractor = (function () {
 
     // Also check for top-level headers/titles saying "Confirmation" (e.g. Rippling ATS top bar)
     const headerHasConfirmation = Array.from(document.querySelectorAll('h1, h2, h3, header, [role="banner"], [class*="header"], [class*="title"], div')).some(el => {
-      if (el.closest && el.closest('#sqc-hud-container, #sqc-modal-overlay')) return false;
+      if (el.closest && el.closest('#sqc-hud-container, #sqc-modal-overlay, .sqc-root')) return false;
       const t = clean(el.innerText || '');
       return t === 'Confirmation' || /^confirmation\b/i.test(t);
     });
@@ -1095,7 +1095,7 @@ window.JobFormExtractor = (function () {
     for (const sel of errorSelectors) {
       const els = document.querySelectorAll(sel);
       for (const el of els) {
-        if (el.closest && el.closest('#sqc-hud-container, #sqc-modal-overlay')) continue;
+        if (el.closest && el.closest('#sqc-hud-container, #sqc-modal-overlay, .sqc-root')) continue;
         const txt = clean(el.innerText || '');
         if (!txt) continue;
         for (const pat of failurePatterns) {
@@ -1108,7 +1108,7 @@ window.JobFormExtractor = (function () {
 
     const headingsAndAlerts = document.querySelectorAll('h1, h2, h3, h4, .alert, [role="alert"], [class*="error"], p');
     for (const el of headingsAndAlerts) {
-      if (el.closest && el.closest('#sqc-hud-container, #sqc-modal-overlay')) continue;
+      if (el.closest && el.closest('#sqc-hud-container, #sqc-modal-overlay, .sqc-root')) continue;
       if (el.children.length > 5 && el.innerText.length > 300) continue;
       const txt = clean(el.innerText || '');
       if (!txt || txt.length > 250) continue;
@@ -1150,7 +1150,7 @@ window.JobFormExtractor = (function () {
       try {
         const els = document.querySelectorAll(sel);
         for (const el of els) {
-          if (el.closest && el.closest('#sqc-hud-container, #sqc-modal-overlay')) continue;
+          if (el.closest && el.closest('#sqc-hud-container, #sqc-modal-overlay, .sqc-root')) continue;
           const rect = el.getBoundingClientRect();
           if (rect.width > 0 && rect.height > 0 && (rect.top < window.innerHeight + 500 && rect.bottom > -500)) {
             foundEl = el;
@@ -1171,7 +1171,7 @@ window.JobFormExtractor = (function () {
       try {
         const textNodes = Array.from(document.querySelectorAll('label, p, span, div, h3, h4'));
         for (const node of textNodes) {
-          if (node.closest && node.closest('#sqc-hud-container, #sqc-modal-overlay')) continue;
+          if (node.closest && node.closest('#sqc-hud-container, #sqc-modal-overlay, .sqc-root')) continue;
           if (node.children.length > 3) continue;
           const txt = (node.innerText || '').trim();
           if (/I(?:'| a)m not a robot|verify that you are human|complete the security check|security verification|puzzle challenge/i.test(txt)) {
@@ -1491,7 +1491,7 @@ window.JobFormExtractor = (function () {
     const greetingRegex = /\b(?:good\s+(?:morning|afternoon|evening)|welcome(?:\s+back)?|hi|hello),\s+([a-zA-Z\u00C0-\u024F]+)(?:\s+([a-zA-Z\u00C0-\u024F]+))?/i;
     const headingCandidates = document.querySelectorAll('h1, h2, h3, .greeting, [class*="greeting"], header [class*="title"], [data-testid*="greeting"], header');
     for (const h of headingCandidates) {
-      if (h.closest && h.closest('#sqc-hud-container, #sqc-modal-overlay')) continue;
+      if (h.closest && h.closest('#sqc-hud-container, #sqc-modal-overlay, .sqc-root')) continue;
       const txt = (h.innerText || '').trim();
       if (!txt || txt.length > 80) continue;
       const match = txt.match(greetingRegex);
@@ -1532,7 +1532,7 @@ window.JobFormExtractor = (function () {
     // 3. "Signed in as <email>" / "Logged in as <email>"
     const signedInEls = document.querySelectorAll('span, div, p, [class*="auth"], [class*="user-email"]');
     for (const el of signedInEls) {
-      if (el.closest && el.closest('#sqc-hud-container, #sqc-modal-overlay')) continue;
+      if (el.closest && el.closest('#sqc-hud-container, #sqc-modal-overlay, .sqc-root')) continue;
       if (el.children.length > 2) continue;
       const txt = (el.innerText || '').trim();
       const m = txt.match(/(?:signed\s*in\s*as|logged\s*in\s*as|current\s*user:?)\s+([^\s@]+@[^\s@]+\.[^\s@]+)/i);
@@ -1601,7 +1601,7 @@ window.JobFormExtractor = (function () {
       ];
 
       for (const el of salaryContainers) {
-        if (el.closest && el.closest('#sqc-hud-container, #sqc-modal-overlay')) continue;
+        if (el.closest && el.closest('#sqc-hud-container, #sqc-modal-overlay, .sqc-root')) continue;
         const txt = (el.innerText || '').trim();
         if (!txt) continue;
 
@@ -2260,7 +2260,7 @@ window.JobFormExtractor = (function () {
     // 1. SCAN ALL INPUTS (Text, Email, Tel, Number, Radio, Checkbox, File)
     const inputs = queryAllDeep('input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"])');
     inputs.forEach(input => {
-      if (input.closest('#sqc-hud-container, #sqc-modal-overlay')) return;
+      if (input.closest('#sqc-hud-container, #sqc-modal-overlay, .sqc-root')) return;
       if (processedElements.has(input)) return;
 
       const type = (input.type || 'text').toLowerCase();
@@ -2452,7 +2452,7 @@ window.JobFormExtractor = (function () {
     // 2. SCAN ALL TEXTAREAS
     const textareas = queryAllDeep('textarea');
     textareas.forEach(ta => {
-      if (ta.closest('#sqc-hud-container, #sqc-modal-overlay')) return;
+      if (ta.closest('#sqc-hud-container, #sqc-modal-overlay, .sqc-root')) return;
       if (processedElements.has(ta)) return;
 
       const name = (ta.name || ta.id || '').toLowerCase();
@@ -2499,7 +2499,7 @@ window.JobFormExtractor = (function () {
       'select, [role="combobox"]:not(input):not(textarea), .k-dropdown, [data-role="dropdownlist"], mat-select'
     );
     selects.forEach(sel => {
-      if (sel.closest('#sqc-hud-container, #sqc-modal-overlay')) return;
+      if (sel.closest('#sqc-hud-container, #sqc-modal-overlay, .sqc-root')) return;
       if (processedElements.has(sel)) return;
 
       // If this select/widget contains any input/child already processed in Section 1, skip duplicate extraction!
@@ -3218,9 +3218,11 @@ window.JobFormExtractor = (function () {
   }
 
   // Restore form fields on the page from sessionStorage and active candidate profile
+  const verifiedAutofillValues = new WeakMap();
   function restoreVerifiedForm(profile, settings) {
     if (!window.SQCContextPolicy?.ready(settings, window.location.href) || profile?.id !== settings.verifiedContext.profileId) return { count: 0 };
     const p = profile;
+    const experienceGroups = new Map();
     const valueFor = label => {
       const key = getCanonicalLabelKey(label);
       const custom = (p.customFields || []).find(f => getCanonicalLabelKey(f.label || '') === key);
@@ -3255,7 +3257,7 @@ window.JobFormExtractor = (function () {
     let count = 0;
     const groups = new Set();
     for (const field of queryAllDeep('input, textarea, select')) {
-      if (field.closest('#sqc-hud-container, #sqc-modal-overlay') || field.disabled || field.readOnly ||
+      if (field.closest('#sqc-hud-container, #sqc-modal-overlay, .sqc-root') || field.disabled || field.readOnly ||
           ['hidden', 'file', 'submit', 'button', 'reset', 'password', 'checkbox'].includes(field.type)) continue;
       let value;
       if (field.type === 'radio') {
@@ -3268,13 +3270,29 @@ window.JobFormExtractor = (function () {
         if (value !== undefined && value !== null && value !== '' && setNativeRadioValue(radios, String(value))) count++;
         continue;
       }
-      if (field.value && !isUnansweredPlaceholder(field.value)) continue;
-      value = valueFor(cleanFieldLabel(getElementLabel(field)));
+      if (field.value && !isUnansweredPlaceholder(field.value) && field.value !== verifiedAutofillValues.get(field)) continue;
+      const label = cleanFieldLabel(getElementLabel(field));
+      let experienceGroup = field.closest('[data-sqc-experience], [data-automation-id^="workExperience-"], [data-testid^="work-experience-"]');
+      if (!experienceGroup) {
+        const candidate = field.closest('fieldset, section, [role="group"]');
+        if (candidate && /work experience|employment history|professional experience/i.test((candidate.textContent || '').slice(0,250))) experienceGroup = candidate;
+      }
+      if (experienceGroup) {
+        if (p.resumeSource !== 'sqc_upload' || !window.SQCResumeContext) continue;
+        if (!experienceGroups.has(experienceGroup)) experienceGroups.set(experienceGroup, experienceGroups.size);
+        value = window.SQCResumeContext.experienceValue(p.resumeContext?.workHistory || [],label,experienceGroups.get(experienceGroup),field.type);
+        if (value === undefined) continue;
+      }
+      if (value === undefined && p.resumeSource === 'sqc_upload' && ['number','text'].includes(field.type)) {
+        value=window.SQCResumeContext?.numericFact(label,p.resumeContext)?.value;
+      }
+      if (value === undefined) value = valueFor(label);
       if (typeof value === 'boolean') value = value ? 'Yes' : 'No';
       if (value === undefined || value === null || value === '') continue;
+      if (field.maxLength > 0 && String(value).length > field.maxLength) continue;
       const ok = field.tagName === 'SELECT' ? setNativeSelectValue(field, String(value)) :
         field.tagName === 'TEXTAREA' ? setNativeTextareaValue(field, String(value)) : setNativeInputValue(field, String(value));
-      if (ok) count++;
+      if (ok) { verifiedAutofillValues.set(field, field.value); count++; }
     }
     return { count };
   }
@@ -3357,7 +3375,7 @@ window.JobFormExtractor = (function () {
     const processedRadioGroups = new Set();
 
     inputs.forEach(input => {
-      if (input.closest('#sqc-hud-container, #sqc-modal-overlay')) return;
+      if (input.closest('#sqc-hud-container, #sqc-modal-overlay, .sqc-root')) return;
       const type = (input.type || 'text').toLowerCase();
       const rawLabel = getElementLabel(input);
       const label = cleanFieldLabel(rawLabel);
@@ -3568,7 +3586,7 @@ window.JobFormExtractor = (function () {
     const tailoredResumeText = (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('sqc_tailored_resume') : null) || p.resumeText || p.baseResumeText || '';
     const textareas = queryAllDeep('textarea');
     textareas.forEach(ta => {
-      if (ta.closest('#sqc-hud-container, #sqc-modal-overlay')) return;
+      if (ta.closest('#sqc-hud-container, #sqc-modal-overlay, .sqc-root')) return;
       const label = cleanFieldLabel(getElementLabel(ta) || '');
       const labelNorm = getCanonicalLabelKey(label);
       let val = findSavedValue(label);
@@ -3616,7 +3634,7 @@ window.JobFormExtractor = (function () {
     const processedSelects = new Set();
 
     selects.forEach(sel => {
-      if (sel.closest('#sqc-hud-container, #sqc-modal-overlay')) return;
+      if (sel.closest('#sqc-hud-container, #sqc-modal-overlay, .sqc-root')) return;
       
       // If container contains a select, prioritize the native select
       let targetElement = sel;
@@ -4205,7 +4223,7 @@ ${targetQuestions.map((q, idx) => `    {
     });
 
     // 4. Referral Checkboxes Fallback: Ensure required referral checkboxes have at least one valid selection
-    const allCheckboxes = Array.from(document.querySelectorAll('input[type="checkbox"]')).filter(cb => !cb.closest('#sqc-hud-container, #sqc-modal-overlay'));
+    const allCheckboxes = Array.from(document.querySelectorAll('input[type="checkbox"]')).filter(cb => !cb.closest('#sqc-hud-container, #sqc-modal-overlay, .sqc-root'));
     const referralCheckboxes = allCheckboxes.filter(cb => {
       const parentTxt = (cb.closest('fieldset, form, div, .form-group')?.innerText || '').toLowerCase();
       return parentTxt.includes('how did you learn') || parentTxt.includes('how did you hear') || parentTxt.includes('referral source');

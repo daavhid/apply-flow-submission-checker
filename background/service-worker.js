@@ -72,7 +72,7 @@ async function openSettings(section) {
   return { success: true };
 }
 
-importScripts('../content/context-policy.js', 'applyflow-session.js');
+importScripts('../content/context-policy.js', '../content/screening-policy.js', '../content/resume-context.js', 'local-resume.js', 'applyflow-session.js');
 const sqcApplyFlow = SQCApplyFlowSession.create({ chrome, fetch: (...args) => fetch(...args), policy: SQCContextPolicy, defaults: DEFAULT_SETTINGS });
 
 // In-Memory Tab-Isolated Sessions Map (tabId -> SessionData)

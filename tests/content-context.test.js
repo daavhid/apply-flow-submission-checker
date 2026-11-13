@@ -13,7 +13,7 @@ function page() {
     scrollX: 0, scrollY: 0, scrollTo() {} };
   const context = vm.createContext({ window, document, Event: class { constructor(type) { this.type = type; } },
     URL, URLSearchParams, Map, Set, Object, Date, console, CSS: { escape: x => x } });
-  for (const name of ['extractor', 'validator']) {
+  for (const name of ['resume-context', 'extractor', 'validator']) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, '../content/' + name + '.js'), 'utf8'), context);
   }
   const settings = { integrationMode: 'applyflow', verifiedContext: { state: 'VERIFIED',
@@ -76,4 +76,28 @@ test('a verified job route stays eligible when launch parameters and visible app
   f.settings.verifiedContext.allowedRoutes=[{url:'https://jobs.example/role/1',includeSubpaths:true}];
   f.window.__SQC_CONTEXT_SETTINGS=f.settings;
   assert.equal(f.window.JobFormExtractor.isJobApplicationPortal(),true);
+});
+test('switching resumes updates SQC-filled skills but preserves manually edited fields',()=>{
+  const f=page(),skills=f.field('Skills'),resume=f.field('Resume text');
+  f.window.JobFormExtractor.restoreSavedForm({id:'profile-1',resumeText:'Base resume',primaryStackKeywords:['C#']},f.settings);
+  resume.value='My manually edited resume text';
+  f.window.JobFormExtractor.restoreSavedForm({id:'profile-1',resumeSource:'sqc_upload',resumeIsTailored:true,
+    resumeText:'Uploaded tailored resume',primaryStackKeywords:['Python','SQL']},f.settings);
+  assert.equal(skills.value,'Python, SQL');assert.equal(resume.value,'My manually edited resume text');
+});
+test('experience rows use uploaded employment facts while contact fields remain from ApplyFlow',()=>{
+  const f=page(),employer=f.field('Company'),title=f.field('Job title'),name=f.field('First name'),email=f.field('Email');
+  const group={};
+  for (const field of [employer,title]) field.closest=selector=>selector.startsWith('[data-sqc-experience]')?group:null;
+  f.window.JobFormExtractor.restoreSavedForm({id:'profile-1',firstName:'Verified',primaryEmail:'verified@example.com',
+    resumeSource:'sqc_upload',resumeIsTailored:true,resumeContext:{workHistory:[{company:'Acme',title:'Senior Engineer'}]}},f.settings);
+  assert.equal(employer.value,'Acme');assert.equal(title.value,'Senior Engineer');
+  assert.equal(name.value,'Verified');assert.equal(email.value,'verified@example.com');
+});
+test('an employer phone field never receives the candidate phone from the base profile',()=>{
+  const f=page(),phone=f.field('Phone'),group={};
+  phone.closest=selector=>selector.startsWith('[data-sqc-experience]')?group:null;
+  f.window.JobFormExtractor.restoreSavedForm({id:'profile-1',phone:'+15555550123',resumeSource:'sqc_upload',
+    resumeContext:{workHistory:[{company:'Acme',title:'Engineer'}]}},f.settings);
+  assert.equal(phone.value,'');
 });

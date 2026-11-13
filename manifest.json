@@ -39,8 +39,11 @@
       "match_about_blank": true,
       "js": [
         "content/context-policy.js",
+        "content/screening-policy.js",
+        "content/screening.js",
         "content/submit-intent.js",
         "options/doc-parser.js",
+        "content/resume-context.js",
         "content/extractor.js",
         "content/validator.js",
         "content/hud.js",

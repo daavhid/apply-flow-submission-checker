@@ -1,6 +1,10 @@
 # 🛡️ Submission Quality Checker & Live Gatekeeper (Chrome Extension MV3)
 
-> ApplyFlow integration migration: Configure the endpoint, then sign in with your ApplyFlow applier email and password. SQC locks the candidate profile assigned to that applier and verifies each job against it. Temporary passwords can require a change before applying. The backend must implement [SQC contract version 2](docs/APPLYFLOW-INTEGRATION.txt), including authentication, profile assignment, context verification, and event acknowledgements. Historical standalone examples below do not authenticate the integrated build. Direct AI screening API calls remain the next phase.
+> ApplyFlow integration migration: Configure the endpoint, then sign in with your ApplyFlow applier email and password. SQC locks the candidate profile assigned to that applier and verifies each job against it. Temporary passwords can require a change before applying. The backend must implement [SQC contract version 2](docs/APPLYFLOW-INTEGRATION.txt), including authentication, profile assignment, context verification, AI screening answers, and event acknowledgements. Historical standalone examples below do not authenticate the integrated build.
+
+For every job, open **HUD > Resume > Upload tailored resume**, review the extracted text/experience rows, and select **Use tailored resume**. SQC uses that document for supported work-history rows, skills, and explicit experience numbers. Identity, contact details, authorization, and other approved profile facts continue to come from ApplyFlow's locked base candidate profile.
+
+With autofill enabled, unanswered questions are automatically batched through ApplyFlow and returned answers are filled into their original fields. **Answer with Codex** retries manually; **Stop** cancels generation. Unknown facts, ambiguous employment layouts, and unsupported controls need review. Add experience rows in the portal when needed. The backend must accept the local `resumeContext` envelope in the [integration contract](docs/APPLYFLOW-INTEGRATION.txt); a locally uploaded resume is never represented as an ApplyFlow-verified document.
 
 Build with `npm run build` and load `dist/extension`. Run `npm test` for the authentication, context isolation, and content autofill checks. On Windows PowerShell, use `npm.cmd` if script execution policy blocks `npm`.
 

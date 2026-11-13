@@ -38,6 +38,17 @@ window.SubmissionHUD = (function () {
   let verifyBannerTimer = null;
   let hudRepairObserver = null, hudRepairTimer = null, localVerifiedResume = null;
   let managedResumeDialog = null;
+  let pendingScreening = null, screeningMessage = '';
+  let autoScreeningTimer = null, autoScreeningStoppedBinding = '';
+  const autoScreeningAttempts = new Set();
+  function cancelPendingScreening(showMessage = true) {
+    if (!pendingScreening) return;
+    const requestId = pendingScreening.batch.requestId; pendingScreening.cancelled = true; pendingScreening = null;
+    autoScreeningStoppedBinding = resumeBinding();
+    chrome.runtime.sendMessage({type:'SQC_CANCEL_QUESTIONS',requestId}).catch(() => {});
+    screeningMessage = showMessage ? 'Stopped. No further answers will be inserted.' : '';
+    lastDrawerFingerprint = '';
+  }
   const injectedResumeFiles = new WeakMap();
   function closeManagedResumeDialog() {
     if (!managedResumeDialog) return;
@@ -197,6 +208,7 @@ window.SubmissionHUD = (function () {
     drawerEl = null;
     blockingDialog = null;
     closeManagedResumeDialog();
+    cancelPendingScreening(false);
     localVerifiedResume = null;
     isDrawerOpen = false;
     lastValidation = null;
@@ -229,6 +241,7 @@ window.SubmissionHUD = (function () {
         currentSettings?.verifiedContext?.resumeId !== settings?.verifiedContext?.resumeId ||
         currentSettings?.verifiedContext?.resumeVersion !== settings?.verifiedContext?.resumeVersion) {
       closeManagedResumeDialog();
+      cancelPendingScreening(false);
       activeTailoredFile = null;
       currentScreenshots = [];
       currentDuplicateRecord = null;
@@ -1195,6 +1208,7 @@ window.SubmissionHUD = (function () {
       return e.unanswered || e.type === 'textarea' || e.required || e.is_required;
     });
     const unansweredCount = unansweredEntries.length;
+    const aiQuestionCount = SQCScreening.capture(allEntries, currentSettings).questions.length;
     const isEmpty = (e) => Boolean(e.unanswered || !String(e.value || '').trim());
     const isReq = (e) => Boolean(e.required || e.is_required);
     const reqCount = allEntries.filter(isReq).length;
@@ -1206,14 +1220,14 @@ window.SubmissionHUD = (function () {
           <span class="sqc-ai-card-ic">${icon('sparkles', 16)}</span>
           <div>
             <div class="sqc-ai-card-title">AI answer assistant</div>
-            <div class="sqc-ai-card-sub">${unansweredCount} open question${unansweredCount === 1 ? '' : 's'} on this page</div>
+            <div class="sqc-ai-card-sub">${aiQuestionCount} unanswered screening question${aiQuestionCount === 1 ? '' : 's'} on this page</div>
           </div>
         </div>
         <div class="sqc-ai-card-actions">
-          <button class="sqc-btn sqc-btn-ai sqc-btn-sm" id="sqc-btn-answer-codex" title="Answer questions automatically using Codex">${icon('wand', 13)}Answer with Codex</button>
+          <button class="sqc-btn sqc-btn-ai sqc-btn-sm" id="sqc-btn-answer-codex" title="Generate grounded answers through ApplyFlow" ${pendingScreening ? 'disabled' : ''}>${pendingScreening ? spinner(13) : icon('wand', 13)}${pendingScreening ? 'Generating answers?' : 'Answer with Codex'}</button><button class="sqc-btn sqc-btn-ghost sqc-btn-sm" id="sqc-btn-cancel-codex" ${pendingScreening ? '' : 'hidden'}>Stop</button>
           <button class="sqc-btn sqc-btn-soft sqc-btn-sm" id="sqc-btn-copy-ai-prompt" title="Copy prompt with resume, JD and questions">${icon('copy', 13)}Copy prompt</button>
           <button class="sqc-btn sqc-btn-soft sqc-btn-sm" id="sqc-btn-paste-ai-answers" title="Paste reply to auto-fill">${icon('paste', 13)}Paste answers</button>
-        </div>
+        </div><p class="sqc-screening-status" id="sqc-screening-status" role="status" aria-live="polite">${escapeHtml(screeningMessage)}</p>
       </div>
 
       <div class="sqc-field-tools">
@@ -1353,7 +1367,7 @@ window.SubmissionHUD = (function () {
       currentScreenshots.map(s => s.id + ':' + s.answered_count).join(','),
       activeTab,
       fieldFilter,
-      fieldQuery
+      fieldQuery, pendingScreening?.batch.requestId || '', screeningMessage
     ].join('§');
 
     if (lastDrawerFingerprint === currentFingerprint && drawerEl.querySelector('.sqc-body')) {
@@ -1480,52 +1494,52 @@ window.SubmissionHUD = (function () {
     }
   }
 
-  async function handleAnswerWithCodex() {
-    const btn = drawerEl.querySelector('#sqc-btn-answer-codex');
-    const restore = setBtnBusy(btn, 'Answering with Codex…');
+  function refreshScreeningUI() {
+    lastDrawerFingerprint = ''; if (isDrawerOpen) updateDrawer(lastExtracted || {}, lastValidation);
+  }
+  function maybeAutoAnswerQuestions() {
+    if (window !== window.top || pendingScreening || autoScreeningTimer || currentProfile?.resumeSource !== 'sqc_upload' ||
+        currentSettings?.autoAutofillOnPageLoad === false || currentSettings?.autoFillCustomQuestions === false ||
+        autoScreeningStoppedBinding === resumeBinding() || !window.SQCContextPolicy?.ready(currentSettings,window.location.href)) return;
+    autoScreeningTimer = setTimeout(() => {
+      autoScreeningTimer = null;
+      if (pendingScreening || currentProfile?.resumeSource !== 'sqc_upload' || autoScreeningStoppedBinding === resumeBinding() ||
+          currentSettings?.autoAutofillOnPageLoad === false || currentSettings?.autoFillCustomQuestions === false ||
+          !window.SQCContextPolicy?.ready(currentSettings,window.location.href)) return;
+      try {
+        const batch=SQCScreening.capture(JobFormExtractor.extractAllFields().all_entries,currentSettings);
+        batch.questions=batch.questions.filter(q => !batch.targets.get(q.id)?.nodes.some(node => node.dataset.sqcAiStatus === 'needs-input'));
+        if (!batch.questions.length) return;
+        const key=resumeBinding()+':'+window.location.href+':'+JSON.stringify(batch.questions);
+        if (autoScreeningAttempts.has(key)) return;
+        if (autoScreeningAttempts.size >= 100) autoScreeningAttempts.delete(autoScreeningAttempts.values().next().value);
+        autoScreeningAttempts.add(key); handleAnswerWithCodex(batch);
+      } catch (_) { /* A context transition is handled by the normal verification pass. */ }
+    },1000);
+  }
+  async function handleAnswerWithCodex(batchOverride) {
+    if (pendingScreening) return;
+    let operation;
     try {
-      const all = JobFormExtractor.extractAllFields();
-      const openQuestions = (all.all_entries || []).filter(e => {
-        if (!e || !e.label) return false;
-        return JobFormExtractor.isOpenEndedQuestion(e) || (e.is_required && !e.value);
-      });
-
-      if (!openQuestions.length) {
-        showToast("ℹ️ No unanswered questions found on this page.");
-        return;
-      }
-
-      const questionsPayload = openQuestions.map((q, idx) => ({
-        id: q.id || q.name || `q_${idx + 1}`,
-        question: q.label,
-        type: q.type || 'textarea',
-        options: Array.isArray(q.options) && q.options.length ? q.options : undefined,
-        required: Boolean(q.is_required),
-      }));
-
-      const res = await chrome.runtime.sendMessage({
-        action: 'ANSWER_QUESTIONS',
-        questions: questionsPayload,
-      });
-
-      if (res && res.success && Array.isArray(res.answers)) {
-        const fillResult = JobFormExtractor.applyParsedAnswers({ answers: res.answers });
-        if (fillResult && fillResult.success) {
-          showToast(`✨ Auto-filled ${fillResult.count} question${fillResult.count === 1 ? '' : 's'} with Codex!`);
-          if (window.SubmissionCheckerCore) {
-            window.SubmissionCheckerCore.runLiveCheck();
-          }
-        } else {
-          showToast("⚠️ Received answers from Codex, but could not map them to form fields.");
-        }
-      } else {
-        showToast(`⚠️ ${res?.error || 'Codex answer generation failed.'}`);
-      }
-    } catch (err) {
-      console.error(err);
-      showToast(`⚠️ Failed to generate answers: ${err.message || err}`);
+      const extracted = JobFormExtractor.extractAllFields();
+      const batch = batchOverride?.questions ? batchOverride : SQCScreening.capture(extracted.all_entries, currentSettings);
+      if (!batchOverride?.questions) autoScreeningStoppedBinding = '';
+      if (!batch.questions.length) {screeningMessage='No unanswered screening questions on this step. Autofill handles standard candidate details.'; refreshScreeningUI(); return;}
+      operation={batch,cancelled:false};pendingScreening=operation;
+      screeningMessage='Generating grounded answers through ApplyFlow. You can keep editing; your changes will be preserved.';
+      refreshScreeningUI();
+      const result=await chrome.runtime.sendMessage({type:'ANSWER_QUESTIONS',requestId:batch.requestId,context:batch.context,url:batch.url,questions:batch.questions});
+      if(operation.cancelled)return;
+      if(!result?.success)throw new Error(result?.error || 'ApplyFlow could not generate answers.');
+      const filled=SQCScreening.apply(result,batch,currentSettings);
+      screeningMessage='Filled '+filled.count+' field'+(filled.count===1?'':'s')+'. '+filled.needsInput+' need your input. '+filled.skipped+' edited or changed fields were left untouched.';
+      showToast(screeningMessage);
+      window.SubmissionCheckerCore?.runLiveCheck();
+    } catch(error) {
+      if(!operation?.cancelled){screeningMessage=error.message || 'Answer generation failed. Please try again.';showToast(screeningMessage);}
     } finally {
-      restore();
+      if(pendingScreening===operation)pendingScreening=null;
+      refreshScreeningUI();
     }
   }
 
@@ -1612,6 +1626,7 @@ window.SubmissionHUD = (function () {
       }
     });
     $('#sqc-btn-answer-codex')?.addEventListener('click', handleAnswerWithCodex);
+    $('#sqc-btn-cancel-codex')?.addEventListener('click', () => {cancelPendingScreening();refreshScreeningUI();});
     $('#sqc-btn-copy-ai-prompt')?.addEventListener('click', handleCopyAiPrompt);
     $('#sqc-btn-copy-ai-footer')?.addEventListener('click', handleCopyAiPrompt);
     $('#sqc-btn-paste-ai-answers')?.addEventListener('click', () => openAiPasteModal());
@@ -2841,17 +2856,74 @@ window.SubmissionHUD = (function () {
       const tailoredMissing = tailoringRequired() && !tailoredReady();
       const file = managedResumeFile(p), canChoose = !tailoredMissing && /^[a-f0-9]{64}$/i.test(p.resumeSha256 || '');
       const skills = (p.primaryStackKeywords || []).map(skill => '<span class="sqc-resume-skill">' + escapeHtml(skill) + '</span>').join('');
-      const dlg = openDialog({ title: tailoredMissing ? 'Job-tailored resume needed' : 'Your ApplyFlow resume',
+      const history = (p.resumeContext?.workHistory || []).map(entry => '<p><strong>' + escapeHtml(entry.title) + '</strong> — ' + escapeHtml(entry.company) + '<br>' + escapeHtml(entry.dateRange) + '</p>').join('');
+      const dlg = openDialog({ title: tailoredMissing ? 'Job-tailored resume needed' : 'Application resume',
         subtitle: escapeHtml(p.fullName) + ' ? ' + escapeHtml(currentApplyFlowContext?.jobTitle || 'Verified application'),
-        body: '<div class="sqc-resume-source"><strong>' + (file ? 'Original file ready' : tailoredMissing ? 'Waiting for the generated job resume' : 'Original file not available') + '</strong><p>' + escapeHtml(file ? file.name : p.resumeFileError || (tailoredMissing ? 'Generate the tailored resume in ApplyFlow, then sync it here. Verified candidate details can still be autofilled.' : 'Sync the generated document from ApplyFlow, or choose the matching file you downloaded.')) + '</p></div>' +
-          (skills ? '<div class="sqc-resume-skills"><strong>Skills supplied by ApplyFlow</strong><div>' + skills + '</div></div>' : '') +
+        body: '<div class="sqc-resume-source"><strong>' + (p.resumeSource === 'sqc_upload' ? 'Applier-uploaded tailored resume' : file ? 'ApplyFlow file ready' : 'Resume file needed') + '</strong><p>' + escapeHtml(file ? file.name : p.resumeFileError || 'Sync a resume from ApplyFlow or upload your tailored document below.') + '</p></div>' +
+          (skills ? '<div class="sqc-resume-skills"><strong>Active resume skills</strong><div>' + skills + '</div></div>' : '') +
+          (history ? '<details open><summary>Experience used for autofill</summary>' + history + '</details>' : '') +
           '<input type="file" id="sqc-verified-local-file" accept=".pdf,.docx,.doc,.txt" hidden><p id="sqc-verified-resume-status" class="sqc-resume-feedback" role="status" aria-live="polite"></p>' +
-          (!file && !canChoose && !tailoredMissing ? '<p class="sqc-dialog-lead">Ask your team to make the generated file available in ApplyFlow so it can be verified and attached here.</p>' : '') +
-          '<details class="sqc-resume-text"><summary>View verified resume text</summary><pre>' + escapeHtml(p.resumeText || '') + '</pre></details>',
+          '<div id="sqc-local-upload-panel" hidden><label for="sqc-local-resume-file">Tailored resume (PDF, DOCX, TXT; up to 10 MB)</label>' +
+          '<input type="file" id="sqc-local-resume-file" accept=".pdf,.docx,.txt"><label for="sqc-local-resume-text">Extracted resume text — review or paste text if extraction fails</label>' +
+          '<textarea class="sqc-textarea" id="sqc-local-resume-text" rows="8" maxlength="200000"></textarea>' +
+          '<div id="sqc-upload-work-history" role="status"></div>' +
+          '<label><input type="checkbox" id="sqc-local-resume-confirm"> I confirm this resume belongs to ' + escapeHtml(p.fullName) + ' and this job.</label>' +
+          '<p>This document supplies resume and skills autofill and is sent as resume context when you request screening answers. It does not change the assigned candidate identity.</p>' +
+          '<button class="sqc-btn sqc-btn-primary" id="sqc-use-local-resume">Use tailored resume</button></div>' +
+          '<details class="sqc-resume-text"><summary>View active resume text</summary><pre>' + escapeHtml(p.resumeText || '') + '</pre></details>',
         footer: '<button class="sqc-btn sqc-btn-ghost" id="sqc-sync-verified">Sync from ApplyFlow</button>' +
+          '<button class="sqc-btn sqc-btn-soft" id="sqc-upload-tailored">Upload tailored resume</button>' +
+          (p.resumeSource === 'sqc_upload' ? '<button class="sqc-btn sqc-btn-ghost" id="sqc-clear-local-resume">Use ApplyFlow resume</button>' : '') +
           (canChoose ? '<button class="sqc-btn sqc-btn-soft" id="sqc-choose-verified">Choose downloaded file</button>' : '') +
           '<button class="sqc-btn sqc-btn-soft" id="sqc-download-verified" ' + (!file || tailoredMissing ? 'disabled' : '') + '>Download</button><button class="sqc-btn sqc-btn-primary" id="sqc-attach-verified" ' + (!file || tailoredMissing ? 'disabled' : '') + '>Attach to application</button>' });
       managedResumeDialog = dlg;
+      let selectedLocalFile = null, parsingLocalFile = false;
+      const previewHistory = () => {
+        const facts = window.SQCResumeContext.parse(dlg.$('#sqc-local-resume-text').value);
+        dlg.$('#sqc-upload-work-history').textContent = facts.workHistory.length ? facts.workHistory.map((e,i) => `${i+1}. ${e.title} at ${e.company} (${e.dateRange})`).join('\n') :
+          'No unambiguous employment rows detected. Check the extracted text; ambiguous experience fields will need review.';
+      };
+      dlg.$('#sqc-local-resume-text').oninput = previewHistory;
+      dlg.$('#sqc-upload-tailored').onclick = () => { dlg.$('#sqc-local-upload-panel').hidden = false; dlg.$('#sqc-local-resume-file').click(); };
+      dlg.$('#sqc-local-resume-file').onchange = async event => {
+        const selected = event.target.files[0]; if (!selected) return;
+        const status = dlg.$('#sqc-verified-resume-status'); selectedLocalFile = null;
+        dlg.$('#sqc-local-resume-text').value = ''; dlg.$('#sqc-local-resume-confirm').checked = false;
+        try {
+          if (!/\.(pdf|docx|txt)$/i.test(selected.name) || selected.size > 10 * 1024 * 1024 || !selected.size) throw new Error('Choose a PDF, DOCX, or TXT resume up to 10 MB.');
+          selectedLocalFile = selected; parsingLocalFile = true; status.textContent = 'Extracting resume text...';
+          const text = await window.ResumeDocumentParser.extractTextFromFile(selected);
+          if (binding !== resumeBinding()) throw new Error('The application changed. Reopen the resume manager.');
+          dlg.$('#sqc-local-resume-text').value = text.slice(0,200000);
+          previewHistory();
+          status.textContent = 'Review the text, confirm the candidate, then choose Use tailored resume.';
+        } catch (error) { status.textContent = error.message + (selectedLocalFile ? ' You can paste readable resume text below.' : ''); }
+        finally { parsingLocalFile = false; }
+      };
+      dlg.$('#sqc-use-local-resume').onclick = async event => {
+        const status = dlg.$('#sqc-verified-resume-status'), restore = setBtnBusy(event.currentTarget, 'Saving...');
+        try {
+          if (!selectedLocalFile || parsingLocalFile) throw new Error('Choose a resume and wait for extraction to finish.');
+          if (binding !== resumeBinding() || !window.SQCContextPolicy.ready(currentSettings, window.location.href)) throw new Error('The application changed. Reopen the resume manager.');
+          const text = dlg.$('#sqc-local-resume-text').value.trim();
+          let skills = [];
+          if (window.ResumeDocumentParser?.extractAndInferTechnicalSkills) {
+            skills = window.ResumeDocumentParser.extractAndInferTechnicalSkills(text,text.toLowerCase()).primaryStackKeywords.filter(skill => text.toLowerCase().includes(skill.toLowerCase()));
+          }
+          const result = await chrome.runtime.sendMessage({type:'SQC_SET_LOCAL_RESUME',context:{...currentSettings.verifiedContext},
+            resume:{filename:selectedLocalFile.name,dataUrl:await fileToBase64(selectedLocalFile),text,skills,confirmed:dlg.$('#sqc-local-resume-confirm').checked}});
+          if (!result?.success) throw new Error(result?.error || 'Could not save the tailored resume.');
+          await window.SubmissionCheckerCore.reloadConfig();
+          window.SubmissionCheckerCore.restoreForm();
+          dlg.close(); showToast('Tailored resume saved for this job. Resume and skills autofill now use it.'); openResumeModal();
+        } catch (error) { status.textContent = error.message; }
+        finally { restore(); }
+      };
+      dlg.$('#sqc-clear-local-resume')?.addEventListener('click',async () => {
+        const result = await chrome.runtime.sendMessage({type:'SQC_CLEAR_LOCAL_RESUME',context:{...currentSettings.verifiedContext}});
+        if (!result?.success) { dlg.$('#sqc-verified-resume-status').textContent = result?.error || 'Could not clear the uploaded resume.'; return; }
+        await window.SubmissionCheckerCore.reloadConfig(); dlg.close(); openResumeModal();
+      });
       dlg.$('#sqc-sync-verified').onclick = async event => {
         const restore = setBtnBusy(event.currentTarget, 'Syncing?');
         try { await window.SubmissionCheckerCore.reloadConfig(true); dlg.close(); openResumeModal(); }
@@ -2876,7 +2948,7 @@ window.SubmissionHUD = (function () {
       dlg.$('#sqc-download-verified').onclick = () => downloadResumeFile(p.resumeText, p);
       dlg.$('#sqc-attach-verified').onclick = () => {
         const result = attachResumeToPortal(p.resumeText, p, null, {userInitiated:true});
-        if (result.fileInputsCount || result.textareasCount) { showToast('Verified resume attached.'); dlg.close(); }
+        if (result.fileInputsCount || result.textareasCount) { showToast(p.resumeSource === 'sqc_upload' ? 'Uploaded tailored resume attached.' : 'Verified resume attached.'); dlg.close(); }
         else dlg.$('#sqc-verified-resume-status').textContent = result.error || 'No resume field is available on this step. Download the verified file if the portal requires a file picker.';
       };
       return;
@@ -3452,6 +3524,7 @@ window.SubmissionHUD = (function () {
     removeBlockingModal,
     toggleDrawer,
     openResumeModal,
+    maybeAutoAnswerQuestions,
     promptTailoredResumeIfNeeded,
     attachResumeToPortal,
     downloadResumeFile,
