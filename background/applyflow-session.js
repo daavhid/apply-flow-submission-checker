@@ -348,6 +348,33 @@
         return { success: true, already_applied: applied, has_applied: applied, can_apply: !applied,
           existingRecord: applied ? cfg.applyFlowContext : null };
       }
+      if (['ANSWER_QUESTIONS', 'SQC_ANSWER_QUESTIONS'].includes(action)) {
+        if (!sender.tab || privileged(sender)) return { success: false, error: 'Question answering requires a verified job tab.' };
+        const cfg = await config({ force: false }, sender);
+        const c = cfg.settings.verifiedContext;
+        if (!c) return { success: false, error: cfg.integration.message };
+        const { sqcAuth: auth } = await chrome.storage.session.get('sqcAuth');
+        const questions = Array.isArray(message.questions) ? message.questions : [];
+        if (questions.length === 0) return { success: false, error: 'No questions provided to answer.' };
+
+        const payload = {
+          contractVersion: 2,
+          applicationSessionId: c.applicationSessionId,
+          requestId: crypto.randomUUID(),
+          jobId: c.jobId,
+          jobVersion: c.jobVersion,
+          profileId: c.profileId,
+          profileVersion: c.profileVersion,
+          resumeId: c.resumeId,
+          resumeVersion: c.resumeVersion,
+          url: sender.url || sender.tab.url,
+          questions,
+          customInstructions: message.customInstructions || '',
+        };
+
+        const result = await request(auth.apiOrigin, '/api/sqc/answer-questions', 'POST', payload, auth.csrfToken);
+        return { success: true, answers: result.answers, meta: result.meta };
+      }
       if (['LOG_SUBMISSION', 'APPLYFLOW_WEBHOOK', 'DISPATCH_LIVE_FEEDBACK'].includes(action)) {
         if (!sender.tab || privileged(sender)) return { success: false, error: 'Application events require a verified job tab.' };
         const cfg = await config({ force: true }, sender);

@@ -1210,8 +1210,9 @@ window.SubmissionHUD = (function () {
           </div>
         </div>
         <div class="sqc-ai-card-actions">
-          <button class="sqc-btn sqc-btn-ai sqc-btn-sm" id="sqc-btn-copy-ai-prompt" title="Copy a ChatGPT prompt with resume, JD and questions">${icon('copy', 13)}Copy prompt</button>
-          <button class="sqc-btn sqc-btn-soft sqc-btn-sm" id="sqc-btn-paste-ai-answers" title="Paste ChatGPT's reply to auto-fill">${icon('paste', 13)}Paste answers</button>
+          <button class="sqc-btn sqc-btn-ai sqc-btn-sm" id="sqc-btn-answer-codex" title="Answer questions automatically using Codex">${icon('wand', 13)}Answer with Codex</button>
+          <button class="sqc-btn sqc-btn-soft sqc-btn-sm" id="sqc-btn-copy-ai-prompt" title="Copy prompt with resume, JD and questions">${icon('copy', 13)}Copy prompt</button>
+          <button class="sqc-btn sqc-btn-soft sqc-btn-sm" id="sqc-btn-paste-ai-answers" title="Paste reply to auto-fill">${icon('paste', 13)}Paste answers</button>
         </div>
       </div>
 
@@ -1479,6 +1480,55 @@ window.SubmissionHUD = (function () {
     }
   }
 
+  async function handleAnswerWithCodex() {
+    const btn = drawerEl.querySelector('#sqc-btn-answer-codex');
+    const restore = setBtnBusy(btn, 'Answering with Codex…');
+    try {
+      const all = JobFormExtractor.extractAllFields();
+      const openQuestions = (all.all_entries || []).filter(e => {
+        if (!e || !e.label) return false;
+        return JobFormExtractor.isOpenEndedQuestion(e) || (e.is_required && !e.value);
+      });
+
+      if (!openQuestions.length) {
+        showToast("ℹ️ No unanswered questions found on this page.");
+        return;
+      }
+
+      const questionsPayload = openQuestions.map((q, idx) => ({
+        id: q.id || q.name || `q_${idx + 1}`,
+        question: q.label,
+        type: q.type || 'textarea',
+        options: Array.isArray(q.options) && q.options.length ? q.options : undefined,
+        required: Boolean(q.is_required),
+      }));
+
+      const res = await chrome.runtime.sendMessage({
+        action: 'ANSWER_QUESTIONS',
+        questions: questionsPayload,
+      });
+
+      if (res && res.success && Array.isArray(res.answers)) {
+        const fillResult = JobFormExtractor.applyParsedAnswers({ answers: res.answers });
+        if (fillResult && fillResult.success) {
+          showToast(`✨ Auto-filled ${fillResult.count} question${fillResult.count === 1 ? '' : 's'} with Codex!`);
+          if (window.SubmissionCheckerCore) {
+            window.SubmissionCheckerCore.runLiveCheck();
+          }
+        } else {
+          showToast("⚠️ Received answers from Codex, but could not map them to form fields.");
+        }
+      } else {
+        showToast(`⚠️ ${res?.error || 'Codex answer generation failed.'}`);
+      }
+    } catch (err) {
+      console.error(err);
+      showToast(`⚠️ Failed to generate answers: ${err.message || err}`);
+    } finally {
+      restore();
+    }
+  }
+
   function setBtnBusy(btn, label) {
     if (!btn) return () => {};
     const original = btn.innerHTML;
@@ -1561,6 +1611,7 @@ window.SubmissionHUD = (function () {
         navigator.clipboard.writeText(tailoredText).then(() => showToast("📋 Tailored resume copied to clipboard!"));
       }
     });
+    $('#sqc-btn-answer-codex')?.addEventListener('click', handleAnswerWithCodex);
     $('#sqc-btn-copy-ai-prompt')?.addEventListener('click', handleCopyAiPrompt);
     $('#sqc-btn-copy-ai-footer')?.addEventListener('click', handleCopyAiPrompt);
     $('#sqc-btn-paste-ai-answers')?.addEventListener('click', () => openAiPasteModal());

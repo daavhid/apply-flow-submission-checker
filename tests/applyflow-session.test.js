@@ -69,6 +69,22 @@ function fixture() {
         resume: { id: 'resume-1', profileId: lockedProfileId, version: 'v1', verified: true, text: 'Verified resume' },
         allowedRoutes: [{ url: 'https://jobs.example/roles/' + n, includeSubpaths: true }], status: 'PENDING' }) };
       onContext();
+    } else if (url.endsWith('/api/sqc/answer-questions')) {
+      const b = JSON.parse(options.body);
+      data = {
+        success: true,
+        contractVersion: 2,
+        applicationSessionId: b.applicationSessionId,
+        requestId: b.requestId,
+        answers: (b.questions || []).map(q => ({
+          id: q.id,
+          question: q.question,
+          answer: 'Codex answer for ' + q.question,
+          status: 'ANSWERED',
+          confidence: 0.95,
+        })),
+        meta: { questionsCount: (b.questions || []).length },
+      };
     } else {
       const b = JSON.parse(options.body);
       data = { success: true, accepted: ack, eventId: b.event_id, applicationSessionId: b.application_session_id, recordId: 'record-1' };
@@ -469,4 +485,30 @@ test('a wizard route without launch parameters preserves its verified applicatio
   assert.equal(r.integration.state, 'VERIFIED');
   const body = JSON.parse(f.calls.filter(c => c.url.endsWith('/api/sqc/application-context')).at(-1).options.body);
   assert.equal(body.applicationSessionId, 'application-1');
+});
+
+test('screening questions can be answered via /api/sqc/answer-questions with verified context', async () => {
+  const f = fixture();
+  await f.service.handle({ type: 'GET_CONFIG' }, f.sender(1));
+  const res = await f.service.handle({
+    action: 'ANSWER_QUESTIONS',
+    questions: [
+      { id: 'q_why', question: 'Why this role?', type: 'textarea' },
+    ],
+  }, f.sender(1));
+
+  assert.equal(res.success, true);
+  assert.equal(res.answers.length, 1);
+  assert.equal(res.answers[0].id, 'q_why');
+  assert.equal(res.answers[0].answer, 'Codex answer for Why this role?');
+
+  const answerCall = f.calls.find(c => c.url.endsWith('/api/sqc/answer-questions'));
+  assert.ok(answerCall);
+  const payload = JSON.parse(answerCall.options.body);
+  assert.equal(payload.contractVersion, 2);
+  assert.equal(payload.applicationSessionId, 'application-1');
+  assert.equal(payload.jobId, 'job-1');
+  assert.equal(payload.profileId, 'profile-1');
+  assert.equal(payload.resumeId, 'resume-1');
+  assert.equal(payload.questions.length, 1);
 });
