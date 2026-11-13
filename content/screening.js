@@ -105,5 +105,12 @@
     }
     return {success:true,count,needsInput,skipped};
   }
-  root.SQCScreening={capture,apply};
+  function applyReviewed(result,batch,id,text,settings=root.__SQC_CONTEXT_SETTINGS,url=root.location.href) {
+    const question=batch.questions.find(q=>q.id===id),target=batch.targets.get(id);
+    if(!question || !target) return {success:false,count:0,needsInput:0,skipped:1};
+    // Clicking Fill explicitly approves replacement; shape, node, and context checks still apply.
+    const reviewed={...batch,questions:[question],targets:new Map([[id,{...target,initial:state(target.nodes,target.type)}]])};
+    return apply({...result,answers:[{id,status:'ANSWERED',answer:text}]},reviewed,settings,url);
+  }
+  root.SQCScreening={capture,apply,applyReviewed};
 })(typeof window!=='undefined'?window:globalThis);

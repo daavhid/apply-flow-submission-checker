@@ -3278,12 +3278,12 @@ window.JobFormExtractor = (function () {
         if (candidate && /work experience|employment history|professional experience/i.test((candidate.textContent || '').slice(0,250))) experienceGroup = candidate;
       }
       if (experienceGroup) {
-        if (p.resumeSource !== 'sqc_upload' || !window.SQCResumeContext) continue;
+        if (!p.resumeIsTailored || !window.SQCResumeContext) continue;
         if (!experienceGroups.has(experienceGroup)) experienceGroups.set(experienceGroup, experienceGroups.size);
         value = window.SQCResumeContext.experienceValue(p.resumeContext?.workHistory || [],label,experienceGroups.get(experienceGroup),field.type);
         if (value === undefined) continue;
       }
-      if (value === undefined && p.resumeSource === 'sqc_upload' && ['number','text'].includes(field.type)) {
+      if (value === undefined && p.resumeIsTailored && ['number','text'].includes(field.type)) {
         value=window.SQCResumeContext?.numericFact(label,p.resumeContext)?.value;
       }
       if (value === undefined) value = valueFor(label);

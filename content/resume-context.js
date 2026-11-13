@@ -5,6 +5,9 @@
   const datePart = '(?:[A-Za-z]{3,9}\\s+\\d{4}|\\d{1,2}[/-]\\d{4}|\\d{4}[/-]\\d{1,2}|\\d{4})';
   const range = new RegExp('(' + datePart + ')\\s*(?:[-–—]|\\bto\\b)\\s*(' + datePart + '|present|current|now)\\s*$', 'i');
   const role = /engineer|developer|architect|consultant|manager|analyst|designer|director|specialist|lead|intern|scientist|administrator|officer|associate|technician|coordinator/i;
+  const companyLine = value => value && value.length<=120 && !/^[•*\-]/.test(value) &&
+    !/\b(maintaining|implemented|developed|delivered|worked|built|addressing|updated|reduced|improved|designed|collaborated|mentored)\b/i.test(value) &&
+    !/[.!?]$/.test(value.replace(/\b(?:Inc|Corp|Ltd|Co)\.$/i,''));
   function date(raw) {
     if (/^(present|current|now)$/i.test(raw)) return {value:'', current:true};
     let m = /^(\d{4})[/-](\d{1,2})$/.exec(raw);
@@ -33,12 +36,12 @@
         if (role.test(prefix)) {
           title=parts.find(p=>role.test(p)) || prefix;
           company=parts.find(p=>!role.test(p)) || '';
-          if (!company && previous && !range.test(previous) && !/^[•*-]/.test(previous) && !role.test(previous)) {company=previous;first=i-1;}
-          if (!company && next && !range.test(next) && !/^[•*-]/.test(next)) {company=next;after=i+2;}
+          if (!company && companyLine(previous) && !range.test(previous) && !role.test(previous)) {company=previous;first=i-1;}
+          if (!company && companyLine(next) && !range.test(next) && !role.test(next)) {company=next;after=i+2;}
         } else if (prefix && role.test(previous)) {company=prefix;title=previous;first=i-1;}
         else if (!prefix && role.test(previous) && i>=2) {title=previous;company=section[i-2];first=i-2;}
         else if (prefix && role.test(next)) {company=prefix;title=next;after=i+2;}
-        if (!title || !company || company.length>160 || title.length>200) {needsReview.push(section[i]);continue;}
+        if (!title || !companyLine(company) || title.length>200) {needsReview.push(section[i]);continue;}
         headers.push({first,after,title,company,from,to,range:m[0]});
       }
       headers.forEach((h,i) => {

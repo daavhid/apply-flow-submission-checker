@@ -215,6 +215,11 @@
           let uploaded;
           try { uploaded = await localResumes?.get(tab.id, localResume.binding(auth, context)); } catch (_) { /* The verified base profile remains usable if local document storage is unavailable. */ }
           const baseResume = context.resume;
+          // An uploaded document is independent of ApplyFlow's default resume. A linked server copy is not.
+          if (uploaded?.source === 'applyflow' && (uploaded.id !== baseResume?.id || uploaded.version !== baseResume?.version ||
+              uploaded.file?.sha256 !== baseResume?.file?.sha256)) {
+            await localResumes.remove(tab.id); uploaded = null;
+          }
           context = {...context, resume: uploaded ? {...uploaded, jobId:context.job.id,
             baseResumeId:baseResume?.id || null,baseResumeVersion:baseResume?.version || null} :
             (baseResume || {id:'none',version:'none',text:'',source:'missing',file:{}})};
@@ -251,9 +256,9 @@
           resumeSource:context.resume.source || 'applyflow',
           resumeBaseId:context.resume.source === 'sqc_upload' ? context.resume.baseResumeId : context.resume.id,
           resumeBaseVersion:context.resume.source === 'sqc_upload' ? context.resume.baseResumeVersion : context.resume.version,
-          resumeIsTailored: context.resume.source === 'sqc_upload' && context.resume.jobId === context.job.id,
+          resumeIsTailored: context.resume.kind === 'tailored' && context.resume.jobId === context.job.id,
           resumeTailoringRequired: true,
-          resumeContext:context.resume.facts || null,
+          resumeContext:context.resume.facts || root.SQCResumeContext?.parse(context.resume.text) || null,
           resumeSha256: context.resume.file?.sha256 || '', resumeFileError: context.resume.file?.error || '',
           resumeMimeType: context.resume.file?.mimeType || '',
           primaryStackKeywords: (Array.isArray(context.resume.skills) ? context.resume.skills : context.resume.skills?.primaryStackKeywords) || context.profile.primaryStackKeywords || [],
@@ -267,22 +272,40 @@
     }
     async function handleInternal(message, sender) {
       const action = message.action || message.type;
-      if (['SQC_SET_LOCAL_RESUME', 'SQC_CLEAR_LOCAL_RESUME'].includes(action)) {
+      if (['SQC_SET_LOCAL_RESUME', 'SQC_CLEAR_LOCAL_RESUME', 'SQC_LINK_APPLYFLOW_RESUME'].includes(action)) {
         if (!sender.tab || privileged(sender) || !localResumes) return {success:false,error:'Upload a resume from a verified application HUD.'};
         const cfg = await config({force:true}, sender, false), c = cfg.settings.verifiedContext;
         if (!c) return {success:false,error:cfg.integration.message};
-        if (!screening.same(message.context, c) || ['applierId','profileAssignmentId','profileAssignmentVersion'].some(key => message.context?.[key] !== c[key])) {
+        const assignmentKeys=['applicationSessionId','jobId','jobVersion','profileId','profileVersion','applierId','profileAssignmentId','profileAssignmentVersion'];
+        if (assignmentKeys.some(key => !message.context?.[key] || message.context[key] !== c[key]) ||
+            action === 'SQC_CLEAR_LOCAL_RESUME' && !screening.same(message.context,c)) {
           return {success:false,error:'The application changed. Reopen the resume manager.'};
         }
         const {sqcAuth:auth, sqcContexts = {}} = await chrome.storage.session.get(['sqcAuth','sqcContexts']);
+        let expectedResume;
         if (action === 'SQC_CLEAR_LOCAL_RESUME') await localResumes.remove(sender.tab.id);
-        else {
+        else if (action === 'SQC_LINK_APPLYFLOW_RESUME') {
+          const original = sqcContexts[sender.tab.id]?.resume;
+          if (original?.verified !== true || original.kind !== 'tailored' || original.jobId !== c.jobId ||
+              !/^[a-f0-9]{64}$/i.test(original.file?.sha256 || '')) return {success:false,error:'Sync the job-tailored resume metadata from ApplyFlow before linking its downloaded file.'};
+          const file = await resumeFile(auth,{...sqcContexts[sender.tab.id],resume:{...original,file:{...original.file,url:undefined,dataUrl:message.dataUrl}}},true);
+          if (!file.dataUrl) return {success:false,error:file.error || 'This file does not match the ApplyFlow resume.'};
+          if ((await chrome.tabs.get(sender.tab.id)).url !== sender.tab.url) return {success:false,error:'The job page changed while linking the resume.'};
+          expectedResume={...original,source:'applyflow',file};
+          await localResumes.put(sender.tab.id,localResume.binding(auth,sqcContexts[sender.tab.id]),expectedResume);
+        } else {
           const resume = await localResume.validate(message.resume, cfg.activeProfile);
+          expectedResume=resume;
           if ((await chrome.tabs.get(sender.tab.id)).url !== sender.tab.url) return {success:false,error:'The job page changed during upload. Try again.'};
           await localResumes.put(sender.tab.id, localResume.binding(auth, sqcContexts[sender.tab.id]), resume);
         }
         for (const [key, operation] of pendingAnswers) if (key.startsWith(sender.tab.id + ':')) operation.controller.abort();
-        return config({}, sender);
+        const saved = await config({}, sender);
+        if (expectedResume && (!saved.activeProfile?.resumeBase64 || saved.activeProfile.resumeId !== expectedResume.id ||
+            saved.activeProfile.resumeVersion !== expectedResume.version || saved.activeProfile.resumeSource !== expectedResume.source)) {
+          return {success:false,error:'The document was not restored after saving. Reopen the resume manager and retry.'};
+        }
+        return saved;
       }
       if (action === 'SQC_CONNECT') {
         if (!privileged(sender)) return { success: false, error: 'Configure ApplyFlow from the extension popup.' };

@@ -152,7 +152,7 @@ test('a generated job resume is fetched with extension credentials and supplies 
     skills:['TypeScript','PostgreSQL'],file:{url:'/files/resume.pdf',filename:'Candidate-generated.pdf',sha256}}}));
   const result=await f.service.handle({type:'GET_CONFIG'},f.sender(1));
   assert.equal(result.integration.state,'VERIFIED');
-  assert.equal(result.activeProfile.resumeIsTailored,false);
+  assert.equal(result.activeProfile.resumeIsTailored,true);
   assert.equal(result.activeProfile.resumeTailoringRequired,true);
   assert.deepEqual(result.activeProfile.primaryStackKeywords,['TypeScript','PostgreSQL']);
   assert.ok(result.activeProfile.resumeBase64.startsWith('data:application/pdf;base64,'));
@@ -620,7 +620,7 @@ test('clearing a local upload restores the server resume and unverified upload m
   const cleared=await f.service.handle({type:'SQC_CLEAR_LOCAL_RESUME',context:uploaded.settings.verifiedContext},f.sender(1));
   assert.equal(cleared.activeProfile.resumeSource,'applyflow');assert.equal(cleared.activeProfile.resumeId,'resume-1');
   const noJob=await f.service.handle({type:'SQC_SET_LOCAL_RESUME'},f.ui);assert.equal(noJob.success,false);
-  const stale=await f.service.handle({type:'SQC_SET_LOCAL_RESUME',context:uploaded.settings.verifiedContext},f.sender(1));
+  const stale=await f.service.handle({type:'SQC_SET_LOCAL_RESUME',context:{...uploaded.settings.verifiedContext,profileAssignmentVersion:'old'}},f.sender(1));
   assert.equal(stale.success,false);
 });
 test('screening waits for the per-application upload even when a server resume exists',async()=>{
@@ -628,4 +628,27 @@ test('screening waits for the per-application upload even when a server resume e
   await assert.rejects(f.service.handle({type:'ANSWER_QUESTIONS',requestId:'batch_without_upload',url:f.tabs[1].url,
     context:cfg.settings.verifiedContext,questions:[{id:'q1',question:'Why this role?',type:'textarea'}]},f.sender(1)),/Upload the tailored resume/);
   assert.equal(f.calls.some(c=>c.url.endsWith('/api/sqc/answer-questions')),false);
+});
+test('uploaded context survives a changed ApplyFlow default resume and a new save can replace that default',async()=>{
+  const f=fixture(),before=await f.service.handle({type:'GET_CONFIG'},f.sender(1));
+  f.mutate(c=>({...c,resume:{...c.resume,id:'new-default',version:'v2'}}));
+  const upload=await f.service.handle({type:'SQC_SET_LOCAL_RESUME',context:before.settings.verifiedContext,
+    resume:{filename:'Tailored.txt',dataUrl:'data:text/plain;base64,'+btoa(localText),text:localText,skills:['Python'],confirmed:true}},f.sender(1));
+  assert.equal(upload.success,true);
+  f.mutate(c=>({...c,resume:{...c.resume,id:'another-default',version:'v3'}}));
+  const refreshed=await f.restart().handle({type:'GET_CONFIG',force:true},f.sender(1));
+  assert.equal(refreshed.activeProfile.resumeId,upload.activeProfile.resumeId);
+  assert.equal(refreshed.activeProfile.resumeText,localText);
+});
+test('matching downloaded ApplyFlow files are persisted with server provenance across worker restarts',async()=>{
+  const f=fixture(),dataUrl='data:application/pdf;base64,'+btoa('%PDF-1.7\nApproved job resume');
+  const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode('%PDF-1.7\nApproved job resume'));
+  const sha256=Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');
+  f.mutate(c=>({...c,resume:{...c.resume,kind:'tailored',jobId:c.job.id,file:{filename:'Approved.pdf',mimeType:'application/pdf',sha256}}}));
+  const cfg=await f.service.handle({type:'GET_CONFIG'},f.sender(1));
+  const linked=await f.service.handle({type:'SQC_LINK_APPLYFLOW_RESUME',context:cfg.settings.verifiedContext,dataUrl},f.sender(1));
+  assert.equal(linked.success,true);assert.equal(linked.activeProfile.resumeIsTailored,true);
+  assert.equal(linked.activeProfile.resumeSource,'applyflow');assert.equal(linked.activeProfile.resumeBase64,dataUrl);
+  const restored=await f.restart().handle({type:'GET_CONFIG'},f.sender(1));
+  assert.equal(restored.activeProfile.resumeBase64,dataUrl);
 });

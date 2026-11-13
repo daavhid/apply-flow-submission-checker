@@ -239,9 +239,11 @@ strings and change whenever their underlying verified data changes.
 
 Tailored resume uploads and source of truth
 
-Every application requires the applier to upload the job-tailored resume through
-HUD > Resume > Upload tailored resume > Use tailored resume. PDF, DOCX, and TXT
-files up to 10 MB are supported. SQC extracts readable text, displays experience
+Each application uses either an uploaded tailored resume or an approved
+ApplyFlow resume with kind:tailored and a matching jobId. Upload through
+HUD > Resume > Upload tailored resume > Use tailored resume. The save button
+confirms candidate/job ownership; there is no additional confirmation checkbox.
+PDF, DOCX, and TXT files up to 10 MB are supported. SQC extracts readable text, displays experience
 rows for review, and requires confirmation of the candidate/job. If extraction
 fails, the applier can paste readable text alongside the original file.
 
@@ -260,15 +262,19 @@ verified:false, and assigns resumeId 'sqc-upload:<file SHA-256>' and resumeVersi
 '<file SHA-256>'. Those IDs are local document identifiers, not ApplyFlow resume
 records. Original bytes are retained in extension-owned IndexedDB with a browser
 session epoch and bounded retention, scoped to the authenticated account,
-assignment/profile/job versions, application session, and optional server resume
-version. Logout clears the local documents. Assignment/job/version changes
+assignment/profile/job versions and application session. A local upload does
+not depend on ApplyFlow's default resume ID/version; refreshing that default
+does not discard the selected upload. A byte-matched downloaded ApplyFlow copy
+is persisted with server provenance and is invalidated if its server version or
+fingerprint changes. Logout clears the local documents. Assignment/job/version changes
 invalidate them; the document must be uploaded for the new application context.
 
 A valid job/profile assignment can return context.resume:null when no server
 resume exists. This verifies the assignment, not a nonexistent resume. Basic
 candidate details remain fillable, while resume-driven answering waits for an
 upload. Existing approved server resume metadata/downloads remain supported for
-viewing and provenance; a server file alone does not replace the required upload.
+viewing and attachment. A verified job-tailored server resume is ready without
+re-upload. An unclassified/base document does not satisfy job tailoring.
 
 Parsed employment rows retain exact source evidence, company, role, month/year
 dates, current-employment status, and responsibilities. Supported existing
@@ -281,13 +287,25 @@ left for review. Ambiguous dates and employment layouts remain unfilled.
 
 Screening pipeline with a local resume
 
-After upload, SQC automatically batches detected unanswered questions through
+Once a tailored resume is active, SQC automatically batches detected unanswered
+questions through
 POST /api/sqc/answer-questions when candidate/custom-question autofill is enabled.
 It applies returned answers to the original fields only if the assignment, job,
 resume, field shape, and user-entered values still match. A manual Answer with
 Codex control remains available for retry; Stop cancels automatic generation for
 the current resume context. Needs-input answers are not repeatedly requested.
 No automatic submission is performed.
+
+The HUD Questions button opens a dedicated Q&A tab. It lists detected unanswered
+questions, accepts manually pasted questions (one per line), and sends either
+batch through the same authenticated endpoint. Returned answers remain visible
+in editable answer cards. Appliers can copy any answer or explicitly fill its
+linked portal field. Manually pasted questions have no DOM binding and are
+copy-only. The Autofill linked fields checkbox can be disabled for review-first
+use. Missing facts, provider errors, and pending generation are shown in the
+panel. Results and edited answers are cleared when the assignment or resume
+changes. Explicit Fill still checks field shape, exact options, character limits,
+and current context; it can replace a field value only on the applier's click.
 
 For uploads, the screening request includes the usual context/version envelope
 with the local resumeId/version, plus:

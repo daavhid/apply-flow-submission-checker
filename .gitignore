@@ -23,4 +23,5 @@ server/data/submissions.json
 
 # Build outputs
 dist/
+.test-artifacts/
 

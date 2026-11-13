@@ -19,8 +19,8 @@ test('a renamed binary document is rejected and text content comes from the actu
   const r = await validate({...input(),text:'fabricated different content'},{id:'p1',fullName:'Candidate One'});
   assert.equal(r.text,text);
 });
-test('local records are invalidated by account, assignment, job, or base resume changes',async () => {
+test('another context cannot read or discard a saved document belonging to the original context',async () => {
   const store = memoryStore(); await store.put(1,'original',{id:'file'});
   assert.equal((await store.get(1,'original')).id,'file');
-  assert.equal(await store.get(1,'another-context'),null); assert.equal(await store.get(1,'original'),null);
+  assert.equal(await store.get(1,'another-context'),null); assert.equal((await store.get(1,'original')).id,'file');
 });

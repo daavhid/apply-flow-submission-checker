@@ -42,3 +42,7 @@ test('unstructured or ambiguous employment stays empty rather than borrowing can
   const f=parse('Candidate One\nSkills: Python, SQL\nExperienced professional.');
   assert.deepEqual(f.workHistory,[]);assert.equal(f.totalYears,null);assert.deepEqual(f.skillYears,{});
 });
+test('a responsibility sentence above a role is not treated as its company',()=>{
+  const facts=parse(`Candidate One\nEXPERIENCE\nFirst Corp\nSenior Engineer | 2022 - 2024\nMaintaining design records, Git pull-request reviews, and governance through the SDLC.\nSoftware Engineer | 2020 - 2022\nSecond Corp\nBuilt APIs.\nEDUCATION`);
+  assert.equal(facts.workHistory[1].company,'Second Corp');
+});

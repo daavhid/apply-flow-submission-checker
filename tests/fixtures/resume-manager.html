@@ -1,0 +1,7 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/content/hud.css"></head>
+<body><h1>Resume manager browser smoke test</h1><label>Resume<input type="file" id="portal-resume" name="resume"></label>
+<label>Why do you want this role?<textarea id="portal-question" required></textarea></label><pre id="smoke-result">Running</pre>
+<script>function smokeFailure(message){document.body.dataset.resumeSmoke='failed';document.getElementById('smoke-result').textContent=String(message);}window.addEventListener('error',e=>smokeFailure(e.message));window.addEventListener('unhandledrejection',e=>smokeFailure(e.reason?.stack||e.reason));</script>
+<script src="/content/context-policy.js"></script><script src="/content/screening-policy.js"></script><script src="/content/screening.js"></script><script src="/content/resume-context.js"></script>
+<script src="/options/doc-parser.js"></script><script src="/background/local-resume.js"></script><script src="/background/applyflow-session.js"></script>
+<script src="/tests/fixtures/resume-manager.js"></script><script src="/content/hud.js"></script><script>runResumeSmoke();</script></body></html>

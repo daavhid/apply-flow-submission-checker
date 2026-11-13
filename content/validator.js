@@ -156,13 +156,13 @@ window.JobFormValidator = (function () {
     }
 
     const profile = activeProfile || {};
-    if (settings.integrationMode === 'applyflow' && profile.resumeSource !== 'sqc_upload' && data.total_fields_count > 0) {
+    if (settings.integrationMode === 'applyflow' && !profile.resumeIsTailored && data.total_fields_count > 0) {
       errors.push({rule:'TAILORED_RESUME_UPLOAD_REQUIRED',severity:'BLOCKING',
-        message:'Upload the tailored resume for this application before continuing. Candidate identity is verified against ApplyFlow.'});
+        message:'Upload a tailored resume or sync the approved job-tailored resume from ApplyFlow before continuing.'});
     }
 
     const effectiveStack = getEffectiveStack(profile, settings.activeStackKey, data.job_title);
-    if (profile.resumeSource === 'sqc_upload' && window.SQCResumeContext) {
+    if (profile.resumeIsTailored && window.SQCResumeContext) {
       for (const entry of data.screening_qa || []) {
         const fact=window.SQCResumeContext.numberMismatch(entry.q,entry.a,profile.resumeContext);
         if(fact) errors.push({rule:'RESUME_EXPERIENCE_NUMBER_MISMATCH',severity:'BLOCKING',

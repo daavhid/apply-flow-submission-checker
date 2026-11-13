@@ -3,7 +3,7 @@
   'use strict';
   const binding = (auth, c) => JSON.stringify([auth.apiOrigin, auth.sessionId, auth.applier.id,
     c.applicationSessionId, c.assignment.profileAssignmentId, c.assignment.profileAssignmentVersion,
-    c.profile.id, c.profile.version, c.job.id, c.job.version, c.resume?.id || null, c.resume?.version || null]);
+    c.profile.id, c.profile.version, c.job.id, c.job.version]);
   async function validate(input, profile) {
     if (input?.confirmed !== true) throw new Error('Confirm that this resume belongs to the assigned candidate and current job.');
     const filename = String(input.filename || '').replace(/[\\/]/g, '_');
@@ -34,7 +34,7 @@
   }
   function memoryStore() {
     const records = new Map();
-    return { async get(id, key) { const r = records.get(id); if (r?.binding !== key) { records.delete(id); return null; } return r.resume; },
+    return { async get(id, key) { const r = records.get(id); return r?.binding === key ? r.resume : null; },
       async put(id, key, resume) { records.set(id, {binding:key, resume}); },
       async remove(id) { records.delete(id); }, async clear() { records.clear(); } };
   }
@@ -63,7 +63,8 @@
     epoch.catch(() => {}); // Surface storage errors on upload, without an unhandled startup rejection.
     return {
       async get(id, key) { const e = await epoch, r = await transact('readonly', s => s.get(id));
-        if (!r) return null; if (r.epoch !== e || r.binding !== key) { await this.remove(id); return null; } return r.resume; },
+        if (!r) return null; if (r.epoch !== e) { await this.remove(id); return null; }
+        return r.binding === key ? r.resume : null; },
       async put(id, key, resume) { const e = await epoch;
         const all = await transact('readonly', s => s.getAll());
         for (const r of all.sort((a,b) => a.savedAt-b.savedAt).slice(0, Math.max(0, all.length - 2))) if (r.tabId !== id) await this.remove(r.tabId);
