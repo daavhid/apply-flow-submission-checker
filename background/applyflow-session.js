@@ -13,7 +13,7 @@
     const preferences = ['autoAutofillOnPageLoad', 'detectCaptchaAndAlert', 'autoFillDemographics',
       'autoFillCompensation', 'autoFillCustomQuestions', 'minScreeningLength', 'streamLiveEvents', 'interceptionMode'];
     const privileged = sender => sender.url?.startsWith(chrome.runtime.getURL('')) === true;
-    const failure = (state, error) => Object.assign(new Error(error), { state });
+    const failure = (state, error, details = {}) => Object.assign(new Error(error), { state, ...details });
     async function request(apiOrigin, path, method = 'GET', body, csrfToken, options = {}) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), options.timeoutMs || 10000);
@@ -33,18 +33,28 @@
           throw failure(path === '/api/sqc/login' ? 'INVALID_CREDENTIALS' : 'SIGNED_OUT',
             path === '/api/sqc/login' ? 'Email or password is incorrect.' : 'Sign in with your ApplyFlow email and password.');
         }
-        if (res.status === 403) throw failure('FORBIDDEN', 'ApplyFlow denied access. Refresh your assignment.');
-        const data = await res.json();
+        if (res.status === 403) throw failure('FORBIDDEN', `ApplyFlow denied access (HTTP 403 at ${path}). Check your session or assignment permissions.`, {status:403,path});
+        let data;
+        try { data = await res.json(); }
+        catch (_) { throw failure([404,405].includes(res.status)?'HTTP_ROUTE_MISSING':'INVALID_RESPONSE',
+          `ApplyFlow returned HTTP ${res.status} at ${path} without a JSON API response. Check that this route is deployed.`,{status:res.status,path}); }
+        if (!data || typeof data !== 'object' || Array.isArray(data)) throw failure('INVALID_RESPONSE',`ApplyFlow returned an invalid JSON object at ${path}.`,{status:res.status,path});
         if (res.status === 409) throw failure('VERSION_MISMATCH', 'The application versions changed. Refresh SQC and try again.');
-        if (!res.ok || data.success !== true) throw failure('UNAVAILABLE',
-          ['/api/sqc/login', '/api/sqc/password'].includes(path) ? 'ApplyFlow could not complete this authentication request.' :
-            (data.error?.message || 'ApplyFlow could not verify this request.'));
+        if (!res.ok || data.success !== true && !(options.allowWithoutSuccess && data.success === undefined)) {
+          const reason=typeof data.error==='string'?data.error:data.error?.message || data.message || 'The backend did not complete this request.';
+          const code=data.error?.code || data.code;
+          const missing=[404,405].includes(res.status) && (!code || ['NOT_FOUND','ROUTE_NOT_FOUND','METHOD_NOT_ALLOWED'].includes(code));
+          throw failure(missing?'HTTP_ROUTE_MISSING':'BACKEND_ERROR',
+            ['/api/sqc/login', '/api/sqc/password'].includes(path) ? 'ApplyFlow could not complete this authentication request.' :
+              `ApplyFlow HTTP ${res.status} at ${path}${code?' ['+code+']':''}: ${String(reason).slice(0,800)}`,
+            {status:res.status,path,backendCode:code});
+        }
         return data;
       } catch (error) {
         if (error.state) throw error;
         if (options.signal?.aborted) throw failure('CANCELLED', 'Answer generation was stopped.');
         if (controller.signal.aborted) throw failure('TIMEOUT', 'The request timed out. Please try again.');
-        throw failure('UNAVAILABLE', 'ApplyFlow is unreachable or returned an invalid response.');
+        throw failure('UNAVAILABLE', `SQC could not reach ${apiOrigin}${path}. No HTTP response was received. Check the saved endpoint, network, and server access policy.`,{path});
       } finally { clearTimeout(timer); options.signal?.removeEventListener('abort', abort); }
     }
     async function clear() {
@@ -272,6 +282,21 @@
     }
     async function handleInternal(message, sender) {
       const action = message.action || message.type;
+      if (action === 'SQC_AI_STATUS') {
+        if (!sender.tab || privileged(sender)) return {success:false,error:'Check AI status from the application Q&A panel.'};
+        const cfg=await config({force:true},sender,false);
+        const {sqcAuth:auth}=await chrome.storage.session.get('sqcAuth');
+        if(!auth || !cfg.integration.applier) return {success:false,error:cfg.integration.message};
+        let data,path;
+        for (path of ['/api/ai/status','/api/ai/health']) {
+          try {data=await request(auth.apiOrigin,path,'GET',undefined,undefined,{allowWithoutSuccess:true});break;}
+          catch(error){if(error.state!=='HTTP_ROUTE_MISSING'||path==='/api/ai/health')throw error;}
+        }
+        const status=data.data || data;
+        const ready=status.connected===false || status.configured===false || ['FAILED','ERROR','UNAVAILABLE','UNCONFIGURED'].includes(String(status.status).toUpperCase()) ? false :
+          status.connected===true || ['READY','CONNECTED','HEALTHY','OK'].includes(String(status.status).toUpperCase()) ? true : null;
+        return {success:true,ready,message:`AI status endpoint reachable. Provider: ${status.provider?.name || status.provider || 'not reported'}; model: ${status.model || 'not reported'}. ${status.message || (ready===false?'ApplyFlow reports the AI provider is not ready. Ask its administrator to check provider/model credentials.':ready===true?'ApplyFlow reports the provider is ready.':'Provider connectivity was not reported; this does not confirm generation works.')}`};
+      }
       if (['SQC_SET_LOCAL_RESUME', 'SQC_CLEAR_LOCAL_RESUME', 'SQC_LINK_APPLYFLOW_RESUME'].includes(action)) {
         if (!sender.tab || privileged(sender) || !localResumes) return {success:false,error:'Upload a resume from a verified application HUD.'};
         const cfg = await config({force:true}, sender, false), c = cfg.settings.verifiedContext;
@@ -493,10 +518,25 @@
         };
         await assertCurrent();
         const options = () => ({timeoutMs:Math.max(1,Math.min(25000,deadline-now())),signal:operation.controller.signal});
-        let result = await request(snapshot.auth.apiOrigin,'/api/sqc/answer-questions','POST',payload,snapshot.auth.csrfToken,options());
+        let result,answerPath;
+        for(answerPath of ['/api/sqc/answer-questions','/api/submissions/answer-questions','/api/ai/answer-questions']) {
+          try {result=await request(snapshot.auth.apiOrigin,answerPath,'POST',payload,snapshot.auth.csrfToken,options());break;}
+          catch(error){if(error.state!=='HTTP_ROUTE_MISSING'||answerPath==='/api/ai/answer-questions')throw error;}
+        }
+        const validateEnvelope = value => {
+          try {screening.envelope(value,expected);}
+          catch (_) {throw failure('INCOMPATIBLE_API',`ApplyFlow responded at ${answerPath}, but the response is missing or mismatches the request ID and job/profile/resume versions required by SQC contract v2. Ask the ApplyFlow agent to align this endpoint.`,{path:answerPath});}
+        };
+        const checkGenerationFailure = value => {
+          if (['FAILED','CANCELLED'].includes(String(value.status || '').toUpperCase())) {
+            const reason=typeof value.error==='string'?value.error:value.error?.message || value.message || 'Ask the ApplyFlow administrator to check the configured AI provider, model, and credentials.';
+            throw failure('GENERATION_FAILED',`ApplyFlow AI generation failed at ${answerPath}: ${String(reason).slice(0,800)}`,{path:answerPath});
+          }
+        };
+        checkGenerationFailure(result);validateEnvelope(result);
         let statusUrl;
         for (let poll=0; ['PENDING','QUEUED','RUNNING'].includes(String(result.status || '').toUpperCase()); poll++) {
-          screening.envelope(result,expected);
+          validateEnvelope(result);
           if (poll >= 40 || now() >= deadline) throw failure('TIMEOUT','Answer generation took too long. Please try again.');
           statusUrl = result.statusUrl || statusUrl;
           if (typeof statusUrl !== 'string') throw failure('INVALID_RESPONSE','ApplyFlow did not supply an answer-status URL.');
@@ -505,9 +545,10 @@
           await sleep(3000); await assertCurrent();
           if (now() >= deadline) throw failure('TIMEOUT','Answer generation took too long. Please try again.');
           result = await request(snapshot.auth.apiOrigin,url.pathname+url.search,'GET',undefined,undefined,options());
+          checkGenerationFailure(result);
         }
         await assertCurrent();
-        if (['FAILED','CANCELLED'].includes(String(result.status || '').toUpperCase())) throw failure('GENERATION_FAILED','ApplyFlow could not complete these answers. Try again.');
+        checkGenerationFailure(result);
         const answers = screening.answers(result,expected,snapshot.questions);
         return await serialize(async () => {
           await assertCurrent();

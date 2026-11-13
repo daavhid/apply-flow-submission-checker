@@ -12,10 +12,12 @@ async function runResumeSmoke() {
   window.chrome={runtime:{id:'browser-test',getURL:p=>'chrome-extension://browser-test/'+p},
     storage:{session:area({}),local:area({sqcConnection:{apiOrigin:location.origin},settings:{}})},
     tabs:{async get(){return {...tab};}}};
-  let answerFailure=false,copied='';
+  let answerFailure=false,copied='',answerRequests=0;
   Object.defineProperty(navigator,'clipboard',{value:{async writeText(value){copied=value;}}});
   const fakeFetch=async (url,options)=>({ok:true,status:200,async json(){
+    if(url.endsWith('/api/ai/status')) return {provider:'CODEX',model:'test-model',connected:true};
     if(url.endsWith('/answer-questions')) {
+      answerRequests++;
       if(answerFailure)return {success:false,error:{message:'ApplyFlow answering is unavailable. Please retry.'}};
       const body=JSON.parse(options.body);return {success:true,contractVersion:2,...SQCScreeningPolicy.stamp(body),requestId:body.requestId,
         answers:body.questions.map(q=>({id:q.id,status:'ANSWERED',answer:'Answer for '+q.question}))};
@@ -75,18 +77,20 @@ async function runResumeSmoke() {
     SubmissionHUD.toggleDrawer(true);document.getElementById('sqc-btn-open-questions').click();
     const wait=async predicate=>{for(let i=0;i<100;i++){if(predicate())return;await new Promise(r=>setTimeout(r,50));}throw new Error('Question UI did not reach the expected state.');};
     check(document.getElementById('sqc-tab-questions').classList.contains('active'),'Questions tab did not open');
-    const auto=document.getElementById('sqc-qa-autofill');auto.checked=false;auto.dispatchEvent(new Event('change'));
-    document.getElementById('sqc-qa-send-detected').click();await wait(()=>document.querySelectorAll('[data-qa-edit]').length===1);
-    check(document.getElementById('portal-question').value==='','Review mode filled a field before approval');
-    const answer=document.querySelector('[data-qa-edit]');check(answer.value==='Answer for Why do you want this role?','Returned answer was not displayed');
-    answer.value='Reviewed answer for the employer';answer.dispatchEvent(new Event('input'));
-    document.querySelector('[data-qa-fill]').click();await wait(()=>document.getElementById('portal-question').value==='Reviewed answer for the employer');
-    const pasted=document.getElementById('sqc-qa-pasted');pasted.value='Describe your Python experience.';pasted.dispatchEvent(new Event('input'));
+    check(document.querySelector('.sqc-build-label')?.textContent.includes('v1.0.1'),'The manual-Q&A build marker is missing');
+    check(!document.getElementById('sqc-qa-send-detected'),'Automatic form question collection is still exposed');
+    check(!document.getElementById('sqc-qa-autofill'),'Question autofill is still enabled');
+    await new Promise(r=>setTimeout(r,1200));check(answerRequests===0,'Questions were sent without clicking Send');
+    document.getElementById('sqc-qa-check-connection').click();await wait(()=>document.getElementById('sqc-tab-questions').textContent.includes('test-model'));
+    const pasted=document.getElementById('sqc-qa-pasted');pasted.value='Describe your Python experience.\nWhy this company?';pasted.dispatchEvent(new Event('input'));
     document.getElementById('sqc-qa-send-pasted').click();await wait(()=>document.querySelectorAll('[data-qa-edit]').length===2);
-    const copies=document.querySelectorAll('[data-qa-copy]');copies[1].click();await wait(()=>copied==='Answer for Describe your Python experience.');
-    check(document.querySelectorAll('[data-qa-fill]')[1].disabled,'Unmapped manual question was offered unsafe autofill');
+    check(document.getElementById('portal-question').value==='','Manual Q&A modified the application form');
+    check(document.querySelector('[data-qa-edit]').value==='Answer for Describe your Python experience.','Returned manual answer was not displayed');
+    check(!document.querySelector('[data-qa-fill]'),'Manual Q&A is offering automatic field filling');
+    const answer=document.querySelector('[data-qa-edit]');answer.value='Reviewed answer';answer.dispatchEvent(new Event('input'));
+    document.querySelector('[data-qa-copy]').click();await wait(()=>copied==='Reviewed answer');
     answerFailure=true;const retry=document.getElementById('sqc-qa-pasted');retry.value='Another question?';retry.dispatchEvent(new Event('input'));
     document.getElementById('sqc-qa-send-pasted').click();await wait(()=>document.getElementById('sqc-tab-questions').textContent.includes('answering is unavailable'));
-    document.body.dataset.resumeSmoke='passed';document.getElementById('smoke-result').textContent='Passed: resume saving/attachment and Q&A post, retrieve, display, review-fill, copy, and API errors';
+    document.body.dataset.resumeSmoke='passed';document.getElementById('smoke-result').textContent='Passed: resume saving/attachment and manual-only Q&A, no automatic requests, AI status, answer retrieval, copy, and API errors';
   }catch(error){document.body.dataset.resumeSmoke='failed';document.getElementById('smoke-result').textContent=error.stack;}
 }

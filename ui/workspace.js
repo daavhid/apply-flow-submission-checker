@@ -20,6 +20,12 @@ window.SQCWorkspace = (() => {
   const field = (id, label, type, autocomplete) => `<div class="field"><label for="${id}">${label}</label><div class="input-wrap"><input id="${id}" name="${id}" type="${type}" autocomplete="${autocomplete}" required>${type === 'password' ? `<button type="button" class="reveal" data-reveal="${id}" aria-label="Show ${label.toLowerCase()}" aria-pressed="false">${icon('eye')}</button>` : ''}</div></div>`;
 
   async function start(surface) {
+    const installedManifest=chrome.runtime.getManifest?.();
+    if(installedManifest?.version) {
+      const build=document.createElement('p');build.className='workspace-build';
+      build.textContent='SQC '+(installedManifest.version_name || installedManifest.version);
+      document.body.appendChild(build);
+    }
     // Keep links to the previous install page working without showing a popup in a browser tab.
     if (surface === 'popup' && new URLSearchParams(location.search).has('setup')) {
       location.replace(chrome.runtime.getURL('onboarding/onboarding.html'));

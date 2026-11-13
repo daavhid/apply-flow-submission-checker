@@ -404,7 +404,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         await chrome.storage.session.remove('sqcEvidence');
         notifyTabsAboutStateChange();
       }
-      sendResponse({ success: false, error: err.message, state: err.state });
+      sendResponse({ success: false, error: err.message, state: err.state, status:err.status, path:err.path });
     });
 
   return true; // Keep message channel open for async response

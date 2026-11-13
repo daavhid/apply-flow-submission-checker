@@ -287,25 +287,35 @@ left for review. Ambiguous dates and employment layouts remain unfilled.
 
 Screening pipeline with a local resume
 
-Once a tailored resume is active, SQC automatically batches detected unanswered
-questions through
-POST /api/sqc/answer-questions when candidate/custom-question autofill is enabled.
-It applies returned answers to the original fields only if the assignment, job,
-resume, field shape, and user-entered values still match. A manual Answer with
-Codex control remains available for retry; Stop cancels automatic generation for
-the current resume context. Needs-input answers are not repeatedly requested.
-No automatic submission is performed.
+Manual Q&A workflow
 
-The HUD Questions button opens a dedicated Q&A tab. It lists detected unanswered
-questions, accepts manually pasted questions (one per line), and sends either
-batch through the same authenticated endpoint. Returned answers remain visible
-in editable answer cards. Appliers can copy any answer or explicitly fill its
-linked portal field. Manually pasted questions have no DOM binding and are
-copy-only. The Autofill linked fields checkbox can be disabled for review-first
-use. Missing facts, provider errors, and pending generation are shown in the
-panel. Results and edited answers are cleared when the assignment or resume
-changes. Explicit Fill still checks field shape, exact options, character limits,
-and current context; it can replace a field value only on the applier's click.
+The HUD Questions button opens a manual-only Q&A tab. SQC does not collect form
+questions for this tab, send batches on page load, or autofill returned answers.
+The applier pastes only the questions they want answered (one per line), then
+clicks Send pasted questions to ApplyFlow. Returned answers stay visible in
+editable cards with Copy answer controls. Sending another request preserves
+previous answers until the assignment or resume changes. Stop cancels a pending
+request. Candidate/profile autofill and resume experience autofill remain separate
+from Q&A; enabling them must never trigger a question-generation request.
+
+Check AI connection explicitly GETs /api/ai/status (or /api/ai/health on a 404/405)
+without sending questions. It displays the provider/model and what the backend
+reports about readiness. A reachable discovery route is not proof that generation
+works. The SQC answer route is preferred; if it is missing (404/405), SQC tries
+/api/submissions/answer-questions, then /api/ai/answer-questions on the same saved
+origin, with the same authentication, CSRF, payload, and response requirements.
+Provider/model errors, authentication failures, rate limits, and invalid version
+envelopes are not bypassed by retrying aliases. A legacy successful response that
+does not satisfy contract v2 is reported as incompatible rather than accepted
+under an unverified profile or resume context.
+
+Errors show the backend HTTP status, API route, and safe backend reason/code.
+A 'code generation failed; retry or ask an admin' response usually requires the
+ApplyFlow administrator to inspect provider availability, model configuration,
+credentials/permissions, quota, and the server-side generation logs. SQC cannot
+repair backend AI credentials or determine the exact provider failure from that
+generic message alone. Map provider errors separately from expired SQC user
+sessions; reserve 401 for an expired/missing authenticated user session.
 
 For uploads, the screening request includes the usual context/version envelope
 with the local resumeId/version, plus:

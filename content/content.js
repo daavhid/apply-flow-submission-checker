@@ -1648,9 +1648,6 @@ window.SubmissionCheckerCore = (function () {
 
       // Update Floating HUD
       SubmissionHUD.updateDrawer(currentExtractedData, currentValidation);
-      if (!currentExtractedData?.is_submission_success && !currentExtractedData?.is_already_applied && !currentDuplicateRecord) {
-        SubmissionHUD.maybeAutoAnswerQuestions?.();
-      }
 
       // Alert applier immediately if there is a candidate context mismatch
       checkAndAlertContextMismatch(currentValidation, currentExtractedData);

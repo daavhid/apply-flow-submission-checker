@@ -213,3 +213,5 @@ html:has([data-surface="popup"]) { width: 392px; overflow-x: hidden; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before { animation: none !important; transition: none !important; } }
 @media (forced-colors: active) { .switch { appearance: auto; } .switch::before { display: none; } }
+/* Installed version stays visible when troubleshooting an older extension copy. */
+.workspace-build { padding:8px 16px; margin:0; color:#94a3b8; font-size:11px; text-align:center; }

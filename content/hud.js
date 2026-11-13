@@ -39,14 +39,11 @@ window.SubmissionHUD = (function () {
   let hudRepairObserver = null, hudRepairTimer = null, localVerifiedResume = null;
   let managedResumeDialog = null;
   let pendingScreening = null, screeningMessage = '';
-  let questionResults = [], pastedQuestions = '', autofillReturnedAnswers = true, screeningError = false;
+  let questionResults = [], pastedQuestions = '', screeningError = false;
   const reviewedAnswerEdits = new Map();
-  let autoScreeningTimer = null, autoScreeningStoppedBinding = '';
-  const autoScreeningAttempts = new Set();
   function cancelPendingScreening(showMessage = true) {
     if (!pendingScreening) return;
     const requestId = pendingScreening.batch.requestId; pendingScreening.cancelled = true; pendingScreening = null;
-    autoScreeningStoppedBinding = resumeBinding();
     chrome.runtime.sendMessage({type:'SQC_CANCEL_QUESTIONS',requestId}).catch(() => {});
     screeningMessage = showMessage ? 'Stopped. No further answers will be inserted.' : '';
     lastDrawerFingerprint = '';
@@ -846,20 +843,14 @@ window.SubmissionHUD = (function () {
   }
 
   function renderQuestionsPanel(entries) {
-    let detected=[];
-    try { detected=SQCScreening.capture(entries,currentSettings).questions; } catch (_) {}
     const busy=Boolean(pendingScreening), ready=tailoredReady();
     return `<section class="sqc-questions-panel">
       <h3>Questions &amp; answers</h3>
-      <p>Send application questions to ApplyFlow. Answers appear here for review, copying, or filling their linked portal fields.</p>
+      <p class="sqc-build-label">Manual Q&amp;A · v1.0.1</p>
+      <p>Paste only the questions you want to send. Nothing is collected from the application automatically. Returned answers appear below for you to review and copy.</p>
       ${!ready ? '<div class="sqc-qa-notice">Select a tailored resume for this job first. <button class="sqc-btn sqc-btn-soft sqc-btn-sm" id="sqc-qa-resume">Open resume manager</button></div>' : ''}
-      <div class="sqc-qa-actions"><button class="sqc-btn sqc-btn-primary" id="sqc-qa-send-detected" ${busy||!ready||!detected.length?'disabled':''}>Send ${detected.length} detected question${detected.length===1?'':'s'}</button>
-      <button class="sqc-btn sqc-btn-soft" id="sqc-qa-refresh">Refresh questions</button>
-      <button class="sqc-btn sqc-btn-ghost" id="sqc-qa-stop" ${busy?'':'hidden'}>Stop</button></div>
-      <label class="sqc-qa-autofill"><input type="checkbox" id="sqc-qa-autofill" ${autofillReturnedAnswers?'checked':''}> Autofill linked fields when answers arrive</label>
-      <p class="sqc-screening-status ${screeningError?'sqc-qa-error':''}" role="${screeningError?'alert':'status'}" aria-live="polite">${escapeHtml(screeningMessage || (busy?'Waiting for ApplyFlow...':'Ready to send questions.'))}</p>
-      <details ${detected.length?'open':''}><summary>Detected unanswered questions (${detected.length})</summary>
-      ${detected.length ? '<ol>'+detected.map(q=>'<li>'+escapeHtml(q.question)+(q.options?' <small>Options: '+q.options.map(escapeHtml).join(' / ')+'</small>':'')+'</li>').join('')+'</ol>' : '<p>No unanswered supported fields detected. Paste a question below if the portal was not detected.</p>'}</details>
+      <div class="sqc-qa-actions"><button class="sqc-btn sqc-btn-soft" id="sqc-qa-check-connection">Check AI connection</button><button class="sqc-btn sqc-btn-ghost" id="sqc-qa-stop" ${busy?'':'hidden'}>Stop</button></div>
+      <p class="sqc-screening-status ${screeningError?'sqc-qa-error':''}" role="${screeningError?'alert':'status'}" aria-live="polite">${escapeHtml(screeningMessage || (busy?'Waiting for ApplyFlow...':'Paste a question, then choose Send.'))}</p>
       <label for="sqc-qa-pasted">Add questions manually (one question per line)</label>
       <textarea class="sqc-textarea" id="sqc-qa-pasted" rows="4" placeholder="Paste application questions here...">${escapeHtml(pastedQuestions)}</textarea>
       <button class="sqc-btn sqc-btn-primary" id="sqc-qa-send-pasted" ${busy||!ready?'disabled':''}>Send pasted questions to ApplyFlow</button>
@@ -871,7 +862,7 @@ window.SubmissionHUD = (function () {
           <p>${entry.status==='NEEDS_INPUT'?escapeHtml(entry.reason || 'ApplyFlow needs more information. You can enter your answer below.'):'Answer received from ApplyFlow.'}</p>
           <textarea class="sqc-textarea" data-qa-edit="${index}" rows="5" aria-label="Answer to ${escapeHtml(entry.question)}">${escapeHtml(answer || '')}</textarea>
           <div class="sqc-qa-actions"><button class="sqc-btn sqc-btn-soft" data-qa-copy="${index}">Copy answer</button>
-          <button class="sqc-btn sqc-btn-primary" data-qa-fill="${index}" ${linked?'':'disabled'}>Fill this field</button></div>
+          ${linked?'<button class="sqc-btn sqc-btn-primary" data-qa-fill="'+index+'">Fill this field</button>':''}</div>
           ${linked?'':'<p>Manual question: copy this answer into the application.</p>'}</article>`;
       }).join('') : '<p>Answers from ApplyFlow will appear here after you send questions.</p>'}</div>
     </section>`;
@@ -1407,7 +1398,7 @@ window.SubmissionHUD = (function () {
       currentScreenshots.map(s => s.id + ':' + s.answered_count).join(','),
       activeTab,
       fieldFilter,
-      fieldQuery, pendingScreening?.batch.requestId || '', screeningMessage,questionResults.length,autofillReturnedAnswers
+      fieldQuery, pendingScreening?.batch.requestId || '', screeningMessage,questionResults.length
     ].join('§');
 
     if (lastDrawerFingerprint === currentFingerprint && drawerEl.querySelector('.sqc-body')) {
@@ -1538,33 +1529,12 @@ window.SubmissionHUD = (function () {
   function refreshScreeningUI() {
     lastDrawerFingerprint = ''; if (isDrawerOpen) updateDrawer(lastExtracted || {}, lastValidation);
   }
-  function maybeAutoAnswerQuestions() {
-    if (window !== window.top || pendingScreening || autoScreeningTimer || !currentProfile?.resumeIsTailored ||
-        currentSettings?.autoAutofillOnPageLoad === false || currentSettings?.autoFillCustomQuestions === false ||
-        autoScreeningStoppedBinding === resumeBinding() || !window.SQCContextPolicy?.ready(currentSettings,window.location.href)) return;
-    autoScreeningTimer = setTimeout(() => {
-      autoScreeningTimer = null;
-      if (pendingScreening || !currentProfile?.resumeIsTailored || autoScreeningStoppedBinding === resumeBinding() ||
-          currentSettings?.autoAutofillOnPageLoad === false || currentSettings?.autoFillCustomQuestions === false ||
-          !window.SQCContextPolicy?.ready(currentSettings,window.location.href)) return;
-      try {
-        const batch=SQCScreening.capture(JobFormExtractor.extractAllFields().all_entries,currentSettings);
-        batch.questions=batch.questions.filter(q => !batch.targets.get(q.id)?.nodes.some(node => node.dataset.sqcAiStatus === 'needs-input'));
-        if (!batch.questions.length) return;
-        const key=resumeBinding()+':'+window.location.href+':'+JSON.stringify(batch.questions);
-        if (autoScreeningAttempts.has(key)) return;
-        if (autoScreeningAttempts.size >= 100) autoScreeningAttempts.delete(autoScreeningAttempts.values().next().value);
-        autoScreeningAttempts.add(key); handleAnswerWithCodex(batch);
-      } catch (_) { /* A context transition is handled by the normal verification pass. */ }
-    },1000);
-  }
   async function handleAnswerWithCodex(batchOverride) {
     if (pendingScreening) return;
     let operation;
     try {
-      const extracted = JobFormExtractor.extractAllFields();
-      const batch = batchOverride?.questions ? batchOverride : SQCScreening.capture(extracted.all_entries, currentSettings);
-      if (!batchOverride?.questions) autoScreeningStoppedBinding = '';
+      const batch = batchOverride?.questions ? batchOverride : null;
+      if (!batch) {activeTab='questions';refreshScreeningUI();return;}
       if (!batch.questions.length) {screeningMessage='No unanswered screening questions on this step. Autofill handles standard candidate details.'; refreshScreeningUI(); return;}
       operation={batch,cancelled:false};pendingScreening=operation;
       screeningError=false;
@@ -1578,8 +1548,7 @@ window.SubmissionHUD = (function () {
       const saved=new Map(questionResults.map(entry=>[entry.id,entry]));
       for(const answer of normalized) saved.set(answer.id,{...answer,question:batch.questions.find(q=>q.id===answer.id).question,batch,result});
       questionResults=Array.from(saved.values()).slice(-100);
-      const filled=autofillReturnedAnswers ? SQCScreening.apply(result,batch,currentSettings) : {count:0,needsInput:normalized.filter(a=>a.status==='NEEDS_INPUT').length,skipped:0};
-      screeningMessage='Received '+normalized.length+' answer'+(normalized.length===1?'':'s')+' from ApplyFlow. Filled '+filled.count+' linked field'+(filled.count===1?'':'s')+'. '+filled.needsInput+' need your input. Review answers in Q&A.';
+      screeningMessage='Received '+normalized.length+' answer'+(normalized.length===1?'':'s')+' from ApplyFlow. Review and copy the answers below.';
       showToast(screeningMessage);
       window.SubmissionCheckerCore?.runLiveCheck();
     } catch(error) {
@@ -1644,10 +1613,13 @@ window.SubmissionHUD = (function () {
     $('#sqc-btn-hud-unlock')?.addEventListener('click', () => openAdminDialog());
     $('#sqc-btn-open-questions')?.addEventListener('click', () => {activeTab='questions';refreshScreeningUI();});
     $('#sqc-qa-resume')?.addEventListener('click',openResumeModal);
-    $('#sqc-qa-refresh')?.addEventListener('click',()=>{window.SubmissionCheckerCore?.runLiveCheck();lastDrawerFingerprint='';updateDrawer(JobFormExtractor.extractAllFields(),lastValidation);});
-    $('#sqc-qa-send-detected')?.addEventListener('click',()=>handleAnswerWithCodex());
     $('#sqc-qa-stop')?.addEventListener('click',()=>{cancelPendingScreening();refreshScreeningUI();});
-    $('#sqc-qa-autofill')?.addEventListener('change',event=>{autofillReturnedAnswers=event.target.checked;});
+    $('#sqc-qa-check-connection')?.addEventListener('click',async event=>{
+      event.currentTarget.disabled=true;screeningError=false;screeningMessage='Checking the configured ApplyFlow AI status...';refreshScreeningUI();
+      try {const result=await chrome.runtime.sendMessage({type:'SQC_AI_STATUS'});if(!result?.success)throw new Error(result?.error || 'AI status check failed.');screeningMessage=result.message;screeningError=result.ready===false;}
+      catch(error){screeningError=true;screeningMessage=error.message;}
+      finally{refreshScreeningUI();}
+    });
     $('#sqc-qa-pasted')?.addEventListener('input',event=>{pastedQuestions=event.target.value;});
     $('#sqc-qa-send-pasted')?.addEventListener('click',()=>{
       pastedQuestions=$('#sqc-qa-pasted').value;
@@ -3612,7 +3584,6 @@ window.SubmissionHUD = (function () {
     removeBlockingModal,
     toggleDrawer,
     openResumeModal,
-    maybeAutoAnswerQuestions,
     promptTailoredResumeIfNeeded,
     attachResumeToPortal,
     downloadResumeFile,

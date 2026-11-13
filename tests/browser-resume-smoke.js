@@ -39,7 +39,7 @@ server.listen(0,'127.0.0.1',async()=>{
     const dom=await call('Runtime.evaluate',{expression:'document.documentElement.outerHTML',returnByValue:true});fs.writeFileSync(path.join(artifacts,'result.html'),dom.result.value);
     const shot=await call('Page.captureScreenshot',{format:'png'});fs.writeFileSync(path.join(artifacts,'resume-manager.png'),Buffer.from(shot.data,'base64'));
     if(state?.state!=='passed')throw new Error(state?.text || errors.slice(-1500));
-    console.log('Real Chrome passed: resume parsing/saving/persistence/attachment; Q&A detected/manual posting, answer display, review-fill, copy, and backend errors (test API).');
+    console.log('Real Chrome passed: resume parsing/saving/persistence/attachment; manual-only Q&A, no automatic requests, AI status, answer display, copy, and backend errors (test API).');
   }catch(error){console.error(error.message);process.exitCode=1;}
   finally{clearTimeout(timeout);if(socket?.readyState===1){await call('Browser.close').catch(()=>{});socket.close();}child.kill();server.close();}
 });

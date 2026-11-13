@@ -1647,6 +1647,7 @@
 .sqc-root .sqc-questions-panel h4 { font-size:13px; line-height:1.6; margin:0; color:var(--sqc-text); }
 .sqc-root .sqc-questions-panel p, .sqc-root .sqc-questions-panel label, .sqc-root .sqc-questions-panel li { font-size:12px; line-height:1.7; }
 .sqc-root .sqc-questions-panel p { color:var(--sqc-muted); }
+.sqc-root .sqc-questions-panel .sqc-build-label { font-size:10px; color:var(--sqc-accent); }
 .sqc-root .sqc-questions-panel summary { cursor:pointer; font-size:12px; color:var(--sqc-text); }
 .sqc-root .sqc-questions-panel ol { padding-left:20px; }
 .sqc-root .sqc-questions-panel li { list-style:decimal; margin:8px 0; }

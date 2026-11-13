@@ -539,7 +539,7 @@ test('stale client assignments fail before the screening provider is called',asy
 test('answer responses must echo the original request and all version identifiers',async()=>{
   const f=fixture(),message=await screeningMessage(f);
   f.intercept((url,options)=>url.endsWith('/answer-questions')?jsonResponse(answerResponse(JSON.parse(options.body),{resumeVersion:'different'})):undefined);
-  await assert.rejects(f.service.handle(message,f.sender(1)),/does not match/);
+  await assert.rejects(f.service.handle(message,f.sender(1)),error=>error.state==='INCOMPATIBLE_API' && /contract v2/.test(error.message));
 });
 test('navigation or reassignment during generation discards the answer batch',async()=>{
   for(const change of [f=>{f.tabs[1].url='https://jobs.example/roles/2';},f=>f.reassign()]){
@@ -651,4 +651,35 @@ test('matching downloaded ApplyFlow files are persisted with server provenance a
   assert.equal(linked.activeProfile.resumeSource,'applyflow');assert.equal(linked.activeProfile.resumeBase64,dataUrl);
   const restored=await f.restart().handle({type:'GET_CONFIG'},f.sender(1));
   assert.equal(restored.activeProfile.resumeBase64,dataUrl);
+});
+test('a missing SQC answer route falls back to the documented submissions alias only on route errors',async()=>{
+  const f=fixture(),message=await screeningMessage(f);
+  f.intercept((url,options)=>{
+    if(url.endsWith('/api/sqc/answer-questions'))return jsonResponse({success:false,error:{code:'NOT_FOUND'}},404);
+    if(url.endsWith('/api/submissions/answer-questions'))return jsonResponse(answerResponse(JSON.parse(options.body)));
+  });
+  const response=await f.service.handle(message,f.sender(1));assert.equal(response.success,true);
+  assert.ok(f.calls.some(c=>c.url.endsWith('/api/submissions/answer-questions')));
+});
+test('provider generation failures show backend reason, route, HTTP status, and do not retry through aliases',async()=>{
+  const f=fixture(),message=await screeningMessage(f);
+  f.intercept(url=>url.endsWith('/api/sqc/answer-questions')?jsonResponse({success:false,error:{code:'CODEX_GENERATION_FAILED',message:'Code generation failed. Retry or ask an admin.'}},502):undefined);
+  await assert.rejects(f.service.handle(message,f.sender(1)),error=>error.status===502&&error.path==='/api/sqc/answer-questions'&&/ask an admin/.test(error.message));
+  assert.equal(f.calls.some(c=>c.url.endsWith('/api/submissions/answer-questions')),false);
+});
+test('failed generation responses do not mask provider errors as envelope mismatches',async()=>{
+  const f=fixture(),message=await screeningMessage(f);
+  f.intercept(url=>url.endsWith('/api/sqc/answer-questions')?jsonResponse({success:true,status:'FAILED',error:{message:'Configured Codex model is unavailable'}}):undefined);
+  await assert.rejects(f.service.handle(message,f.sender(1)),error=>error.state==='GENERATION_FAILED'&&/model is unavailable/.test(error.message));
+});
+test('AI discovery works with the documented provider status response without a success wrapper',async()=>{
+  const f=fixture();f.intercept(url=>url.endsWith('/api/ai/status')?jsonResponse({provider:'CODEX',model:'test-codex-model',connected:true}):undefined);
+  const status=await f.service.handle({type:'SQC_AI_STATUS'},f.sender(1));
+  assert.equal(status.success,true);assert.equal(status.ready,true);assert.match(status.message,/test-codex-model/);
+  assert.equal(f.calls.filter(c=>c.url.includes('/answer-questions')).length,0);
+});
+test('AI discovery reports an unconfigured backend provider without claiming generation is connected',async()=>{
+  const f=fixture();f.intercept(url=>url.endsWith('/api/ai/status')?jsonResponse({provider:'CODEX',configured:false}):undefined);
+  const status=await f.service.handle({type:'SQC_AI_STATUS'},f.sender(1));
+  assert.equal(status.ready,false);assert.match(status.message,/administrator/);
 });
