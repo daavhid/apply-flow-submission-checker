@@ -12,12 +12,13 @@ async function runResumeSmoke() {
   window.chrome={runtime:{id:'browser-test',getURL:p=>'chrome-extension://browser-test/'+p},
     storage:{session:area({}),local:area({sqcConnection:{apiOrigin:location.origin},settings:{}})},
     tabs:{async get(){return {...tab};}}};
-  let answerFailure=false,copied='',answerRequests=0;
+  let answerFailure=false,copied='',answerRequests=0,releaseAnswers=null,answerGate=null;
   Object.defineProperty(navigator,'clipboard',{value:{async writeText(value){copied=value;}}});
   const fakeFetch=async (url,options)=>({ok:true,status:200,async json(){
     if(url.endsWith('/api/ai/status')) return {provider:'CODEX',model:'test-model',connected:true};
     if(url.endsWith('/answer-questions')) {
       answerRequests++;
+      if(answerGate) await answerGate;
       if(answerFailure)return {success:false,error:{message:'ApplyFlow answering is unavailable. Please retry.'}};
       const body=JSON.parse(options.body);return {success:true,contractVersion:2,...SQCScreeningPolicy.stamp(body),requestId:body.requestId,
         answers:body.questions.map(q=>({id:q.id,status:'ANSWERED',answer:'Answer for '+q.question}))};
@@ -77,18 +78,45 @@ async function runResumeSmoke() {
     SubmissionHUD.toggleDrawer(true);document.getElementById('sqc-btn-open-questions').click();
     const wait=async predicate=>{for(let i=0;i<100;i++){if(predicate())return;await new Promise(r=>setTimeout(r,50));}throw new Error('Question UI did not reach the expected state.');};
     check(document.getElementById('sqc-tab-questions').classList.contains('active'),'Questions tab did not open');
-    check(document.querySelector('.sqc-build-label')?.textContent.includes('v1.0.1'),'The manual-Q&A build marker is missing');
+    check(document.querySelector('.sqc-build-label')?.textContent.includes('v1.0.3'),'The manual-Q&A build marker is missing');
     check(!document.getElementById('sqc-qa-send-detected'),'Automatic form question collection is still exposed');
     check(!document.getElementById('sqc-qa-autofill'),'Question autofill is still enabled');
     await new Promise(r=>setTimeout(r,1200));check(answerRequests===0,'Questions were sent without clicking Send');
     document.getElementById('sqc-qa-check-connection').click();await wait(()=>document.getElementById('sqc-tab-questions').textContent.includes('test-model'));
     const pasted=document.getElementById('sqc-qa-pasted');pasted.value='Describe your Python experience.\nWhy this company?';pasted.dispatchEvent(new Event('input'));
-    document.getElementById('sqc-qa-send-pasted').click();await wait(()=>document.querySelectorAll('[data-qa-edit]').length===2);
+    answerGate=new Promise(resolve=>{releaseAnswers=resolve;});
+    document.getElementById('sqc-qa-send-pasted').click();
+    await wait(()=>document.querySelector('.sqc-qa-loading .sqc-spin'));
+    check(document.getElementById('sqc-qa-send-pasted').disabled,'Send is not disabled while fetching');
+    check(document.querySelector('.sqc-questions-panel').getAttribute('aria-busy')==='true','Fetching state is not exposed');
+    releaseAnswers();answerGate=null;
+    await wait(()=>document.querySelectorAll('[data-qa-edit]').length===2);
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+    const scrollBody=document.querySelector('.sqc-body'),copy=document.querySelector('[data-qa-copy]');
+    check(scrollBody.scrollHeight>scrollBody.clientHeight,'Narrow HUD does not have a scrollable body');
+    check(copy.getBoundingClientRect().top>=scrollBody.getBoundingClientRect().top && copy.getBoundingClientRect().bottom<=scrollBody.getBoundingClientRect().bottom,'Top answer copy is not visible after retrieval');
+    check(!document.querySelector('.sqc-qa-loading'),'Loader remained after retrieval');
     check(document.getElementById('portal-question').value==='','Manual Q&A modified the application form');
     check(document.querySelector('[data-qa-edit]').value==='Answer for Describe your Python experience.','Returned manual answer was not displayed');
     check(!document.querySelector('[data-qa-fill]'),'Manual Q&A is offering automatic field filling');
     const answer=document.querySelector('[data-qa-edit]');answer.value='Reviewed answer';answer.dispatchEvent(new Event('input'));
     document.querySelector('[data-qa-copy]').click();await wait(()=>copied==='Reviewed answer');
+    document.getElementById('sqc-qa-copy-all').click();await wait(()=>copied.includes('Reviewed answer')&&copied.includes('Why this company?'));
+    answer.value=('Long reviewed answer.\n').repeat(80);answer.dispatchEvent(new Event('input'));
+    answer.focus({preventScroll:true});answer.setSelectionRange(5,15);answer.scrollTop=100;
+    scrollBody.scrollTop=scrollBody.scrollHeight;
+    const oldScroll=scrollBody.scrollTop,oldInner=answer.scrollTop;
+    const footer=document.querySelector('.sqc-foot'),footerTop=footer.getBoundingClientRect().top;
+    let clickCount=0;copy.addEventListener('click',()=>clickCount++);
+    copy.dispatchEvent(new MouseEvent('mousedown',{bubbles:true}));
+    for(let i=0;i<12;i++) SubmissionHUD.updateDrawer(JobFormExtractor.extractAllFields(),{isValid:false,errorCount:i%2+1,errors:[{rule:'REQUIRED',message:'Required answer '+i}],warnings:[]});
+    check(document.querySelector('[data-qa-edit]')===answer,'Validation replaced the answer editor');
+    check(document.querySelector('[data-qa-copy]')===copy,'Validation replaced the pressed copy button');
+    check(document.activeElement===answer && answer.selectionStart===5 && answer.selectionEnd===15,'Validation interrupted answer editing');
+    check(Math.abs(scrollBody.scrollTop-oldScroll)<2 && answer.scrollTop===oldInner,'Validation reset scroll position');
+    copy.dispatchEvent(new MouseEvent('mouseup',{bubbles:true}));copy.click();await wait(()=>copied===answer.value);
+    check(document.querySelector('.sqc-foot')===footer && footer.getBoundingClientRect().top===footerTop,'Validation moved footer controls');
+    check(clickCount===1,'Click was lost or duplicated during validation updates');
     answerFailure=true;const retry=document.getElementById('sqc-qa-pasted');retry.value='Another question?';retry.dispatchEvent(new Event('input'));
     document.getElementById('sqc-qa-send-pasted').click();await wait(()=>document.getElementById('sqc-tab-questions').textContent.includes('answering is unavailable'));
     document.body.dataset.resumeSmoke='passed';document.getElementById('smoke-result').textContent='Passed: resume saving/attachment and manual-only Q&A, no automatic requests, AI status, answer retrieval, copy, and API errors';

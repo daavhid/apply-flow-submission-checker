@@ -39,6 +39,7 @@ window.SubmissionHUD = (function () {
   let hudRepairObserver = null, hudRepairTimer = null, localVerifiedResume = null;
   let managedResumeDialog = null;
   let pendingScreening = null, screeningMessage = '';
+  let drawerEvents = null;
   let questionResults = [], pastedQuestions = '', screeningError = false;
   const reviewedAnswerEdits = new Map();
   function cancelPendingScreening(showMessage = true) {
@@ -689,7 +690,8 @@ window.SubmissionHUD = (function () {
       containerEl.appendChild(pillEl);
     }
 
-    pillEl.innerHTML = `
+    const pillTemplate = document.createElement('template');
+    pillTemplate.innerHTML = `
       <span class="sqc-pill-avatar">
         ${escapeHtml(getInitials(candidateName))}
         <span class="sqc-pill-dot t-${status.tone}"></span>
@@ -704,6 +706,7 @@ window.SubmissionHUD = (function () {
       ${tailoredReady() ? `<span class="sqc-pill-tag" style="background:rgba(16,185,129,0.22);color:#6ee7b7;" title="Job-tailored resume active">${icon('sparkles', 10)}Tailored</span>` : ''}
       ${isAuditMode ? '<span class="sqc-pill-tag is-audit" title="Audit mode — submissions are not blocked">Audit</span>' : ''}
     `;
+    patchDrawer(pillEl,pillTemplate.content);
     clampHUD();
   }
 
@@ -844,28 +847,58 @@ window.SubmissionHUD = (function () {
 
   function renderQuestionsPanel(entries) {
     const busy=Boolean(pendingScreening), ready=tailoredReady();
-    return `<section class="sqc-questions-panel">
+    return `<section class="sqc-questions-panel" aria-busy="${busy}">
       <h3>Questions &amp; answers</h3>
-      <p class="sqc-build-label">Manual Q&amp;A · v1.0.1</p>
+      <p class="sqc-build-label">Manual Q&amp;A · v1.0.3</p>
       <p>Paste only the questions you want to send. Nothing is collected from the application automatically. Returned answers appear below for you to review and copy.</p>
       ${!ready ? '<div class="sqc-qa-notice">Select a tailored resume for this job first. <button class="sqc-btn sqc-btn-soft sqc-btn-sm" id="sqc-qa-resume">Open resume manager</button></div>' : ''}
       <div class="sqc-qa-actions"><button class="sqc-btn sqc-btn-soft" id="sqc-qa-check-connection">Check AI connection</button><button class="sqc-btn sqc-btn-ghost" id="sqc-qa-stop" ${busy?'':'hidden'}>Stop</button></div>
-      <p class="sqc-screening-status ${screeningError?'sqc-qa-error':''}" role="${screeningError?'alert':'status'}" aria-live="polite">${escapeHtml(screeningMessage || (busy?'Waiting for ApplyFlow...':'Paste a question, then choose Send.'))}</p>
+      <p class="sqc-screening-status ${busy?'sqc-qa-loading':''} ${screeningError?'sqc-qa-error':''}" role="${screeningError?'alert':'status'}" aria-live="polite">${busy?spinner(18):''}${escapeHtml(screeningMessage || (busy?'Waiting for ApplyFlow...':'Paste a question, then choose Send.'))}</p>
       <label for="sqc-qa-pasted">Add questions manually (one question per line)</label>
       <textarea class="sqc-textarea" id="sqc-qa-pasted" rows="4" placeholder="Paste application questions here...">${escapeHtml(pastedQuestions)}</textarea>
-      <button class="sqc-btn sqc-btn-primary" id="sqc-qa-send-pasted" ${busy||!ready?'disabled':''}>Send pasted questions to ApplyFlow</button>
-      <div class="sqc-qa-results"><h3>Returned answers (${questionResults.length})</h3>
+      <button class="sqc-btn sqc-btn-primary" id="sqc-qa-send-pasted" ${busy||!ready?'disabled':''}>${busy?spinner(16):''}${busy?'Fetching answers...':'Send pasted questions to ApplyFlow'}</button>
+      <div class="sqc-qa-results"><div class="sqc-qa-results-heading"><h3>Returned answers (${questionResults.length})</h3><button class="sqc-btn sqc-btn-soft sqc-btn-sm" id="sqc-qa-copy-all" ${questionResults.length?'':'disabled'}>Copy all answers</button></div>
       ${questionResults.length ? questionResults.map((entry,index)=>{
         const answer=reviewedAnswerEdits.has(entry.id)?reviewedAnswerEdits.get(entry.id):entry.answer;
         const linked=entry.batch.targets.has(entry.id);
-        return `<article class="sqc-qa-answer"><h4>${escapeHtml(entry.question)}</h4>
+        return `<article class="sqc-qa-answer" id="sqc-qa-answer-${escapeHtml(entry.id)}"><div class="sqc-qa-answer-heading"><h4>${escapeHtml(entry.question)}</h4><button class="sqc-btn sqc-btn-soft sqc-btn-sm" data-qa-copy="${index}">Copy answer</button></div>
           <p>${entry.status==='NEEDS_INPUT'?escapeHtml(entry.reason || 'ApplyFlow needs more information. You can enter your answer below.'):'Answer received from ApplyFlow.'}</p>
-          <textarea class="sqc-textarea" data-qa-edit="${index}" rows="5" aria-label="Answer to ${escapeHtml(entry.question)}">${escapeHtml(answer || '')}</textarea>
-          <div class="sqc-qa-actions"><button class="sqc-btn sqc-btn-soft" data-qa-copy="${index}">Copy answer</button>
-          ${linked?'<button class="sqc-btn sqc-btn-primary" data-qa-fill="'+index+'">Fill this field</button>':''}</div>
+          <textarea class="sqc-textarea" id="sqc-qa-edit-${escapeHtml(entry.id)}" data-qa-edit="${index}" rows="5" aria-label="Answer to ${escapeHtml(entry.question)}">${escapeHtml(answer || '')}</textarea>
+          <div class="sqc-qa-actions">${linked?'<button class="sqc-btn sqc-btn-primary" data-qa-fill="'+index+'">Fill this field</button>':''}</div>
           ${linked?'':'<p>Manual question: copy this answer into the application.</p>'}</article>`;
       }).join('') : '<p>Answers from ApplyFlow will appear here after you send questions.</p>'}</div>
     </section>`;
+  }
+
+  // Reconcile live validation in place: keep the actual controls, focus and scroll nodes.
+  function patchDrawer(parent, template) {
+    const key = node => node.nodeType === 1 ? (node.id || ['data-tab','data-qa-edit','data-qa-copy','data-filter'].map(a => node.hasAttribute(a) ? a + ':' + node.getAttribute(a) : '').find(Boolean) || '') : '';
+    let cursor = parent.firstChild;
+    for (const next of Array.from(template.childNodes)) {
+      let current = cursor;
+      const nextKey = key(next);
+      if (nextKey && key(current || {}) !== nextKey) {
+        current = Array.from(parent.childNodes).find(n => key(n) === nextKey);
+        if (current) parent.insertBefore(current, cursor);
+      }
+      if (!current || current.nodeType !== next.nodeType || current.nodeName !== next.nodeName || key(current) !== nextKey) {
+        parent.insertBefore(next, cursor);
+        continue;
+      }
+      if (current.nodeType === 1) {
+        const top = current.scrollTop, left = current.scrollLeft;
+        for (const attr of Array.from(current.attributes)) if (!next.hasAttribute(attr.name)) current.removeAttribute(attr.name);
+        for (const attr of next.attributes) if (current.getAttribute(attr.name) !== attr.value) current.setAttribute(attr.name, attr.value);
+        if (current.matches('textarea,input,select')) {
+          if (current.matches('select')) patchDrawer(current, next);
+          if (current !== document.activeElement && current.value !== next.value) current.value = next.value;
+          if (current.matches('input')) current.checked = next.checked;
+        } else patchDrawer(current, next);
+        current.scrollTop = top; current.scrollLeft = left;
+      } else if (current.nodeValue !== next.nodeValue) current.nodeValue = next.nodeValue;
+      cursor = current.nextSibling;
+    }
+    while (cursor) { const following = cursor.nextSibling; cursor.remove(); cursor = following; }
   }
 
   function updateDrawer(extractedData, validationResult) {
@@ -876,7 +909,8 @@ window.SubmissionHUD = (function () {
     if (currentSettings?.integrationMode === 'applyflow' && !window.SQCContextPolicy?.ready(currentSettings, window.location.href)) {
       const signedIn = Boolean(currentSettings.applierId);
       const requiresPassword = currentSettings.integrationState === 'PASSWORD_CHANGE_REQUIRED';
-      drawerEl.innerHTML = `<header class="sqc-head"><div class="sqc-id"><span class="sqc-avatar">${icon('shieldCheck', 22)}</span><div><strong>ApplyFlow</strong><p class="sqc-section-meta">Quality Gatekeeper</p></div></div><button class="sqc-icon-btn" id="sqc-close-verification" aria-label="Close gatekeeper">${icon('x')}</button></header>
+      const handoff = document.createElement('template');
+      handoff.innerHTML = `<header class="sqc-head"><div class="sqc-id"><span class="sqc-avatar">${icon('shieldCheck', 22)}</span><div><strong>ApplyFlow</strong><p class="sqc-section-meta">Quality Gatekeeper</p></div></div><button class="sqc-icon-btn" id="sqc-close-verification" aria-label="Close gatekeeper">${icon('x')}</button></header>
         <div class="sqc-body sqc-workspace-handoff">
           <span class="sqc-handoff-icon">${icon(signedIn ? 'briefcase' : 'lock', 32)}</span>
           <span class="sqc-section-title">${signedIn ? 'WORKSPACE CONNECTED' : 'YOUR PROTECTED WORKSPACE'}</span>
@@ -886,6 +920,9 @@ window.SubmissionHUD = (function () {
           <button class="sqc-btn sqc-btn-primary" id="sqc-open-workspace">${icon('shieldCheck', 16)}${requiresPassword ? 'Finish account setup' : signedIn ? 'Manage workspace' : 'Set up workspace'}${icon('chevron', 14)}</button>
           ${signedIn && !requiresPassword ? '<button class="sqc-btn sqc-btn-ghost" id="sqc-recheck-context">Recheck this application</button>' : '<p class="sqc-handoff-footnote">ApplyFlow can stay in a different Chrome profile.</p>'}
         </div>`;
+      drawerEvents?.abort();
+      lastDrawerFingerprint = '';
+      patchDrawer(drawerEl,handoff.content);
       drawerEl.querySelector('#sqc-close-verification').onclick = () => toggleDrawer(false);
       drawerEl.querySelector('#sqc-open-workspace').onclick = async event => {
         const button = event.currentTarget;
@@ -909,7 +946,7 @@ window.SubmissionHUD = (function () {
     // Preserve scroll + focus across live re-renders
     const prevBody = drawerEl.querySelector('.sqc-body');
     const prevScroll = prevBody ? prevBody.scrollTop : 0;
-    const activeId = document.activeElement && drawerEl.contains(document.activeElement) ? document.activeElement.id : null;
+    const focused = drawerEl.contains(document.activeElement) ? document.activeElement : null;
     const prevJobInput = drawerEl.querySelector('#sqc-af-input-job-id')?.value || '';
 
     const x = extractedData || {};
@@ -1406,7 +1443,8 @@ window.SubmissionHUD = (function () {
     }
     lastDrawerFingerprint = currentFingerprint;
 
-    drawerEl.innerHTML = `
+    const template = document.createElement('template');
+    template.innerHTML = `
       <header class="sqc-head">
         <div class="sqc-id">
           <span class="sqc-avatar">${escapeHtml(getInitials(p.fullName))}</span>
@@ -1472,19 +1510,11 @@ window.SubmissionHUD = (function () {
       </footer>
     `;
 
-    // Restore scroll / focus / filters
+    patchDrawer(drawerEl, template.content);
+    applyFieldFilter();
+    if (focused?.isConnected && document.activeElement !== focused) focused.focus({preventScroll:true});
     const body = drawerEl.querySelector('.sqc-body');
     if (body) body.scrollTop = prevScroll;
-    applyFieldFilter();
-    if (activeId) {
-      const el = drawerEl.querySelector(`#${CSS.escape(activeId)}`);
-      if (el) {
-        el.focus();
-        if (el.setSelectionRange && typeof el.value === 'string') {
-          try { el.setSelectionRange(el.value.length, el.value.length); } catch (_) {}
-        }
-      }
-    }
 
     bindDrawerEvents(extractedData, p);
   }
@@ -1531,7 +1561,7 @@ window.SubmissionHUD = (function () {
   }
   async function handleAnswerWithCodex(batchOverride) {
     if (pendingScreening) return;
-    let operation;
+    let operation, received = false;
     try {
       const batch = batchOverride?.questions ? batchOverride : null;
       if (!batch) {activeTab='questions';refreshScreeningUI();return;}
@@ -1547,7 +1577,7 @@ window.SubmissionHUD = (function () {
       const normalized=SQCScreeningPolicy.answers(result,{...batch.context,requestId:batch.requestId},batch.questions);
       const saved=new Map(questionResults.map(entry=>[entry.id,entry]));
       for(const answer of normalized) saved.set(answer.id,{...answer,question:batch.questions.find(q=>q.id===answer.id).question,batch,result});
-      questionResults=Array.from(saved.values()).slice(-100);
+      questionResults=Array.from(saved.values()).slice(-100);received=true;
       screeningMessage='Received '+normalized.length+' answer'+(normalized.length===1?'':'s')+' from ApplyFlow. Review and copy the answers below.';
       showToast(screeningMessage);
       window.SubmissionCheckerCore?.runLiveCheck();
@@ -1556,6 +1586,11 @@ window.SubmissionHUD = (function () {
     } finally {
       if(pendingScreening===operation)pendingScreening=null;
       refreshScreeningUI();
+      if(received && activeTab==='questions') requestAnimationFrame(()=>{
+        const body=drawerEl?.querySelector('.sqc-body');
+        const first=drawerEl?.querySelector('#'+CSS.escape('sqc-qa-answer-'+operation.batch.questions[0].id));
+        if(body && first) body.scrollTop += first.getBoundingClientRect().top - body.getBoundingClientRect().top - 58;
+      });
     }
   }
 
@@ -1574,10 +1609,13 @@ window.SubmissionHUD = (function () {
 
   function bindDrawerEvents(extractedData, p) {
     const $ = (sel) => drawerEl.querySelector(sel);
+    drawerEvents?.abort();
+    drawerEvents = new AbortController();
+    const on = (element, type, handler) => element?.addEventListener(type, handler, {signal:drawerEvents.signal});
 
     // Tabs
     drawerEl.querySelectorAll('.sqc-seg-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
+      on(btn,'click', () => {
         activeTab = btn.dataset.tab;
         lastDrawerFingerprint = ''; // Invalidate so next render knows activeTab
         drawerEl.querySelectorAll('.sqc-seg-btn').forEach(b => b.classList.toggle('active', b === btn));
@@ -1596,32 +1634,32 @@ window.SubmissionHUD = (function () {
 
     // Field filters
     drawerEl.querySelectorAll('.sqc-chip[data-filter]').forEach(chip => {
-      chip.addEventListener('click', () => {
+      on(chip,'click', () => {
         fieldFilter = chip.dataset.filter;
         drawerEl.querySelectorAll('.sqc-chip[data-filter]').forEach(c => c.classList.toggle('active', c === chip));
         applyFieldFilter();
       });
     });
-    $('#sqc-field-search')?.addEventListener('input', (e) => {
+    on($('#sqc-field-search'),'input', (e) => {
       fieldQuery = e.target.value || '';
       applyFieldFilter();
     });
 
     // Header
-    $('#sqc-drawer-close')?.addEventListener('click', () => toggleDrawer(false));
-    $('#sqc-open-options')?.addEventListener('click', () => chrome.runtime.sendMessage({ type: "OPEN_OPTIONS" }));
-    $('#sqc-btn-hud-unlock')?.addEventListener('click', () => openAdminDialog());
-    $('#sqc-btn-open-questions')?.addEventListener('click', () => {activeTab='questions';refreshScreeningUI();});
-    $('#sqc-qa-resume')?.addEventListener('click',openResumeModal);
-    $('#sqc-qa-stop')?.addEventListener('click',()=>{cancelPendingScreening();refreshScreeningUI();});
-    $('#sqc-qa-check-connection')?.addEventListener('click',async event=>{
+    on($('#sqc-drawer-close'),'click', () => toggleDrawer(false));
+    on($('#sqc-open-options'),'click', () => chrome.runtime.sendMessage({ type: "OPEN_OPTIONS" }));
+    on($('#sqc-btn-hud-unlock'),'click', () => openAdminDialog());
+    on($('#sqc-btn-open-questions'),'click', () => {activeTab='questions';refreshScreeningUI();});
+    on($('#sqc-qa-resume'),'click',openResumeModal);
+    on($('#sqc-qa-stop'),'click',()=>{cancelPendingScreening();refreshScreeningUI();});
+    on($('#sqc-qa-check-connection'),'click',async event=>{
       event.currentTarget.disabled=true;screeningError=false;screeningMessage='Checking the configured ApplyFlow AI status...';refreshScreeningUI();
       try {const result=await chrome.runtime.sendMessage({type:'SQC_AI_STATUS'});if(!result?.success)throw new Error(result?.error || 'AI status check failed.');screeningMessage=result.message;screeningError=result.ready===false;}
       catch(error){screeningError=true;screeningMessage=error.message;}
       finally{refreshScreeningUI();}
     });
-    $('#sqc-qa-pasted')?.addEventListener('input',event=>{pastedQuestions=event.target.value;});
-    $('#sqc-qa-send-pasted')?.addEventListener('click',()=>{
+    on($('#sqc-qa-pasted'),'input',event=>{pastedQuestions=event.target.value;});
+    on($('#sqc-qa-send-pasted'),'click',()=>{
       pastedQuestions=$('#sqc-qa-pasted').value;
       const questions=pastedQuestions.split(/\r?\n/).map(q=>q.trim()).filter(Boolean);
       if (!questions.length || questions.length>100 || questions.some(q=>q.length>4000)) {screeningMessage='Enter 1–100 questions, one per line, each up to 4,000 characters.';refreshScreeningUI();return;}
@@ -1631,10 +1669,20 @@ window.SubmissionHUD = (function () {
         handleAnswerWithCodex(batch);
       } catch(error) {screeningMessage=error.message;refreshScreeningUI();}
     });
-    drawerEl.querySelectorAll('[data-qa-edit]').forEach(input=>input.addEventListener('input',()=>{
+    drawerEl.querySelectorAll('[data-qa-edit]').forEach(input=>on(input,'input',()=>{
       const entry=questionResults[Number(input.dataset.qaEdit)];if(entry)reviewedAnswerEdits.set(entry.id,input.value);
     }));
-    drawerEl.querySelectorAll('[data-qa-copy], [data-qa-fill]').forEach(button=>button.addEventListener('click',async()=>{
+    on($('#sqc-qa-copy-all'),'click',async()=>{
+      try {
+        const ready=window.SQCContextPolicy.ready(currentSettings,window.location.href);
+        if(!ready || questionResults.some(entry=>!SQCScreeningPolicy.same(entry.batch.context,currentSettings.verifiedContext))) throw new Error('The application context changed. Request fresh answers.');
+        const answers=questionResults.map(entry=>({question:entry.question,answer:reviewedAnswerEdits.has(entry.id)?reviewedAnswerEdits.get(entry.id):entry.answer})).filter(entry=>entry.answer?.trim());
+        if(!answers.length) throw new Error('Enter an answer first.');
+        await navigator.clipboard.writeText(answers.map(entry=>entry.question+'\n'+entry.answer).join('\n\n'));
+        showToast('All answers copied.');
+      } catch(error){showToast(error.message);}
+    });
+    drawerEl.querySelectorAll('[data-qa-copy], [data-qa-fill]').forEach(button=>on(button,'click',async()=>{
       const index=Number(button.dataset.qaCopy ?? button.dataset.qaFill),entry=questionResults[index];
       if(!entry)return;
       const answer=reviewedAnswerEdits.has(entry.id)?reviewedAnswerEdits.get(entry.id):entry.answer;
@@ -1649,10 +1697,10 @@ window.SubmissionHUD = (function () {
     }));
 
     // Tools
-    $('#sqc-btn-open-resume')?.addEventListener('click', () => openResumeModal());
-    $('#sqc-btn-open-tailor-banner')?.addEventListener('click', () => openResumeModal());
-    $('#sqc-btn-edit-tailored')?.addEventListener('click', () => openResumeModal());
-    $('#sqc-btn-reattach-portal')?.addEventListener('click', () => {
+    on($('#sqc-btn-open-resume'),'click', () => openResumeModal());
+    on($('#sqc-btn-open-tailor-banner'),'click', () => openResumeModal());
+    on($('#sqc-btn-edit-tailored'),'click', () => openResumeModal());
+    on($('#sqc-btn-reattach-portal'),'click', () => {
       const tailoredText = currentSettings?.integrationMode === 'applyflow' ? p.resumeText || '' : (sessionStorage.getItem('sqc_tailored_resume') || p.resumeText || '');
       const res = attachResumeToPortal(tailoredText, p, null, { userInitiated: true });
       if (res && res.fileInputsCount > 0) {
@@ -1667,38 +1715,38 @@ window.SubmissionHUD = (function () {
       }
       if (window.SubmissionCheckerCore) window.SubmissionCheckerCore.runLiveCheck();
     });
-    $('#sqc-btn-download-tailored')?.addEventListener('click', () => {
+    on($('#sqc-btn-download-tailored'),'click', () => {
       const tailoredText = currentSettings?.integrationMode === 'applyflow' ? p.resumeText || '' : (sessionStorage.getItem('sqc_tailored_resume') || p.resumeText || '');
       downloadResumeFile(tailoredText, p);
     });
-    $('#sqc-btn-copy-tailored')?.addEventListener('click', () => {
+    on($('#sqc-btn-copy-tailored'),'click', () => {
       const tailoredText = currentSettings?.integrationMode === 'applyflow' ? p.resumeText || '' : (sessionStorage.getItem('sqc_tailored_resume') || p.resumeText || '');
       if (tailoredText) {
         navigator.clipboard.writeText(tailoredText).then(() => showToast("📋 Tailored resume copied to clipboard!"));
       }
     });
-    $('#sqc-btn-answer-codex')?.addEventListener('click', handleAnswerWithCodex);
-    $('#sqc-btn-cancel-codex')?.addEventListener('click', () => {cancelPendingScreening();refreshScreeningUI();});
-    $('#sqc-btn-copy-ai-prompt')?.addEventListener('click', handleCopyAiPrompt);
-    $('#sqc-btn-copy-ai-footer')?.addEventListener('click', handleCopyAiPrompt);
-    $('#sqc-btn-paste-ai-answers')?.addEventListener('click', () => openAiPasteModal());
-    $('#sqc-btn-paste-ai-footer')?.addEventListener('click', () => openAiPasteModal());
+    on($('#sqc-btn-answer-codex'),'click', handleAnswerWithCodex);
+    on($('#sqc-btn-cancel-codex'),'click', () => {cancelPendingScreening();refreshScreeningUI();});
+    on($('#sqc-btn-copy-ai-prompt'),'click', handleCopyAiPrompt);
+    on($('#sqc-btn-copy-ai-footer'),'click', handleCopyAiPrompt);
+    on($('#sqc-btn-paste-ai-answers'),'click', () => openAiPasteModal());
+    on($('#sqc-btn-paste-ai-footer'),'click', () => openAiPasteModal());
 
     // Screenshot capture, preview & delete
     drawerEl.querySelectorAll('.sqc-btn-snap-trigger').forEach(btn => {
-      btn.addEventListener('click', async () => {
+      on(btn,'click', async () => {
         if (window.SubmissionCheckerCore?.captureScreenshot) {
           await window.SubmissionCheckerCore.captureScreenshot('MANUAL');
         }
       });
     });
     drawerEl.querySelectorAll('[data-shot-preview]').forEach(el => {
-      el.addEventListener('click', () => {
+      on(el,'click', () => {
         openScreenshotPreviewDialog(el.dataset.shotPreview);
       });
     });
     drawerEl.querySelectorAll('[data-shot-delete]').forEach(btn => {
-      btn.addEventListener('click', (e) => {
+      on(btn,'click', (e) => {
         e.stopPropagation();
         if (window.SubmissionCheckerCore?.deleteScreenshot) {
           window.SubmissionCheckerCore.deleteScreenshot(btn.dataset.shotDelete);
@@ -1707,7 +1755,7 @@ window.SubmissionHUD = (function () {
     });
 
     // Confirm & log submission
-    $('#sqc-btn-confirm-apply')?.addEventListener('click', async (e) => {
+    on($('#sqc-btn-confirm-apply'),'click', async (e) => {
       if (!window.SubmissionCheckerCore) return;
       setQuickApplyStatus('submitting', '⏳ Submitting application to Apply-Flow...');
       const restore = setBtnBusy(e.currentTarget, 'Submitting…');
@@ -1733,10 +1781,10 @@ window.SubmissionHUD = (function () {
     });
 
     // Portal failure dialog
-    $('#sqc-btn-portal-failed')?.addEventListener('click', () => openPortalFailedDialog());
+    on($('#sqc-btn-portal-failed'),'click', () => openPortalFailedDialog());
 
     // Mark as already applied
-    $('#sqc-btn-mark-already-applied')?.addEventListener('click', async (e) => {
+    on($('#sqc-btn-mark-already-applied'),'click', async (e) => {
       if (!window.SubmissionCheckerCore) return;
       const restore = setBtnBusy(e.currentTarget, 'Updating…');
       const res = await window.SubmissionCheckerCore.markAsAlreadyApplied();
@@ -1747,7 +1795,7 @@ window.SubmissionHUD = (function () {
     });
 
     // Reject job due to unmet strict requirement (e.g. GitHub Profile Required)
-    $('#sqc-btn-reject-unmet-job')?.addEventListener('click', async (e) => {
+    on($('#sqc-btn-reject-unmet-job'),'click', async (e) => {
       if (!window.SubmissionCheckerCore) return;
       const reason = e.currentTarget.dataset.reason || 'UNMET_REQUIREMENT_GITHUB';
       const restore = setBtnBusy(e.currentTarget, 'Rejecting in Apply-Flow…');
@@ -1759,7 +1807,7 @@ window.SubmissionHUD = (function () {
     });
 
     // Candidate details remain available while the job-specific resume is being generated.
-    $('#sqc-btn-restore')?.addEventListener('click', () => {
+    on($('#sqc-btn-restore'),'click', () => {
       if (!window.SubmissionCheckerCore) return;
       const res = window.SubmissionCheckerCore.restoreForm();
       const attachment = attachResumeToPortal(currentProfile?.resumeText || '', currentProfile);
@@ -1768,7 +1816,7 @@ window.SubmissionHUD = (function () {
     });
 
     // Copy payload
-    $('#sqc-btn-copy')?.addEventListener('click', (e) => {
+    on($('#sqc-btn-copy'),'click', (e) => {
       const btn = e.currentTarget;
       const payload = cleanPayloadForView(extractedData, p);
       navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
@@ -1788,34 +1836,34 @@ window.SubmissionHUD = (function () {
       }
       if (window.SubmissionCheckerCore) window.SubmissionCheckerCore.attachApplyFlowJobId(val);
     };
-    $('#sqc-btn-attach-job-id')?.addEventListener('click', attach);
-    $('#sqc-af-input-job-id')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') attach(); });
+    on($('#sqc-btn-attach-job-id'),'click', attach);
+    on($('#sqc-af-input-job-id'),'keydown', (e) => { if (e.key === 'Enter') attach(); });
 
     // Blockers
-    $('#sqc-flag-otp')?.addEventListener('click', () => {
+    on($('#sqc-flag-otp'),'click', () => {
       if (window.SubmissionCheckerCore) {
         window.SubmissionCheckerCore.reportBlockedStatus("EMAIL_OTP_REQUIRED", "Blocked: Candidate email verification / OTP code required to login.");
       }
     });
-    $('#sqc-flag-login')?.addEventListener('click', () => {
+    on($('#sqc-flag-login'),'click', () => {
       if (window.SubmissionCheckerCore) {
         window.SubmissionCheckerCore.reportBlockedStatus("LOGIN_ERROR", "Blocked: ATS portal account error or login disabled.");
       }
     });
 
     // Context mismatch action buttons
-    $('#sqc-btn-open-settings-mismatch')?.addEventListener('click', () => {
+    on($('#sqc-btn-open-settings-mismatch'),'click', () => {
       chrome.runtime.sendMessage({ type: "OPEN_OPTIONS" });
     });
 
-    $('#sqc-btn-switch-to-target-candidate')?.addEventListener('click', (e) => {
+    on($('#sqc-btn-switch-to-target-candidate'),'click', (e) => {
       const btn = e.currentTarget;
       const targetName = btn.dataset.targetName || '';
       const targetId = btn.dataset.targetId || '';
       handleSwitchToTargetCandidate(targetName, targetId, btn);
     });
 
-    $('#sqc-btn-switch-to-account-candidate')?.addEventListener('click', (e) => {
+    on($('#sqc-btn-switch-to-account-candidate'),'click', (e) => {
       const btn = e.currentTarget;
       const targetName = btn.dataset.targetName || '';
       const targetId = btn.dataset.targetId || '';
@@ -1823,14 +1871,14 @@ window.SubmissionHUD = (function () {
     });
 
     // Tech stack conflict buttons
-    $('#sqc-btn-switch-stack-candidate')?.addEventListener('click', (e) => {
+    on($('#sqc-btn-switch-stack-candidate'),'click', (e) => {
       const btn = e.currentTarget;
       const targetName = btn.dataset.targetName || '';
       const targetId = btn.dataset.targetId || '';
       handleSwitchToTargetCandidate(targetName, targetId, btn);
     });
 
-    $('#sqc-btn-reject-stack-job')?.addEventListener('click', async (e) => {
+    on($('#sqc-btn-reject-stack-job'),'click', async (e) => {
       if (!window.SubmissionCheckerCore) return;
       const reason = e.currentTarget.dataset.reason || 'TECH_STACK_MISMATCH';
       const restore = setBtnBusy(e.currentTarget, 'Rejecting in Apply-Flow…');
@@ -1841,7 +1889,7 @@ window.SubmissionHUD = (function () {
       }
     });
 
-    $('#sqc-btn-open-settings-stack')?.addEventListener('click', () => {
+    on($('#sqc-btn-open-settings-stack'),'click', () => {
       chrome.runtime.sendMessage({ type: "OPEN_OPTIONS" });
     });
   }

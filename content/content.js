@@ -45,6 +45,7 @@ window.SubmissionCheckerCore = (function () {
 
   let isCoreActive = false;
   let isRouteWatcherBound = false;
+  let handleRouteTransition = null, observedRoute = window.location.href, configSequence = 0;
   let initializing = false, discoveryObserver = null, discoveryTimer = null;
   async function eligiblePortal() {
     if (window.JobFormExtractor?.isJobApplicationPortal()) return true;
@@ -66,6 +67,7 @@ window.SubmissionCheckerCore = (function () {
     discoveryObserver.observe(document.documentElement, {childList: true, subtree: true});
   }
   chrome.runtime.onMessage.addListener(message => {
+    if(message.type==='SQC_ROUTE_CHANGED'){handleRouteTransition?.();return;}
     if (!isCoreActive && ['STATE_UPDATED', 'SQC_CONTEXT_AVAILABLE'].includes(message.type)) init();
     else if (isCoreActive && message.type === 'SQC_CONTEXT_AVAILABLE') fetchConfig().then(() => { tryAutoRestore(); runExtractionAndValidation(); });
   });
@@ -74,8 +76,12 @@ window.SubmissionCheckerCore = (function () {
     if (isRouteWatcherBound) return;
     isRouteWatcherBound = true;
 
-    const handleRouteTransition = async () => {
+    handleRouteTransition = async () => {
+      if(observedRoute===window.location.href) return;
+      observedRoute=window.location.href;
+      const route=observedRoute;
       const isEligible = await eligiblePortal();
+      if(window.location.href!==route) return;
       if (!isEligible) {
         if (window.JobFormExtractor) window.JobFormExtractor.cleanupNonJobSession();
         if (window.SubmissionHUD) window.SubmissionHUD.destroy();
@@ -685,8 +691,10 @@ window.SubmissionCheckerCore = (function () {
   }
 
   async function fetchConfig(force = false) {
+    const sequence=++configSequence, requestedUrl=window.location.href;
     return new Promise((resolve) => {
       chrome.runtime.sendMessage({ type: "GET_CONFIG", force }, (res) => {
+        if(sequence!==configSequence || requestedUrl!==window.location.href){resolve(null);return;}
         if (res && res.success) {
           const nextSession = res.settings?.verifiedContext?.applicationSessionId;
           const c = res.settings?.verifiedContext;

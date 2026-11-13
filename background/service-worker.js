@@ -85,7 +85,10 @@ function bindEvidenceContext(config, tabId) {
   const c = config.settings?.verifiedContext;
   if (!tabId || !c) return;
   const key = [c.applicationSessionId, c.applierId, c.profileAssignmentId, c.profileAssignmentVersion, c.profileId, c.profileVersion, c.jobVersion, c.resumeVersion].join(':');
-  if (tabApplyFlowSessions.get(tabId)?.contextKey !== key) tabApplyFlowSessions.set(tabId, { contextKey: key, screenshots: [] });
+  if (tabApplyFlowSessions.get(tabId)?.contextKey !== key) {
+    const existing=[...tabApplyFlowSessions.values()].find(session=>session.contextKey===key);
+    tabApplyFlowSessions.set(tabId, {contextKey:key,screenshots:existing ? structuredClone(existing.screenshots || []) : []});
+  }
   config.sessionScreenshots = tabApplyFlowSessions.get(tabId).screenshots || [];
 }
 
@@ -104,6 +107,12 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
   await sqcEvidenceReady;
   tabApplyFlowSessions.delete(tabId);
   await chrome.storage.session.set({ sqcEvidence: compactEvidence() });
+});
+
+// Browser navigation events also cover history changes made in the site's main world.
+chrome.tabs.onUpdated?.addListener((tabId, changeInfo) => {
+  if (!changeInfo.url) return;
+  chrome.tabs.sendMessage(tabId, {type:'SQC_ROUTE_CHANGED'}).catch(()=>{});
 });
 
 // Message Bus Handler

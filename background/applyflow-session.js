@@ -156,15 +156,29 @@
       const { sqcContexts = {} } = await chrome.storage.session.get('sqcContexts');
       let previous = sqcContexts[tab.id];
       const requested = hints(url);
+      const belongsToAuth = c => c?.authSessionId === auth.sessionId &&
+        c.profile?.id === auth.assignment?.profileId && c.profile?.version === auth.assignment?.profileVersion &&
+        c.assignment?.profileAssignmentId === auth.assignment?.id && c.assignment?.profileAssignmentVersion === auth.assignment?.version;
+      // A new application tab may reuse only one unambiguous, already approved job route.
+      if (!previous) {
+        const matches = Object.values(sqcContexts).filter(c => belongsToAuth(c) && policy.matchesUrl(url,c.allowedRoutes) &&
+          (!requested.applicationSessionId || requested.applicationSessionId === c.applicationSessionId) &&
+          (!requested.jobId || requested.jobId === c.job.id) && (!requested.profileId || requested.profileId === c.profile.id));
+        if (new Set(matches.map(c=>c.applicationSessionId)).size === 1) previous=matches[0];
+      }
       // Only explicit launch identifiers or an exact backend-authorized route can carry an assignment.
       const compatible = previous?.authSessionId === auth.sessionId && policy.matchesUrl(url, previous.allowedRoutes) &&
         (!requested.applicationSessionId || requested.applicationSessionId === previous.applicationSessionId) &&
         (!requested.jobId || requested.jobId === previous.job.id) && (!requested.profileId || requested.profileId === previous.profile.id);
-      if (compatible && !force && previous.checkedAt + 30000 > now() && previous.expiresAt > now()) return previous;
+      if (compatible && !force && previous.checkedAt + 30000 > now() && previous.expiresAt > now()) {
+        if (!sqcContexts[tab.id]) await chrome.storage.session.set({sqcContexts:{...sqcContexts,[tab.id]:previous}});
+        return previous;
+      }
       delete sqcContexts[tab.id];
       await chrome.storage.session.set({ sqcContexts });
       const body = { contractVersion: 2, url,
-        ...(compatible ? { applicationSessionId: previous.applicationSessionId } : {}), ...requested };
+        ...(compatible ? { applicationSessionId: previous.applicationSessionId } :
+          belongsToAuth(previous) && !Object.keys(requested).length ? {previousApplicationSessionId:previous.applicationSessionId} : {}), ...requested };
       const stamp = revision;
       const data = await request(auth.apiOrigin, '/api/sqc/application-context', 'POST', body, auth.csrfToken);
       const c = data.context;
@@ -221,9 +235,20 @@
         if (tab && auth.assignment && !auth.passwordChangeRequired) {
           // Every frame is verified against its own URL; the context routes must authorize embedded forms too.
           const url = privileged(sender) ? tab.url : (sender.url || tab.url);
+          const {sqcContexts:priorContexts={}}=await chrome.storage.session.get('sqcContexts');
           context = await resolveContext(auth, tab, url, message.force === true);
           let uploaded;
           try { uploaded = await localResumes?.get(tab.id, localResume.binding(auth, context)); } catch (_) { /* The verified base profile remains usable if local document storage is unavailable. */ }
+          // Carry the same reviewed document into an approved continuation tab, never another job.
+          if (!uploaded && localResumes) {
+            const binding=localResume.binding(auth,context);
+            for (const [sourceTab,source] of Object.entries(priorContexts)) {
+              if(Number(sourceTab)===tab.id || localResume.binding(auth,source)!==binding) continue;
+              try { uploaded=await localResumes.get(Number(sourceTab),binding);
+                if(uploaded){await localResumes.put(tab.id,binding,uploaded);break;}
+              } catch (_) { /* Keep the backend profile usable if local storage is unavailable. */ }
+            }
+          }
           const baseResume = context.resume;
           // An uploaded document is independent of ApplyFlow's default resume. A linked server copy is not.
           if (uploaded?.source === 'applyflow' && (uploaded.id !== baseResume?.id || uploaded.version !== baseResume?.version ||
@@ -412,9 +437,19 @@
         const url = sender.url || sender.tab?.url;
         // This only decides whether to show the HUD. GET_CONFIG must renew expired leases
         // before any autofill, file attachment, or application action is allowed.
-        return {success: true, eligible: Boolean(sqcAuth &&
-          Object.values(sqcContexts).some(context => context.authSessionId === sqcAuth.sessionId &&
-            policy.matchesUrl(url, context.allowedRoutes)))};
+        const approved=Boolean(sqcAuth && Object.values(sqcContexts).some(context =>
+          context.authSessionId === sqcAuth.sessionId && policy.matchesUrl(url,context.allowedRoutes)));
+        if(approved) return {success:true,eligible:true};
+        // A stripped URL or empty intermediate page still gets a chance to be verified.
+        // The prior tab session is discovery evidence only; the backend must authorize this URL.
+        const prior=sqcContexts[sender.tab?.id];
+        let samePortal=false;
+        try {samePortal=prior?.allowedRoutes?.some(route=>new URL(route.url).origin===new URL(url).origin)===true;} catch (_) {}
+        if(sqcAuth && prior?.authSessionId===sqcAuth.sessionId && samePortal) {
+          const resolved=await config({},sender,false);
+          return {success:true,eligible:Boolean(resolved.settings.verifiedContext)};
+        }
+        return {success:true,eligible:false};
       }
       if (forbidden.has(action)) return { success: false, isLocked: true, error: 'Candidate and applier assignments are managed in ApplyFlow.' };
       if (action === 'SAVE_SETTINGS' || action === 'SET_INTERCEPTION_MODE') {

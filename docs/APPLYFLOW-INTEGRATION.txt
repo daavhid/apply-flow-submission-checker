@@ -182,7 +182,8 @@ Request:
   "applicationSessionId":"app_123",
   "url":"https://boards.greenhouse.io/example/jobs/12345#application_session_id=app_123",
   "jobId":"optional_explicit_applyflow_job_id",
-  "profileId":"optional_explicit_applyflow_profile_id"
+  "profileId":"optional_explicit_applyflow_profile_id",
+  "previousApplicationSessionId":"optional_continuation_hint"
 }
 
 Optional identifiers are omitted when absent. A previously verified tab can
@@ -359,6 +360,16 @@ ApplyFlow resume record or mark a local upload as server verified. A changed
 resume cancels stale answer generation and invalidates prior evidence versions.
 
 HUD continuity
+
+SQC listens to browser tab URL updates as well as in-page history events.
+Approved steps retain the same applicationSessionId when launch parameters vanish.
+An approved continuation in another tab may reuse only one unambiguous matching
+session, including its reviewed local resume and audit screenshots.
+For a new route outside allowedRoutes, SQC sends previousApplicationSessionId
+as a discovery hint, not authorization. ApplyFlow must verify the actual ATS
+requisition/application association and return the correct context with that new
+step explicitly authorized. Reject unrelated or ambiguous routes. This hint must
+not cause arbitrary request URLs to be added to allowedRoutes.
 
 Include every authorized application step and redirected portal in allowedRoutes.
 SQC can rediscover a previously approved job route even if launch

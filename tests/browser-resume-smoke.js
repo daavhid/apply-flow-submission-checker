@@ -16,7 +16,7 @@ const server=http.createServer((req,res)=>{
 server.listen(0,'127.0.0.1',async()=>{
   const url=`http://127.0.0.1:${server.address().port}/tests/fixtures/resume-manager.html`;
   const child=spawn(browser,['--headless=new','--disable-gpu','--no-first-run','--no-default-browser-check',
-    '--user-data-dir='+profile,'--remote-debugging-port=0','--window-size=1000,1100',url],{windowsHide:true});
+    '--user-data-dir='+profile,'--remote-debugging-port=0','--window-size=540,820',url],{windowsHide:true});
   let errors='',socket,sequence=0;const pending=new Map();
   child.stderr.on('data',b=>{errors+=b;});child.stdout.resume();
   const call=(method,params={})=>new Promise((resolve,reject)=>{const id=++sequence;pending.set(id,{resolve,reject});socket.send(JSON.stringify({id,method,params}));});

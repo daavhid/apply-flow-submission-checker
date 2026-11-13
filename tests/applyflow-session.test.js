@@ -198,6 +198,74 @@ test('a later approved portal step can discover the existing job without URL lau
   await f.service.handle({type:'SQC_LOGOUT'},f.ui);
   assert.equal((await f.service.handle({type:'SQC_PORTAL_ELIGIBILITY'},f.sender(1))).eligible,false);
 });
+test('approved multi-page navigation retains the job and local resume after worker restart', async () => {
+  const f=fixture();await f.service.handle({type:'GET_CONFIG'},f.sender(1));
+  const original=f.chrome.storage.session.data.sqcContexts[1];
+  const auth=f.chrome.storage.session.data.sqcAuth;
+  const resume={id:'sqc-upload:test',version:'test',source:'sqc_upload',kind:'tailored',profileId:original.profile.id,text:'Reviewed local resume',file:{}};
+  await f.localResumes.put(1,localResume.binding(auth,original),resume);
+  f.advance(61000);f.tabs[1].url='https://jobs.example/roles/1/application/experience';
+  const result=await f.restart().handle({type:'GET_CONFIG'},f.sender(1));
+  assert.equal(result.settings.verifiedContext.applicationSessionId,'application-1');
+  assert.equal(result.activeProfile.resumeText,resume.text);
+  const call=f.calls.filter(c=>c.url.endsWith('/application-context')).at(-1);
+  assert.equal(JSON.parse(call.options.body).applicationSessionId,'application-1');
+});
+
+test('an approved continuation in a new tab retains the unambiguous session and reviewed resume', async () => {
+  const f=fixture();await f.service.handle({type:'GET_CONFIG'},f.sender(1));
+  const context=f.chrome.storage.session.data.sqcContexts[1],auth=f.chrome.storage.session.data.sqcAuth;
+  await f.localResumes.put(1,localResume.binding(auth,context),{id:'sqc-upload:test',version:'test',source:'sqc_upload',kind:'tailored',profileId:context.profile.id,text:'Same job resume',file:{}});
+  f.tabs[3]={id:3,url:'https://jobs.example/roles/1/application/experience'};
+  const cfg=await f.restart().handle({type:'GET_CONFIG'},f.sender(3));
+  assert.equal(cfg.settings.verifiedContext.applicationSessionId,'application-1');
+  assert.equal(cfg.activeProfile.resumeText,'Same job resume');
+  assert.equal(f.chrome.storage.session.data.sqcContexts[3].job.id,'job-1');
+  f.tabs[3].url='https://jobs.example/roles/2';
+  const other=await f.service.handle({type:'GET_CONFIG'},f.sender(3));
+  assert.equal(other.settings.verifiedContext.jobId,'job-2');
+  assert.notEqual(other.activeProfile.resumeText,'Same job resume');
+});
+
+test('a new unapproved step sends continuity only as a hint and requires backend route authorization', async () => {
+  const f=fixture();await f.service.handle({type:'GET_CONFIG'},f.sender(1));
+  f.tabs[1].url='https://jobs.example/applications/experience';
+  const denied=await f.service.handle({type:'GET_CONFIG'},f.sender(1));
+  assert.equal(denied.settings.verifiedContext,null);
+  const call=f.calls.filter(c=>c.url.endsWith('/application-context')).at(-1);
+  const body=JSON.parse(call.options.body);
+  assert.equal(body.previousApplicationSessionId,'application-1');
+  assert.equal(body.applicationSessionId,undefined);
+  // Reinstall the initial route, then simulate trusted backend approval of the new step.
+  f.tabs[1].url='https://jobs.example/roles/1#application_session_id=application-1';
+  await f.service.handle({type:'GET_CONFIG'},f.sender(1));
+  f.mutate(c=>({...c,allowedRoutes:[...c.allowedRoutes,{url:'https://jobs.example/applications/experience'}]}));
+  f.tabs[1].url='https://jobs.example/applications/experience';
+  const approved=await f.service.handle({type:'GET_CONFIG'},f.sender(1));
+  assert.equal(approved.settings.verifiedContext.applicationSessionId,'application-1');
+});
+
+test('an empty intermediate page can request backend approval through portal discovery', async () => {
+  const f=fixture();await f.service.handle({type:'GET_CONFIG'},f.sender(1));
+  f.mutate(c=>({...c,allowedRoutes:[...c.allowedRoutes,{url:'https://jobs.example/applications/review'}]}));
+  f.tabs[1].url='https://jobs.example/applications/review';
+  const allowed=await f.service.handle({type:'SQC_PORTAL_ELIGIBILITY'},f.sender(1));
+  assert.equal(allowed.eligible,true);
+  assert.equal(JSON.parse(f.calls.filter(c=>c.url.endsWith('/application-context')).at(-1).options.body).previousApplicationSessionId,'application-1');
+});
+
+test('ambiguous contexts in other tabs cannot select a continuation session', async () => {
+  const f=fixture();await f.service.handle({type:'GET_CONFIG'},f.sender(1));
+  await f.service.handle({type:'GET_CONFIG'},f.sender(2));
+  const contexts=f.chrome.storage.session.data.sqcContexts;
+  contexts[2].allowedRoutes=contexts[1].allowedRoutes;
+  f.tabs[3]={id:3,url:'https://jobs.example/roles/1/experience'};
+  await f.service.handle({type:'GET_CONFIG'},f.sender(3));
+  const body=JSON.parse(f.calls.filter(c=>c.url.endsWith('/application-context')).at(-1).options.body);
+  assert.equal(body.applicationSessionId,undefined);
+  assert.equal(body.previousApplicationSessionId,undefined);
+});
+
 test('two job tabs retain isolated job contexts under the applier locked profile across worker restart', async () => {
   const f = fixture();
   await f.service.handle({ type: 'GET_CONFIG' }, f.sender(1));
