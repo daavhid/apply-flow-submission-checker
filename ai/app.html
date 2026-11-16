@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><title>ApplyFlow Q&A</title><link rel="stylesheet" href="app.css"></head>
+<body>
+  <main>
+    <header><div class="brand">AF</div><div><p class="eyebrow">APPLYFLOW ASSISTANT</p><h1>Application Q&amp;A</h1></div><span class="sidebar-tag">Sidebar</span></header>
+    <section class="insights" aria-label="Q&A overview">
+      <div class="insights-heading"><div><p class="eyebrow">YOUR WORKSPACE</p><h2>From questions to answers.</h2></div><span id="resume-readiness" class="readiness">Add resume</span></div>
+      <p id="insight-message">Select a resume to ground your answers.</p>
+      <div class="insight-grid"><button type="button" data-jump="questions-form"><strong id="insight-queued">0</strong><span>In batch</span></button><button type="button" data-jump="answers-title"><strong id="insight-answered">0</strong><span>Answered</span></button><button type="button" id="jump-review"><strong id="insight-review">0</strong><span>To review</span></button><button type="button" id="jump-applied"><strong id="insight-applied">0</strong><span>Applied</span></button></div>
+    </section>
+    <div class="environment"><label for="environment">Server</label><select id="environment"><option value="deployed">ApplyFlow (deployed)</option><option value="local">Localhost :5000</option></select></div>
+    <details id="resume-section" class="panel" open><summary>Resume context <span id="resume-name"></span></summary>
+      <p class="help">Upload a resume or paste its text. The selected resume is sent with your questions to ApplyFlow to ground the answers.</p>
+      <label for="resume-file">Upload PDF, DOCX, or TXT (up to 10 MB)</label><input id="resume-file" type="file" accept=".pdf,.docx,.txt">
+      <label for="candidate-name">Candidate name for attachment filename</label><input id="candidate-name" type="text" maxlength="120" placeholder="Detected from the resume heading">
+      <label class="toggle"><input id="attach-resume" type="checkbox" checked>Attach this resume to matching application upload fields</label>
+      <button id="attach-resume-now" type="button">Attach resume to this application</button>
+      <button id="download-named-resume" type="button">Download named resume</button>
+      <p id="attachment-status" role="status" aria-live="polite">Upload the original file. Attachments use the candidate name and keep the original format.</p>
+      <label for="resume-text">Review extracted text or paste your resume</label><textarea id="resume-text" rows="6" maxlength="200000"></textarea>
+      <div class="actions"><button id="save-resume" type="button">Use this resume</button><button id="clear-resume" type="button">Remove resume</button></div>
+      <p id="resume-status" role="status" aria-live="polite"></p>
+    </details>
+    <details id="defaults-section" class="panel"><summary>Answer defaults <span id="defaults-state">Extension defaults active</span></summary>
+      <p class="help">Standard answers are active automatically across job forms. Names, contact details and experience come from the selected resume. Save optional overrides here when this resume needs different answers.</p>
+      <label for="defaults-file">Import your question-and-answer notes (TXT)</label><input id="defaults-file" type="file" accept=".txt,text/plain">
+      <label for="default-facts">Confirmed facts and answer preferences</label><textarea id="default-facts" rows="8" maxlength="100000" placeholder="Work authorization country and status: ...&#10;Sponsorship now or in future: ...&#10;Desired salary range, currency and pay period: ...&#10;Start availability: ..."></textarea>
+      <div class="actions"><button id="use-defaults" type="button" class="primary">Save resume overrides</button><button id="clear-defaults" type="button">Reset to extension defaults</button></div>
+      <div class="actions"><button id="save-default-template" type="button">Save reusable template</button><button id="load-default-template" type="button">Load template</button><button id="delete-default-template" type="button">Delete saved template</button></div>
+      <p id="defaults-status" role="status" aria-live="polite">Extension defaults are always active. Save only when you want to override them for the current resume.</p>
+      <button id="load-standard-defaults" type="button">Load updated standard defaults</button>
+    </details>
+    <section class="panel" id="detection-section" aria-label="Application question detection">
+      <label class="toggle"><input id="auto-detect" type="checkbox" checked>Auto-detect application fields and questions</label>
+      <label class="toggle"><input id="apply-choices" type="checkbox" checked>Apply matching radio, checkbox and dropdown answers</label>
+      <label class="toggle"><input id="apply-text" type="checkbox" checked>Also fill supported written and numeric answers</label>
+      <button id="detect-questions" type="button">Refresh page questions</button>
+      <button id="connect-page" type="button" class="primary" hidden>Connect application page</button>
+      <p id="detection-status" role="status" aria-live="polite">Checking access to the active application page...</p>
+      <details id="detection-details" hidden><summary>Detection details</summary><p id="detection-error-detail"></p></details>
+      <p class="help">Includes name, contact and application questions. Existing entries stay untouched. Confirmed defaults apply to matching fields; uploads and legal agreements remain manual. Open a custom dropdown and refresh to capture its choices. Copy is available for unsupported controls.</p>
+    </section>
+    <form id="questions-form" class="panel">
+      <div class="section-heading"><span class="step">02</span><div><h2>Build your question batch</h2><p>Detected questions appear below. Add anything missed.</p></div></div>
+      <details id="manual-entry"><summary>Add questions manually</summary><label for="questions">Paste questions</label>
+      <p id="question-help">Paste questions in a numbered list or one per line. Put answer choices on separate lines beginning with a dash. Review types and choices before sending.</p>
+      <textarea id="questions" rows="5" maxlength="400099" aria-describedby="question-help" placeholder="1. Do you have Python experience?&#10;- Yes&#10;- No&#10;&#10;2. Describe your most relevant project."></textarea>
+      <div class="actions"><button id="add-pasted" type="button">Add pasted questions</button><button id="add-question" type="button">Add a question</button></div>
+      </details>
+      <div class="batch-heading"><h2>Question batch <span id="batch-count">(0)</span></h2><button id="clear-questions" type="button">Clear batch</button></div>
+      <div id="question-list"></div>
+      <div class="actions"><button id="send" type="submit" class="primary" aria-describedby="generate-help">Get answers</button><button id="stop" type="button" hidden>Stop request</button></div>
+      <p id="generate-help" class="help" role="status" aria-live="polite"></p>
+      <div id="loading" role="status" hidden><span class="spinner" aria-hidden="true"></span><span id="progress-text">Fetching answers from ApplyFlow…</span></div>
+      <p id="status" role="status" aria-live="polite">Ready when you are.</p>
+    </form>
+    <section class="results" aria-labelledby="answers-title"><div class="results-heading"><div><p class="eyebrow">03 / REVIEW &amp; USE</p><h2 id="answers-title">Your answers <span id="answer-count"></span></h2></div><button id="copy-all" type="button" disabled>Copy all answers</button></div><div class="answer-filters" role="group" aria-label="Filter answers"><button type="button" data-answer-filter="all" aria-pressed="true">All</button><button type="button" data-answer-filter="review" aria-pressed="false">To review</button><button type="button" data-answer-filter="draft" aria-pressed="false">Drafts</button><button type="button" data-answer-filter="applied" aria-pressed="false">Applied</button></div><p id="filtered-empty" class="empty" hidden>No answers match this view.</p><div id="answers"><p class="empty">Your answers will appear here after you send a batch.</p></div></section>
+  </main>
+  <template id="answer-template"><article class="panel answer"><div class="answer-meta"><span class="answer-type"></span><span class="answer-state"></span></div><div class="answer-heading"><h3></h3><button type="button" class="copy">Copy answer</button></div><p class="reason" hidden></p><label class="sr-only">Review or edit this answer</label><textarea rows="7"></textarea><div class="answer-actions"><button type="button" class="mark-reviewed">Mark reviewed</button></div></article></template>
+  <template id="question-template"><details class="question-editor"><summary></summary><label>Question<textarea class="question-text" rows="2" maxlength="4000"></textarea></label><label>Answer type<select class="question-type"><option value="textarea">Open answer / paragraph</option><option value="text">Short text</option><option value="yes_no">Yes / No</option><option value="radio">Radio / one choice</option><option value="select">Dropdown / one choice</option><option value="checkbox">Checkbox / multiple choices</option><option value="number">Number</option><option value="date">Date</option><option value="email">Email</option><option value="url">URL</option><option value="tel">Phone</option></select></label><label class="question-options" hidden>Choices (one per line)<textarea rows="3"></textarea></label><label>Character limit (optional)<input class="question-limit" type="number" min="1" max="50000"></label><button type="button" class="remove-question">Remove question</button></details></template>
+  <script src="lib/jszip.min.js"></script><script src="document-parser.js"></script><script src="resume.js"></script><script src="questions.js"></script><script src="app.js"></script>
+</body></html>

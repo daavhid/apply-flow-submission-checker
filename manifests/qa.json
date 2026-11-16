@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "ApplyFlow Q&A",
+  "version": "2.9.0",
+  "version_name": "2.9.0 - Named Resume Attachments",
+  "minimum_chrome_version": "116",
+  "description": "Internal questions and answers powered by the embedded ApplyFlow AI API.",
+  "permissions": [
+    "sidePanel",
+    "storage",
+    "activeTab",
+    "scripting",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://*/*",
+    "http://*/*"
+  ],
+  "action": {
+    "default_title": "Open ApplyFlow Q&A sidebar",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "side_panel": {
+    "default_path": "ai/app.html"
+  },
+  "background": {
+    "service_worker": "ai/worker.js"
+  }
+}

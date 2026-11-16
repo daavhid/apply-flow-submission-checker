@@ -1,3 +1,17 @@
+# Full SQC + AI Q&A releases
+
+`main` preserves the full SQC extension (login, assignment verification, HUD, settings and submission gate) and includes the updated Q&A sidebar. Open **AI Q&A sidebar** from the ready SQC workspace. The Q&A context is its selected resume; it does not modify or unlock the backend-assigned SQC profile or job.
+
+The standalone rollout branch **feat/ai-questions-only** remains available with no SQC login or HUD. See [release variants](docs/RELEASES.md) and [Q&A features](docs/QA-README.md).
+
+| Command on main | Unpacked extension | ZIP |
+| --- | --- | --- |
+| `npm run build` / `npm run build:sqc` | `dist/extension` | `dist/submission-checker-extension.zip` |
+| `npm run build:qa` | `dist/qa/extension` | `dist/qa/applyflow-qa-extension.zip` |
+| `npm run build:all` | Both directories above | Both archives above |
+
+Builds clean only their own output folder, so producing one release preserves the other. `npm test` checks both variants; `npm run test:browser` runs the Q&A Chrome checks.
+
 # 🛡️ Submission Quality Checker & Live Gatekeeper (Chrome Extension MV3)
 
 > ApplyFlow integration migration: Configure the endpoint, then sign in with your ApplyFlow applier email and password. SQC locks the candidate profile assigned to that applier and verifies each job against it. Temporary passwords can require a change before applying. The backend must implement [SQC contract version 2](docs/APPLYFLOW-INTEGRATION.txt), including authentication, profile assignment, context verification, AI screening answers, and event acknowledgements. Historical standalone examples below do not authenticate the integrated build.

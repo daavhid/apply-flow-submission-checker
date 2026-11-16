@@ -9,7 +9,12 @@
     "dev": "node --watch server/server.js",
     "build": "node build-extension.js",
     "build:extension": "node build-extension.js",
-    "test:ping": "node -e \"fetch('http://localhost:3000/api/health').then(r=>r.json()).then(console.log).catch(console.error)\""
+    "test:ping": "node -e \"fetch('http://localhost:3000/api/health').then(r=>r.json()).then(console.log).catch(console.error)\"",
+    "build:sqc": "node build-extension.js --profile=sqc",
+    "build:qa": "node build-extension.js --profile=qa",
+    "build:all": "node build-extension.js --all",
+    "test:qa": "node --test tests/qa-*.test.js",
+    "test:browser": "node tests/browser-qa-smoke.js"
   },
   "keywords": [
     "ats",

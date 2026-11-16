@@ -1,89 +1,40 @@
-/**
- * Automated Extension Builder & Packager
- * Copies all required Chrome extension files into dist/extension and creates a distributable ZIP.
- */
-
-const fs = require('fs');
-const path = require('path');
-const { execSync } = require('child_process');
-
-const ROOT_DIR = __dirname;
-const DIST_DIR = path.join(ROOT_DIR, 'dist');
-const EXTENSION_DIST_DIR = path.join(DIST_DIR, 'extension');
-const ZIP_FILE_PATH = path.join(DIST_DIR, 'submission-checker-extension.zip');
-
-// Extension items to include
-const EXTENSION_FILES = [
-  'manifest.json',
-  'background',
-  'content',
-  'popup',
-  'onboarding',
-  'ui',
-  'options',
-  'icons'
-];
-
-function copyRecursive(src, dest) {
-  const stat = fs.statSync(src);
-  if (stat.isDirectory()) {
-    if (!fs.existsSync(dest)) {
-      fs.mkdirSync(dest, { recursive: true });
-    }
-    const entries = fs.readdirSync(src);
-    for (const entry of entries) {
-      copyRecursive(path.join(src, entry), path.join(dest, entry));
-    }
-  } else {
-    const parent = path.dirname(dest);
-    if (!fs.existsSync(parent)) {
-      fs.mkdirSync(parent, { recursive: true });
-    }
-    fs.copyFileSync(src, dest);
+/* Build the full SQC release and the standalone Q&A release from shared sources. */
+'use strict';
+const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+const JSZip=require('jszip');
+const client=require('./ai/client');
+const ROOT_DIR=__dirname;
+const PROFILES={
+  sqc:{manifest:'manifest.json',files:['background','content','popup','onboarding','ui','options','ai','icons'],folder:'extension',zip:'submission-checker-extension.zip'},
+  qa:{manifest:'manifests/qa.json',files:['ai','icons'],folder:'qa/extension',zip:'qa/applyflow-qa-extension.zip'}
+};
+function safeOutput(relative){
+  const dist=path.join(ROOT_DIR,'dist'),target=path.resolve(dist,relative),inside=path.relative(dist,target);
+  if(!inside||inside.startsWith('..')||path.isAbsolute(inside))throw new Error('Build output must stay inside dist.');
+  for(let current=target;current!==ROOT_DIR;current=path.dirname(current))if(fs.existsSync(current)&&fs.lstatSync(current).isSymbolicLink())throw new Error('Build output cannot use symbolic links.');
+  return target;
+}
+async function build(profileName='sqc'){
+  const profile=PROFILES[profileName];if(!profile)throw new Error('Choose --profile=sqc or --profile=qa.');
+  const manifest=JSON.parse(fs.readFileSync(path.join(ROOT_DIR,profile.manifest),'utf8'));
+  if(profileName==='qa'){
+    const scope={};vm.runInNewContext(fs.readFileSync(path.join(ROOT_DIR,'ai/config.js'),'utf8'),scope);
+    const config=scope.SQC_AI_CONFIG;
+    if(config.endpoint)manifest.host_permissions=[...new Set([...(manifest.host_permissions||[]),...[config.endpoint,config.localEndpoint].filter(Boolean).map(value=>new URL(client.endpoint(value)).origin+'/*')])];
+    else console.warn('Internal AI endpoint is not configured; this Q&A build cannot fetch live answers.');
   }
+  const output=safeOutput(profile.folder),archive=safeOutput(profile.zip);
+  fs.rmSync(output,{recursive:true,force:true});fs.mkdirSync(output,{recursive:true});
+  for(const item of profile.files)fs.cpSync(path.join(ROOT_DIR,item),path.join(output,item),{recursive:true});
+  fs.writeFileSync(path.join(output,'manifest.json'),JSON.stringify(manifest,null,2)+'\n');
+  const zip=new JSZip();
+  function include(folder){for(const entry of fs.readdirSync(folder,{withFileTypes:true})){const file=path.join(folder,entry.name);if(entry.isDirectory())include(file);else zip.file(path.relative(output,file).split(path.sep).join('/'),fs.readFileSync(file));}}
+  include(output);fs.mkdirSync(path.dirname(archive),{recursive:true});fs.writeFileSync(archive,await zip.generateAsync({type:'nodebuffer',compression:'DEFLATE'}));
+  console.log(profileName.toUpperCase()+' unpacked: '+output);console.log(profileName.toUpperCase()+' ZIP: '+archive);
+  return {profile:profileName,output,archive};
 }
-
-console.log('🚀 Building Submission Quality Checker Extension...');
-
-// 1. Clean dist directory
-const relativeDist = path.relative(path.resolve(ROOT_DIR), path.resolve(DIST_DIR));
-if (!relativeDist || relativeDist.startsWith('..') || path.isAbsolute(relativeDist) || fs.existsSync(DIST_DIR) && fs.lstatSync(DIST_DIR).isSymbolicLink()) {
-  throw new Error('Refusing to clean a build directory outside the workspace.');
+if(require.main===module){
+  const args=process.argv.slice(2),selected=args.find(arg=>arg.startsWith('--profile='));
+  (async()=>{if(args.includes('--all')){await build('sqc');await build('qa');}else await build(selected?selected.slice('--profile='.length):'sqc');})().catch(error=>{console.error(error.message);process.exitCode=1;});
 }
-if (fs.existsSync(DIST_DIR)) {
-  fs.rmSync(DIST_DIR, { recursive: true, force: true });
-}
-fs.mkdirSync(EXTENSION_DIST_DIR, { recursive: true });
-
-// 2. Copy extension files
-for (const item of EXTENSION_FILES) {
-  const srcPath = path.join(ROOT_DIR, item);
-  const destPath = path.join(EXTENSION_DIST_DIR, item);
-
-  if (fs.existsSync(srcPath)) {
-    copyRecursive(srcPath, destPath);
-    console.log(`  ✓ Copied ${item}`);
-  } else {
-    console.warn(`  ⚠️ Warning: ${item} not found at ${srcPath}`);
-  }
-}
-
-// Profiles and connection identity are resolved from ApplyFlow at runtime.
-
-// 3. Create ZIP archive
-try {
-  if (process.platform === 'win32') {
-    // Use PowerShell Compress-Archive on Windows
-    execSync(`powershell -Command "Compress-Archive -Path '${EXTENSION_DIST_DIR}\\*' -DestinationPath '${ZIP_FILE_PATH}' -Force"`, { stdio: 'inherit' });
-  } else {
-    // Use zip on Unix / Linux / macOS
-    execSync(`cd "${EXTENSION_DIST_DIR}" && zip -r "${ZIP_FILE_PATH}" ./*`, { stdio: 'inherit' });
-  }
-  console.log(`\n📦 Successfully created ZIP archive: ${ZIP_FILE_PATH}`);
-} catch (err) {
-  console.log(`\n💡 Unpacked folder created at: ${EXTENSION_DIST_DIR}`);
-}
-
-console.log(`\n✅ Build Complete!`);
-console.log(`📁 Unpacked Folder for Chrome:  dist/extension`);
-console.log(`🎁 Distributable ZIP file:      dist/submission-checker-extension.zip\n`);
+module.exports={build,PROFILES};

@@ -117,6 +117,8 @@ chrome.tabs.onUpdated?.addListener((tabId, changeInfo) => {
 
 // Message Bus Handler
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // The dedicated Q&A listener owns these messages and must be the only responder.
+  if (typeof (message.type || message.action) === "string" && (message.type || message.action).startsWith("QA_")) return;
   const handler = async () => {
     await sqcMigration;
     await sqcEvidenceReady;

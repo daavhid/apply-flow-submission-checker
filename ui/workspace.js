@@ -85,7 +85,7 @@ window.SQCWorkspace = (() => {
       return `<div class="identity-stack"><div class="identity-label">SIGNED IN AS</div>${person(i.applier.name, i.applier.email)}<div class="identity-connector"><span></span>${icon('lock')}Synced from ApplyFlow</div><div class="identity-label">YOUR ASSIGNED CANDIDATE</div>${person(config.activeProfile.fullName, config.activeProfile.primaryEmail || config.activeProfile.email || 'Verified candidate profile', 'candidate')}</div>`;
     }
     function shell(stage, content) {
-      view.innerHTML = `<div class="workspace-frame ${stage === 'ready' ? 'ready-frame' : ''}">${surface === 'setup' ? steps(stage) : ''}${content}</div>`;
+      view.innerHTML = `<div class="workspace-frame ${stage === 'ready' ? 'ready-frame' : ''}">${surface === 'setup' ? steps(stage) : ''}${content}${stage === 'ready' ? '<div class="workspace-actions"><button class="button secondary" id="open-qa">Open AI Q&amp;A sidebar</button></div>' : ''}</div>`;
       view.setAttribute('aria-busy', 'false');
       view.dataset.stage = stage;
       bind();
@@ -142,6 +142,11 @@ window.SQCWorkspace = (() => {
       on('account', () => navigate('account'));
       on('review-profile', () => navigate('profile'));
       on('preferences', () => navigate('preferences'));
+      on('open-qa', () => perform(async () => {
+        if (!Number.isInteger(activeTab?.id)) throw new Error('Open an application tab first.');
+        await chrome.sidePanel.open({tabId: activeTab.id});
+        if (surface === 'popup') window.close();
+      }));
       on('password-settings', () => navigate('password'));
       on('history', () => perform(async () => {
         const result = await send({ type: 'OPEN_OPTIONS', section: 'history' });
