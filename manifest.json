@@ -1,72 +1,33 @@
 {
   "manifest_version": 3,
-  "name": "Apply-Flow Quality Gatekeeper",
-  "version": "1.0.3",
-  "version_name": "1.0.3 - Application continuity",
-  "description": "An Apply-Flow Subsidiary Suite \u2014 Real-time ATS form extractor, submission quality validator, live HUD, and duplicate prevention gatekeeper.",
+  "name": "ApplyFlow Q&A",
+  "version": "2.9.0",
+  "version_name": "2.9.0 - Named Resume Attachments",
+  "minimum_chrome_version": "116",
+  "description": "Internal questions and answers powered by the embedded ApplyFlow AI API.",
   "permissions": [
+    "sidePanel",
     "storage",
     "activeTab",
-    "tabs",
     "scripting",
-    "notifications"
+    "tabs"
   ],
   "host_permissions": [
-    "http://localhost:5000/*",
-    "http://localhost:3000/*",
-    "http://127.0.0.1:5000/*",
-    "https://*.onrender.com/*",
-    "<all_urls>"
+    "https://*/*",
+    "http://*/*"
   ],
   "action": {
-    "default_popup": "popup/popup.html",
-    "default_title": "Apply-Flow Quality Gatekeeper",
+    "default_title": "Open ApplyFlow Q&A sidebar",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
       "128": "icons/icon128.png"
     }
   },
-  "options_page": "options/options.html",
-  "background": {
-    "service_worker": "background/service-worker.js"
+  "side_panel": {
+    "default_path": "ai/app.html"
   },
-  "content_scripts": [
-    {
-      "matches": [
-        "<all_urls>"
-      ],
-      "all_frames": true,
-      "match_about_blank": true,
-      "js": [
-        "content/context-policy.js",
-        "content/screening-policy.js",
-        "content/screening.js",
-        "content/submit-intent.js",
-        "options/doc-parser.js",
-        "content/resume-context.js",
-        "content/extractor.js",
-        "content/validator.js",
-        "content/hud.js",
-        "content/content.js"
-      ],
-      "css": [
-        "content/hud.css",
-        "content/injector.css"
-      ],
-      "run_at": "document_end"
-    }
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "icons/*",
-        "content/*",
-        "options/lib/*"
-      ],
-      "matches": [
-        "<all_urls>"
-      ]
-    }
-  ]
+  "background": {
+    "service_worker": "ai/worker.js"
+  }
 }

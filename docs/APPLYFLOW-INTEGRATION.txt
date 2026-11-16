@@ -1,574 +1,223 @@
-ApplyFlow integration contract for SQC
+NAMED RESUME ATTACHMENTS (2.9, supersedes manual-upload-only notes below)
+Original PDF/DOCX/TXT bytes stay in local IndexedDB, outside model context.
+Only filename/metadata and parsed text are part of the resume snapshot.
+The worker binds attachments to the selected resume version and original tab,
+document, URL and unchanged upload field. Attachments use Candidate Name.ext,
+never regenerate the document, and never overwrite a selected file.
+Sponsorship needed now or in future defaults to No. Reversed or combined
+authorization questions still require correct contextual interpretation.
 
-Implement this contract in the ApplyFlow backend to enable the SQC authentication,
-candidate profile, job context, and audit synchronization already implemented in
-this repository. Contract version: 2. These new authentication/context routes are
-requirements for the ApplyFlow agent; their existence is not assumed.
+AUTOMATIC DEFAULTS (2.8.1, supersedes activation instructions below)
+Built-in defaults are automatically active across job tabs and resume changes.
+No confirmation checkbox or activation call is required. answerDefaults.source
+can be extension_defaults or user_confirmed (explicitly saved resume overrides).
+Overrides remain resume-bound; resetting them restores the automatic defaults.
+Names, contact details and experience still use only the current resume context.
 
-Scope
+APPLYFLOW RESUME-ONLY Q&A
+Branch: feat/ai-questions-only
+Surface: Chrome global side panel. No sign-in, assigned profile, authentication calls, auditing, form validation
+or submission blocking. The extension detects screening questions and applies
+matching answers locally to supported native inputs/textareas/selects and simple
+editable textboxes, with manual fallback for unsupported widgets.
 
-SQC now uses one user-selected ApplyFlow API origin. The user signs in with their
-ApplyFlow applier email and password. The authenticated server session returns
-the candidate profile assigned to that applier, which is locked across SQC job
-tabs. Each job context must match this profile lock. Profiles are no longer seeded from JSON.
-Candidate editing, local reassignment, admin passkeys, and extra webhook targets
-are disabled. The existing ChatGPT copy/paste tools remain available only inside
-a verified assignment. Screening requests are integrated with ApplyFlow; the
-general chat UI is separate from application answering.
+EMBEDDED ENDPOINTS (POST)
+Default: https://applyflow-api.jhproit.com/api/ai/chat
+Local: http://localhost:5000/api/ai/chat
+The user selects a server. Requests do not fall back automatically.
 
-Authentication transport
+RESUME FLOW
+Upload PDF/DOCX/TXT (up to 10 MB), or paste resume text; review extracted text;
+choose Use this resume. The extension stores the selected text in trusted
+browser-session storage. It sends text and filename, not the binary document,
+with every question batch. Remove resume clears this context. A different resume
+receives a new version; stale responses are discarded. No candidate record is
+looked up or written. Resume context is user-provided, not backend-verified.
 
-The endpoint is the ONLY integration setting the installer/user supplies. Do not
-ask the user to enter candidate IDs, applier IDs, API keys, extension IDs, AI
-provider settings, or separate webhook URLs. The applier supplies their assigned
-email and password in the dedicated SQC setup page. SQC sends
-credentials to the configured ApplyFlow server and never stores them. ApplyFlow
-owns account creation, credential verification, password policy, and assignments.
-The extension opens its centered setup page on first installation, persists
-the endpoint across browser restarts/extension updates, and uses the same flow
-for an unpacked local installation and a Chrome Web Store installation.
-
-1. The user enters the API origin in onboarding/onboarding.html and continues.
-   HTTPS is required, except HTTP on localhost/127.0.0.1/[::1]. Paths, credentials,
-   query strings, and hashes are rejected. Portal URLs cannot select API origins.
-2. SQC checks GET /api/sqc/auth before accepting a new server, then requires
-   explicit email/password sign-in through POST /api/sqc/login. It does not open
-   a website login or adopt an existing website session during initial setup.
-   ApplyFlow may be open in another Chrome profile or browser. No website login
-   is required in the browser profile where the extension is installed.
-3. All API calls originate in the service worker, use credentials: include,
-   cache: no-store, and reject redirects. The login POST must establish the API
-   session cookie in the extension's browser profile; subsequent API calls use
-   that session. If ApplyFlow currently accepts only bearer tokens,
-   add a supported cookie-based adapter for these routes before enabling SQC.
-4. Permit the deployed chrome-extension://<extension-id> origin and the
-   Content-Type, X-SQC-CSRF, and X-SQC-Extension-Id request headers. SQC supplies
-   its actual chrome.runtime.id automatically on every request, for both unpacked
-   and Store builds. Do not ask the user for this ID. Register permitted Store
-   and development extension origins centrally on the backend. The extension ID
-   is public client metadata, never proof of identity or assignment authorization.
-   Configure credentialed responses
-   for this origin explicitly; do not combine credentialed access with '*'.
-   Test the actual Chrome cookie policy in the target deployment.
-   In particular, test credential sign-in in a fresh browser profile with no
-   ApplyFlow website cookies; a website session in another profile is irrelevant.
-5. GET /api/sqc/session returns a session-bound CSRF token. The login POST uses
-   the separate pre-authentication token from GET /api/sqc/auth. All POST requests
-   include X-SQC-CSRF. Validate it, session access, and assignment ownership on
-   the backend. No bearer token or CSRF token is exposed to portal content scripts.
-6. 401 means signed out/expired; 403 means access denied/revoked. Never redirect
-   API requests to login HTML. Return JSON errors for all other non-success cases:
-   {"success":false,"error":{"code":"CONTEXT_MISMATCH","message":"..."}}
-
-Extension setup and ready state
-
-The setup page shows one step at a time: server, credentials, assigned profile
-review, then the ready workspace. A temporary password must be changed before
-profile review. Accounts without a candidate remain on an assignment waiting
-screen with a retry action. Profiles are supplied by the server, never selected
-or edited locally. Reviewing a profile records only a UI acknowledgement keyed
-to the server, applier, assignment, and profile versions. It grants no permission
-to autofill or submit; every portal still requires a backend-verified job context.
-
-After setup, the toolbar popup shows the HUD-style workspace and waits for an
-application. A verified active job tab shows its title and company. The portal
-HUD sends unauthenticated users to the dedicated setup tab using OPEN_SETUP;
-the service worker focuses an existing setup tab instead of opening duplicates.
-Signing out returns to credential sign-in and clears the UI acknowledgement.
-
-GET /api/sqc/session
-
-Response (top-level shape, no data wrapper):
+REQUEST
+Content-Type: application/json
+Credentials: omit (no cookies, Authorization or X-SQC-CSRF header)
 {
-  "success": true,
-  "contractVersion": 2,
-  "session": {"id":"auth_123","expiresAt":"2030-01-01T13:00:00.000Z","passwordChangeRequired":false},
-  "applier": {"id":"user_123","name":"Applier Name","email":"applier@example.com"},
-  "csrfToken":"opaque_session_bound_csrf_value",
-  "profileAssignment":{
-    "id":"profile_assignment_123","version":"4","status":"ACTIVE",
-    "applierId":"user_123","profileId":"profile_123","profileVersion":"7"
-  },
-  "profile":{
-    "id":"profile_123","version":"7","verified":true,"fullName":"Candidate Name"
-  }
-}
-
-Use the authenticated user, never a request applier ID. Session IDs must change
-when the user signs out/signs in as another account. Applier identity is locked in
-SQC. This endpoint must not return a list of unrelated candidate profiles.
-Return the assigned profile even when no job tab is open, so the user can see
-their locked assignment immediately after sign-in. Include the full verified
-profile fields needed for display; the per-job context includes the approved
-resume. Return profileAssignment:null and profile:null when no active assignment
-exists; SQC then shows UNASSIGNED and blocks application actions. Do not silently
-pick another candidate. Increment assignment.version on reassignment/revocation.
-
-Applier credentials and password lifecycle
-
-Provision the applier account and initial email/password in ApplyFlow using the
-existing authorized administration flow. SQC does not create users or carry a
-shared default password. A temporary password can be marked passwordChangeRequired
-in the session; SQC blocks all job contexts until the password is changed.
-
-GET /api/sqc/auth is available before login. It returns:
-{
-  "success":true,"contractVersion":2,
-  "csrfToken":"opaque_pre_authentication_token",
-  "expiresAt":"2030-01-01T12:05:00.000Z"
-}
-Bind this short-lived challenge to a pre-authentication HttpOnly cookie and
-validate the actual permitted extension origin. It must not expose an applier
-profile or create an authenticated user session. Return Cache-Control:no-store.
-
-POST /api/sqc/login
-Headers: Content-Type:application/json; X-SQC-CSRF:<pre-authentication token>
-Body: {"email":"applier@example.com","password":"user_supplied_password"}
-Response: {"success":true,"contractVersion":2}
-
-Validate credentials with ApplyFlow's existing account system and establish a
-rotated authenticated HttpOnly cookie. SQC then GETs /api/sqc/session, checks the
-returned email matches the submitted email, and obtains the locked profile.
-Invalid credentials return 401 with a generic error. Rate-limit login attempts.
-Do not echo passwords into responses or logs, or accept applier/profile IDs as
-credential substitutes. Passwords are cleared from the SQC form after submission
-and from worker message objects after completion. No password is saved in Chrome
-local/session storage or included in audit/event payloads.
-
-POST /api/sqc/password
-Headers: Content-Type:application/json; X-SQC-CSRF:<authenticated session token>
-Body: {"currentPassword":"user_current_password","newPassword":"user_new_password"}
-Response: {"success":true,"contractVersion":2}
-
-Verify the current password, enforce the existing backend password policy, change
-the password, and invalidate old authentication sessions. Rotate the current
-cookie into a new session and clear passwordChangeRequired. SQC clears its old
-context and fetches /api/sqc/session again. If the backend chooses not to preserve
-the current session, return 401 on the next session check and require sign-in with
-the new password. Wrong current password/policy failures return 400; missing or
-expired authentication returns 401. Never change the assigned profile as a side
-effect of a password change.
-
-POST /api/sqc/logout
-Headers: Content-Type:application/json; X-SQC-CSRF:<authenticated session token>
-Body: {}
-Response: {"success":true,"contractVersion":2}
-
-Revoke the backend session and expire its cookie, including the corresponding
-ApplyFlow browser session if they share it. SQC clears its cached identity and
-records local sign-out even if the server is unavailable; automatic reconnect
-must not silently reuse a leftover cookie. Sign-in explicitly clears this local
-lock only after credential verification. Disconnecting the endpoint is separate
-from signing out; use Sign out to revoke the authenticated session.
-
-Launching an assignment
-
-Create or reuse an authorized applicationSessionId for the tuple of tenant,
-applier, candidate, and job. Launch the portal with this identifier in its hash:
-https://boards.greenhouse.io/example/jobs/12345#application_session_id=app_123
-
-Preserve any existing portal hash route and append parameters appropriately.
-Explicit sqc_application_session_id in the query is also supported. Hash job_id
-and profile_id, or query sqc_job_id and sqc_profile_id, are optional hints only.
-SQC ignores ordinary ATS job_id query values as ApplyFlow IDs to avoid collisions.
-Names, applier_id, server URLs, and stack labels in portal URLs are not authority.
-
-POST /api/sqc/application-context
-
-Headers: Content-Type: application/json; X-SQC-CSRF: <session token>
-Request:
-{
-  "contractVersion":2,
-  "applicationSessionId":"app_123",
-  "url":"https://boards.greenhouse.io/example/jobs/12345#application_session_id=app_123",
-  "jobId":"optional_explicit_applyflow_job_id",
-  "profileId":"optional_explicit_applyflow_profile_id",
-  "previousApplicationSessionId":"optional_continuation_hint"
-}
-
-Optional identifiers are omitted when absent. A previously verified tab can
-reuse applicationSessionId across authorized wizard/redirect routes. For a
-standalone portal URL without a launch identifier, resolve only a single
-unambiguous assignment that belongs to the authenticated applier. Return a
-409 error if no unique assignment is available; never choose the first candidate.
-
-Response:
-{
-  "success":true,
-  "contractVersion":2,
-  "context":{
-    "applicationSessionId":"app_123",
-    "authSessionId":"auth_123",
-    "expiresAt":"2030-01-01T12:05:00.000Z",
-    "applier":{"id":"user_123","name":"Applier Name"},
-    "assignment":{
-      "status":"ACTIVE","applierId":"user_123",
-      "profileId":"profile_123","jobId":"job_123",
-      "profileAssignmentId":"profile_assignment_123","profileAssignmentVersion":"4"
-    },
-    "profile":{
-      "id":"profile_123","version":"7","verified":true,
-      "fullName":"Candidate Name","firstName":"Candidate","lastName":"Name",
-      "primaryEmail":"candidate@example.com","emailAliases":["candidate@example.com"],
-      "phone":"+15555550123","address":"Verified address","city":"City",
-      "state":"State","zip":"12345","country":"United States",
-      "targetStack":"Python","primaryStackKeywords":["python"],
-      "workAuth":{"authorizedInUS":"Yes","requiresSponsorship":"No"},
-      "compensation":{"salaryFloor":120000,"desiredSalary":140000},
-      "customFields":[{"label":"Exact screening question text","value":"Verified answer"}]
-    },
-    "job":{
-      "id":"job_123","version":"3","title":"Backend Engineer","company":"Example",
-      "url":"https://boards.greenhouse.io/example/jobs/12345"
-    },
-    "resume":{
-      "id":"resume_123","profileId":"profile_123","version":"2",
-      "verified":true,"text":"Verified resume text",
-      "file":{"filename":"Candidate_Name.pdf","dataUrl":"data:application/pdf;base64,..."}
-    },
-    "allowedRoutes":[
-      {"url":"https://boards.greenhouse.io/example/jobs/12345","includeSubpaths":true},
-      {"url":"https://boards.greenhouse.io/example/confirmation/12345","includeSubpaths":false}
-    ],
-    "status":"PENDING"
-  }
-}
-
-All IDs, versions, and flags in this example are real server-resolved values in
-production; timestamps must be future UTC ISO strings. Versions are nonempty
-strings and change whenever their underlying verified data changes.
-
-Tailored resume uploads and source of truth
-
-Each application uses either an uploaded tailored resume or an approved
-ApplyFlow resume with kind:tailored and a matching jobId. Upload through
-HUD > Resume > Upload tailored resume > Use tailored resume. The save button
-confirms candidate/job ownership; there is no additional confirmation checkbox.
-PDF, DOCX, and TXT files up to 10 MB are supported. SQC extracts readable text, displays experience
-rows for review, and requires confirmation of the candidate/job. If extraction
-fails, the applier can paste readable text alongside the original file.
-
-ApplyFlow remains the source of truth for the base candidate profile: identity,
-contact information, work authorization, sponsorship, location, compensation,
-demographics, and other approved profile facts. Return these as structured,
-versioned fields in session.profile and context.profile. A server-provided
-verification prompt can accompany them as profile.verificationPrompt, but must
-not be the sole representation of verification facts. SQC must not reconstruct
-identity or legal eligibility from resume prose or from an AI answer.
-
-The uploaded resume is a separate, applier-provided source for work-history
-entries, descriptions, skills, and explicitly stated experience numbers. It
-never updates the candidate's base profile. SQC labels it source:sqc_upload,
-verified:false, and assigns resumeId 'sqc-upload:<file SHA-256>' and resumeVersion
-'<file SHA-256>'. Those IDs are local document identifiers, not ApplyFlow resume
-records. Original bytes are retained in extension-owned IndexedDB with a browser
-session epoch and bounded retention, scoped to the authenticated account,
-assignment/profile/job versions and application session. A local upload does
-not depend on ApplyFlow's default resume ID/version; refreshing that default
-does not discard the selected upload. A byte-matched downloaded ApplyFlow copy
-is persisted with server provenance and is invalidated if its server version or
-fingerprint changes. Logout clears the local documents. Assignment/job/version changes
-invalidate them; the document must be uploaded for the new application context.
-
-A valid job/profile assignment can return context.resume:null when no server
-resume exists. This verifies the assignment, not a nonexistent resume. Basic
-candidate details remain fillable, while resume-driven answering waits for an
-upload. Existing approved server resume metadata/downloads remain supported for
-viewing and attachment. A verified job-tailored server resume is ready without
-re-upload. An unclassified/base document does not satisfy job tailoring.
-
-Parsed employment rows retain exact source evidence, company, role, month/year
-dates, current-employment status, and responsibilities. Supported existing
-experience rows are filled in order. The extension does not create arbitrary
-portal-specific rows or invent missing employers, dates, or durations. The user
-must review parsed rows, add missing portal rows, and complete unsupported
-controls. A month-only source never produces an invented day. Explicit numeric
-experience facts include their source sentence; unknown skill durations are
-left for review. Ambiguous dates and employment layouts remain unfilled.
-
-Screening pipeline with a local resume
-
-Manual Q&A workflow
-
-The HUD Questions button opens a manual-only Q&A tab. SQC does not collect form
-questions for this tab, send batches on page load, or autofill returned answers.
-The applier pastes only the questions they want answered (one per line), then
-clicks Send pasted questions to ApplyFlow. Returned answers stay visible in
-editable cards with Copy answer controls. Sending another request preserves
-previous answers until the assignment or resume changes. Stop cancels a pending
-request. Candidate/profile autofill and resume experience autofill remain separate
-from Q&A; enabling them must never trigger a question-generation request.
-
-Check AI connection explicitly GETs /api/ai/status (or /api/ai/health on a 404/405)
-without sending questions. It displays the provider/model and what the backend
-reports about readiness. A reachable discovery route is not proof that generation
-works. The SQC answer route is preferred; if it is missing (404/405), SQC tries
-/api/submissions/answer-questions, then /api/ai/answer-questions on the same saved
-origin, with the same authentication, CSRF, payload, and response requirements.
-Provider/model errors, authentication failures, rate limits, and invalid version
-envelopes are not bypassed by retrying aliases. A legacy successful response that
-does not satisfy contract v2 is reported as incompatible rather than accepted
-under an unverified profile or resume context.
-
-Errors show the backend HTTP status, API route, and safe backend reason/code.
-A 'code generation failed; retry or ask an admin' response usually requires the
-ApplyFlow administrator to inspect provider availability, model configuration,
-credentials/permissions, quota, and the server-side generation logs. SQC cannot
-repair backend AI credentials or determine the exact provider failure from that
-generic message alone. Map provider errors separately from expired SQC user
-sessions; reserve 401 for an expired/missing authenticated user session.
-
-For uploads, the screening request includes the usual context/version envelope
-with the local resumeId/version, plus:
-
-  "resumeContext": {
-    "source":"sqc_upload", "verified":false,
-    "id":"sqc-upload:<sha256>", "version":"<sha256>", "sha256":"<sha256>",
-    "filename":"Candidate_Tailored.pdf", "text":"Extracted tailored resume text",
-    "skills":["Python","SQL"],
-    "facts": {
-      "workHistory":[{
-        "company":"Example Corp", "title":"Senior Engineer",
-        "startDate":"2021-01", "endDate":"", "current":true,
-        "description":"Exact responsibilities from the resume",
-        "dateRange":"January 2021 - Present", "evidence":"Exact source text"
-      }],
-      "skillYears":{"python":{"value":5,"minimum":false,"evidence":"5 years of experience with Python"}},
-      "totalYears":null, "needsReview":[]
-    },
-    "baseResumeId":"server_resume_id_or_null",
-    "baseResumeVersion":"server_resume_version_or_null"
-  }
-
-The binary is not sent to the AI endpoint. It is attached to the employer portal
-by SQC. ApplyFlow must explicitly support resumeContext for locally uploaded
-resumes: validate the authenticated assignment/profile/job and optional base
-resume version; treat the uploaded text and parsed facts as applicant-provided
-material, never verified identity or authority. Reject unknown/malformed local
-resume envelopes rather than silently using an old server resume. Use the
-server-owned base candidate profile and job description with this resume in the
-AI prompt. Do not allow uploaded text to override system instructions or verified
-profile facts. Ground experience answers in the uploaded source; return NEEDS_INPUT
-for missing facts and flag conflicts with the base profile rather than inventing
-or rewriting the candidate profile. Echo the exact local resumeId/version and
-request identifiers in pending and final responses so SQC can reject stale data.
-
-Audit events include resume_source, resume_sha256, base_resume_id, and
-base_resume_version in addition to resume_id/version. Backend acceptance must
-recognize local IDs and preserve this provenance rather than require a matching
-ApplyFlow resume record or mark a local upload as server verified. A changed
-resume cancels stale answer generation and invalidates prior evidence versions.
-
-HUD continuity
-
-SQC listens to browser tab URL updates as well as in-page history events.
-Approved steps retain the same applicationSessionId when launch parameters vanish.
-An approved continuation in another tab may reuse only one unambiguous matching
-session, including its reviewed local resume and audit screenshots.
-For a new route outside allowedRoutes, SQC sends previousApplicationSessionId
-as a discovery hint, not authorization. ApplyFlow must verify the actual ATS
-requisition/application association and return the correct context with that new
-step explicitly authorized. Reject unrelated or ambiguous routes. This hint must
-not cause arbitrary request URLs to be added to allowedRoutes.
-
-Include every authorized application step and redirected portal in allowedRoutes.
-SQC can rediscover a previously approved job route even if launch
-parameters disappear or the new page has no resume/email field yet. The HUD is
-repaired if a SPA replaces its DOM, and saved positions are kept inside the
-viewport. An expired lease does not hide the HUD: SQC renews the context first.
-Visibility does not grant permission: autofill and resume attachment
-still require a current backend-verified context for the exact page.
-
-Required validation:
-- Authenticate the applier and tenant, check active assignment ownership, and
-  enforce equality among assignment IDs, profile ID, job ID, resume.profileId,
-  and the returned authenticated session/applier IDs.
-- The job context profile ID/version must equal /api/sqc/session's locked profile
-  ID/version. Echo profileAssignmentId/version in context.assignment. A different
-  candidate for the same applier is rejected even if the URL requests that candidate.
-- Match the actual portal URL/requisition/platform identifier to the target job.
-  Company/title alone are insufficient. Reject conflicting hints and ambiguity.
-- Build allowedRoutes from trusted job/ATS data. Do not echo arbitrary request
-  URLs into this list. Prefix routes match only path segments. Include identifying
-  query parameters when a platform uses them to distinguish jobs.
-- Authorize each redirect, login, confirmation, and embedded application frame
-  explicitly. Do not whitelist an entire shared ATS host or '/' for subpaths.
-  Every frame verifies its own URL with the worker; page postMessage cannot
-  install identity or profile context. Cross-frame AI injection is not implemented.
-- Omit unknown optional profile facts; never supply invented defaults for
-  authorization, sponsorship, salary, demographic answers, or experience.
-- A server resume may be null. A non-null server resume must still have verified
-  ownership and version metadata. The uploaded tailored resume supplies the active
-  experience context. Never synthesize a substitute file or candidate identity.
-- Existing profile sections such as eeoc, location, technicalExperience,
-  backgroundAndEducation, and customFields can be supplied as verified objects.
-
-Lease and synchronization behavior
-
-SQC refreshes active content configuration every 30 seconds and caches successful
-auth/context checks for at most 30 seconds. A content lease is capped at 60 seconds
-and never outlives the server context or authentication expiry. Sign-out and
-revocation therefore propagate within these polling/lease limits, not instantly.
-Event delivery forces fresh authentication and context verification. If profile,
-job, or resume versions changed since evidence was created, the event is rejected
-until SQC refreshes. Different tabs maintain independent contexts. Verified data
-is stored in trusted extension session storage, survives worker suspension, and
-expires on browser-session termination. There is no offline identity fallback.
-
-Submission and live-event synchronization
-
-Keep these existing endpoints and add authenticated ownership/version checks:
-POST /api/submissions/webhook
-POST /api/submissions/live-event
-
-Requests retain the existing SQC evidence/validation fields and add:
-{
-  "contractVersion":2,
-  "event_id":"random_event_uuid",
-  "application_session_id":"app_123",
-  "job_id":"job_123","job_version":"3",
-  "profile_id":"profile_123","candidate_id":"profile_123","profile_version":"7",
-  "profile_assignment_id":"profile_assignment_123","profile_assignment_version":"4",
-  "applier_id":"user_123","applier_name":"Applier Name","applier_email":"applier@example.com",
-  "profile_name":"Candidate Name","profile_assigned":"Candidate Name",
-  "resume_id":"resume_123","resume_version":"2",
-  "is_final_submission":true,
-  "submission_confirmed_by":"CONFIRMED_ON_PORTAL_SUCCESS_PAGE",
-  "job_status":"SUBMITTED","validation_status":"PASSED",
-  "extracted_data":{},"screening_qa":[],"screenshots":[],
-  "timestamp":"2030-01-01T12:00:00.000Z"
-}
-
-Re-derive identity/ownership and the applier profile lock server-side, validate
-profile assignment, profile, job, and resume versions, and deduplicate
-event_id within the assignment. Reject stale versions with 409. Do not treat
-PENDING/IN_PROGRESS, REJECTED, BLOCKED, or PORTAL_ACCESS_FAILED as a successful
-application. Prevent downgrading an already submitted application. Screenshot
-evidence can include a generated form summary when browser capture is unavailable;
-it is not by itself proof that the portal accepted an application.
-
-Both endpoints MUST respond with this acknowledgement shape:
-{
-  "success":true,"accepted":true,
-  "eventId":"the_exact_request_event_id",
-  "applicationSessionId":"app_123",
-  "recordId":"stored_record_id"
-}
-
-SQC reports successful delivery only after this acknowledgement. Existing
-responses containing only success:true are insufficient. Local audit history
-stores acknowledged metadata; visual evidence is sent to ApplyFlow and retained
-in bounded extension session storage. No automatic durable retry queue is part
-of this phase. A failed or timed-out dispatch must be retried explicitly; the
-backend must never infer that failed delivery means the portal application failed.
-
-AI screening integration (implemented extension contract)
-
-SQC calls POST /api/sqc/answer-questions with the authenticated session cookie
-and X-SQC-CSRF. Keep /api/submissions/answer-questions and
-/api/ai/answer-questions as backend aliases for existing clients; SQC uses the
-canonical /api/sqc route. All responses must be JSON, never login redirects.
-
-Request:
-{
-  "contractVersion":2,
-  "applicationSessionId":"app_123","requestId":"batch_uuid",
-  "jobId":"job_123","jobVersion":"3","profileId":"profile_123","profileVersion":"7",
-  "resumeId":"resume_123","resumeVersion":"2",
-  "url":"https://boards.greenhouse.io/example/jobs/12345",
-  "questions":[
-    {"id":"stable_field_uuid","question":"Why this role?","type":"textarea","required":true,"maxLength":1000},
-    {"id":"stable_choice_uuid","question":"Years of Node.js experience?","type":"select","required":true,"options":["1-2 years","3-5 years","5+ years"]}
+  "messages":[
+    {"role":"system","content":"Fixed instructions for resume-grounded first-person answers"},
+    {"role":"user","content":"JSON containing questions and resumeContext"}
   ],
-  "customInstructions":"Optional instructions, at most 4000 characters"
+  "temperature":0.2,
+  "resumeContext":{
+    "source":"upload",
+    "filename":"Resume.pdf",
+    "text":"Reviewed extracted resume text",
+    "version":"opaque unique resume version"
+  }
 }
 
-Resolve candidate/job and tenant from the authenticated assignment, rather than
-arbitrary client names. Before model execution, validate active assignment,
-job/profile/resume versions, correct tailored document when required, and the
-exact authorized job route (employer hostname alone is insufficient). Repeat
-authorization/version validation before releasing results, including polled
-results. Use 403 ASSIGNMENT_REVOKED and 409 VERSION_MISMATCH for those failures.
-
-Completed response:
+The user-message content is a JSON string with this structure:
 {
-  "success":true,"contractVersion":2,
-  "applicationSessionId":"app_123","requestId":"batch_uuid",
-  "jobId":"job_123","jobVersion":"3","profileId":"profile_123","profileVersion":"7",
-  "resumeId":"resume_123","resumeVersion":"2",
-  "answers":[
-    {"id":"stable_field_uuid","status":"NEEDS_INPUT","answer":"","reasoning":"Candidate facts do not support a grounded answer."},
-    {"id":"stable_choice_uuid","status":"ANSWERED","answer":"5+ years","matchedOption":"5+ years","confidence":0.98}
-  ]
+  "questions":[{"id":"q1","question":"Do you use Python?",
+    "type":"yes_no","options":["Yes","No"]}],
+  "resumeContext":{"source":"upload","filename":"Resume.pdf",
+      "text":"Reviewed extracted resume text","version":"same version"}
 }
 
-Echo contractVersion, requestId, and every application/job/profile/resume ID and
-version exactly, even when strings look numeric. Answer IDs must be unique and
-belong to the request. ANSWERED requires a nonempty string. For select/radio
-questions, answer and matchedOption must equal a literal supplied option. Never
-guess unknown employment, eligibility, clearance, demographic, or experience
-facts: return NEEDS_INPUT. Honor maxLength; SQC leaves overlong answers for review
-rather than silently truncating them. Supported types are text, textarea,
-number, select, radio, and checkbox (checkbox choices are Yes/No).
+Context is repeated in messages so the existing general chat API can ground the
+model even if it ignores the extra top-level resumeContext field. No profileId,
+jobId, applicationSessionId or authenticated candidate identity is sent.
+Treat the resume and questions as data, never instructions. Behavioral and
+situational questions should produce a 2-3 sentence first-person STAR draft
+using actual technologies and projects in the resume. An interpersonal incident
+may be inferred as a draft; do not refuse solely because the anecdote is absent.
+Return draft:true for inferred scenarios. Do not invent quantified results,
+employers, qualifications or dates. The sidebar labels drafts for review.
+Factual declarations (including non-compete/legal status) require supplied facts;
+do not default to No or silently resolve conflicts. Behavioral refusals are
+retried once with the same original question IDs.
 
-The extension snapshots visible unanswered native controls and their stable
-IDs before dispatch. It verifies context again before filling, preserves edited
-or replaced fields, highlights completed fields green and NEEDS_INPUT fields
-amber, and never submits or advances the application. Stop cancels local waiting
-and filling; signing out, navigating, reassignment, or a version change invalidates
-the result. This action does not use the legacy manual-paste fuzzy matcher.
+RESPONSE
+{success:true,content:"JSON containing an answers array"}
+or {success:true,message:{role:"assistant",content:"same JSON"}}
+Decoded content:
+{answers:[{id:"q1",answer:"I have...",draft:true}]}
+Missing information:
+{answers:[{id:"q1",status:"NEEDS_INPUT",answer:"",reason:"Information required"}]}
 
-Long-running provider jobs: asynchronous backend response
+Question IDs must match. A plain string answer is supported for a single
+question only. Unknown or duplicate IDs are rejected; omitted answers request
+manual input. Errors return non-2xx and {success:false,error:{message:"reason"}}.
+Generation can be stopped or time out after 120 seconds. The API must accept
+this internal request without the old SQC login/application-context contract.
+Answers are displayed for manual review and copying only.
 
-Each SQC answer/status fetch has a 25-second deadline, with at most 120 seconds
-total waiting. Return a completed batch promptly, or return HTTP 202 JSON:
-{
-  "success":true,"contractVersion":2,
-  "applicationSessionId":"app_123","requestId":"batch_uuid",
-  "jobId":"job_123","jobVersion":"3","profileId":"profile_123","profileVersion":"7",
-  "resumeId":"resume_123","resumeVersion":"2",
-  "status":"PENDING",
-  "statusUrl":"/api/sqc/answer-questions/requests/batch_uuid"
-}
 
-SQC polls the supplied authenticated same-origin GET statusUrl every 3 seconds
-(at most 40 polls, bounded by the total deadline). Every pending response must
-echo the full identity/version envelope above. PENDING, QUEUED, and RUNNING are
-recognized; subsequent responses can omit statusUrl to keep the previous URL.
-The final response must contain the completed answers envelope. Reject redirects,
-foreign origins, and cross-user status requests. Failed jobs can return status
-FAILED with an error. Cancellation stops extension requests; it does not promise
-to cancel a provider run already executing on the backend.
+TYPED BATCHES
+Up to 100 manually entered questions. Each has a stable ID and question text.
+Supported types: textarea, text, yes_no, radio, select, checkbox, number, date,
+email, url, tel. Radio/select/checkbox include exact options. Yes/no uses
+["Yes","No"]. maxLength is optional (1-50,000). IDs and constraints must survive
+any backend/model transformations.
 
-ApplyFlow owns the JHProIT integration: keep provider credentials server-side,
-create chats, send grounded prompts plus output_schema, and poll provider runs
-with a bounded timeout. Do not expose provider keys or send the extension to
-provider URLs. This extension repository does not contain apps/api; provider
-orchestration and the authenticated pending-status route require backend work.
+Radio/select/yes_no answers are exact option strings. Checkbox answers are
+arrays of exact option strings. Numbers use numeric strings; dates use YYYY-MM-DD.
+Unknown choices, malformed field values or overlong answers require manual input;
+the sidebar does not fuzzy-match choices or silently truncate generated answers.
 
-Use future, server-generated expiresAt values in real contexts, actual file-byte
-SHA-256 values (not an example or empty-file digest), and explicit verified
-workAuth.authorizedInUS facts when available. Do not infer eligibility from an
-unstructured workAuthType label. Record a final submission only after portal
-confirmation and the event acknowledgement described above; an Apply navigation
-button and a successful AI answer batch are not submission evidence.
+The extension queues groups of ten, with up to two concurrent /api/ai/chat calls.
+Each call includes the same selected resume. Groups complete independently;
+progress is shown in the sidebar, and returned answers can be reviewed/copied
+before all groups complete. Failed groups retain their question rows for manual
+input; successful groups are not discarded. Stop aborts active groups and prevents
+queued groups from starting. Changing/removing the resume invalidates the batch.
+No new asynchronous backend endpoint is required. The extension coordinates
+background requests against the existing chat endpoint. Any server/provider
+concurrency limits still apply.
 
-Existing /api/ai/chat and /api/ai/status are not authentication or assignment
-verification endpoints. AI availability alone must never unlock SQC.
 
-Acceptance checks for the ApplyFlow agent
+DETECTED APPLICATION QUESTIONS
+The extension detects visible unanswered application fields from the active page
+using scripting with persistent HTTP/HTTPS site access. This includes names,
+contact details, demographic questions and visible file-upload tasks. Passwords,
+security codes, government identifiers, legal agreements, hidden/disabled and
+already-answered fields remain excluded. Names and contact facts must come from
+the selected resume or confirmed notes, never another candidate's defaults.
+Detection is heuristic and the user can review, remove or add questions before
+sending. No AI request is triggered by scanning alone.
 
-Test email/password login, invalid credentials, temporary-password enforcement,
-password changes and old-password rejection, logout with failed server delivery,
-an authenticated applier with no assigned profile, expired login, wrong applier,
-wrong tenant, reassignment,
-candidate/profile/resume version updates, a resume belonging to another candidate,
-ambiguous standalone jobs, different jobs in two tabs, route redirects, embedded
-form URLs, and a logout during context retrieval. Verify that forged URL names,
-applier IDs, API origins, and candidate IDs do not change identity. Test duplicate
-event IDs, failed acknowledgements, and stale versions without marking jobs applied.
+Questions include type, exact options, required, maxLength, accessible help text,
+and numeric min/max/step when available. Preserve these fields in the model
+prompt. Detecting a required field does not authorize an invented answer.
 
-SQC local checks: npm.cmd test; npm.cmd run build on Windows (npm on other systems).
-Load dist/extension as an unpacked Chrome extension. Connect to the implemented
-API origin, sign in, refresh the popup, then open an assignment from ApplyFlow.
-Live end-to-end acceptance requires these backend routes and a Chrome session.
+The model returns exact literal radio/select answers and arrays of checkbox
+option strings. The sidebar matches those choices locally to the original tab,
+frame/document, URL, question snapshot and unchanged field state. Source binding
+metadata and browser selectors are NOT sent to ApplyFlow. No new backend route
+is required; existing chat requests carry the question requirements and resume.
+Missing personal facts must still use NEEDS_INPUT. Checkbox answers specify the
+matching options only, never "check all" unless all options are actually correct.
+Open-ended answers are editable/copyable and can be filled into their linked
+fields when supported. Inferred scenario drafts require review first.
+
+No screenshot/image messages are sent in this version. All screenshot controls,
+vision client code and image input have been removed.
+
+
+PAGE CONNECTION RECOVERY (2.5.2)
+The manifest requests persistent HTTP/HTTPS host access so new job tabs and
+different job sites connect without a per-tab permission request. Chrome Site
+access must allow all sites. If access is withheld, Connect application page
+remains available to request access to the active origin.
+Chrome site permission is independent of the ApplyFlow server URL and Codex.
+The tabs permission identifies the active application URL. After a grant the
+sidebar rescans automatically. Access/injection errors no longer share a generic
+permission message: missing installation permissions, restricted browser pages,
+site access, and detector execution errors are reported distinctly. Diagnostic
+URLs have their query/hash removed before display. No backend change is needed.
+
+
+PAYLOCITY LABEL EXTRACTION (2.5.3)
+Paylocity renders screening labels as direct paragraph/span headings inside
+.multi-question and .text-question wrappers; text labels may be nested in a
+paragraph without a for attribute. The detector now recognizes these wrappers,
+sibling labels, Bootstrap form groups and nearby structurally bounded headings.
+The visible (required) marker becomes required:true metadata and is removed from
+the actual question text. Exact radio/checkbox options are still read from their
+associated option labels. No embedded state, grading rules or answer keys are
+read. The same chat payload is used; no ApplyFlow backend change is required.
+
+
+GENERATION READINESS (2.5.4)
+The sidebar no longer silently disables generation for unsaved resume edits.
+With valid reviewed resume text, Get answers first saves that text and waits for
+the save acknowledgement, then sends the batch. A failed save prevents the AI
+call and allows retry. Without valid resume text, the main action opens the
+resume panel with a specific explanation. The worker still requires a saved
+resume snapshot; grounding is never bypassed. Session-stored resume data is
+cleared when Chrome reloads or updates the extension, so the user may need to
+upload/paste the resume again after an extension update.
+
+
+FULL FIELD FILLING AND CONFIRMED DEFAULTS (2.6.0)
+The extension can fill detected native text/textarea, numeric, date, email, URL,
+phone, select, radio and checkbox controls plus simple contenteditable textboxes.
+It uses native value setters with input/change events and checks field identity,
+question/options, URL/document and unchanged user values. Invalid field limits,
+rich editors and closed custom dropdowns require manual entry. Inferred draft
+scenarios are not filled until the user marks them reviewed. No form is submitted.
+
+A new user-message data field is supplied only when defaults were confirmed for
+the exact selected resume version:
+"answerDefaults":{"source":"user_confirmed","text":"The confirmed facts"}
+It accompanies questions and resumeContext inside messages[1].content JSON.
+This is model grounding data, not system instructions and not an authenticated
+candidate profile. It does not require a new backend endpoint. Generic chat
+adapters must retain the user-message JSON in the provider prompt.
+
+Use these facts only for the selected candidate. Resolve question polarity and
+exact options. If defaults conflict with each other or the resume, request input.
+Never infer work authorization, sponsorship, compensation, age or sensitive facts
+from an unspecified placeholder. Do not treat a role's salary range as accepted
+without supporting candidate preferences. A reusable template is inactive until
+explicitly confirmed for the current resume; a different resume version does not
+inherit active personal facts. Updating defaults invalidates pending answers.
+
+The uploaded source summary has no actual authorization/sponsorship/salary or
+availability defaults and contains candidate-specific contact/education details
+and some conflicting experience statements. Those must not become silent global
+facts for other resumes. No such personal details are bundled in the extension.
+
+Subsequent user preferences (v2.7 starter template): authorized to work Yes,
+with the applicable country still to be confirmed; sponsorship remains separate.
+Prefer the posted upper annual base-pay boundary, with the midpoint acceptable
+strictly above 100,000. Currency must be confirmed. Missing posted ranges or an
+upper boundary at/below the threshold require input. These preferences are sent
+only after the applier confirms and activates defaults for the selected resume.
+Do not invent a posted range when it is absent from the supplied data.
+
+WHOLE APPLICATION FORMS (2.8)
+The starter now includes Gender: Male, Hispanic/Latino: No, not a protected veteran,
+no SMS application updates, and Two or more races with a nondisclosure fallback.
+They become active only after confirmation for the selected resume and then apply
+across its job forms. Existing saved templates and active notes are not overwritten.
+File-upload tasks return NEEDS_INPUT locally and require the original document.
+Accessible custom dropdown options can be read when their associated listbox is
+visible. Closed or inaccessible widgets remain manual; no universal coverage is
+promised. Later wizard steps are detected after they load, never opened or submitted
+automatically. No new backend routes are needed.
