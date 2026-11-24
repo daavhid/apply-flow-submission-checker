@@ -1,6 +1,20 @@
 # Full SQC + AI Q&A releases
 
-`main` preserves the full SQC extension (login, assignment verification, HUD, settings and submission gate) and includes the updated Q&A sidebar. Open **AI Q&A sidebar** from the ready SQC workspace. The Q&A context is its selected resume; it does not modify or unlock the backend-assigned SQC profile or job.
+`main` uses one native Chrome sidebar with **Overview**, **Resume** and **Q&A** tabs. The toolbar opens sign-in directly for disconnected accounts. After login, Overview displays the account and assigned profiles without requiring a job. A verified job loads its status and approved resume automatically; missing resumes open the Resume tab. Uploads parse and save automatically, then close the editor. There is no floating HUD or manual completion button.
+
+Tracked job URLs activate from browser navigation/load events without depending on a detected form or an open sidebar. Job verification errors appear on every sidebar tab with the failing API/field and **Copy details**. Missing resume text does not deactivate an otherwise verified job. After reloading an extension update, refresh an already-open job tab once to load the new content scripts.
+
+Version 1.6 separates candidate reference facts from actual job documents, supports hidden Attach controls and importing an existing portal resume, and names the target candidate for each tracked application. It detects stable closed/404/410 pages, pauses application actions and reports unavailable status without downgrading applied records. Live progress starts only with actual input. Idle autofill does not rewrite dropdowns or repeatedly retry failed answers; editing a control pauses automatic filling.
+
+Job associations are retained per tab through URL changes, denied refreshes and worker restarts. New opener tabs can carry discovery hints; backend verification still controls every new route. A different job needs its own verified launch context. Completing a valid form, clicking Next, seeing a Confirmation heading, or manually invoking the old HUD method cannot mark a job submitted. The extension requires a visible definitive portal notice and an acknowledged ApplyFlow record before displaying completion.
+
+Deployment settings live in [config/settings.json](config/settings.json). Edit that source, run `npm.cmd run build:all`, and reload/distribute the rebuilt extension. Main enforces these settings instead of asking appliers to choose them. Set `resume.mode` to `fixed` for an approved shared candidate resume or `tailored` for a separate job resume. An explicit backend tailoring requirement still applies. Keep passwords and API credentials out of this file; the saved workspace endpoint and email/password login remain separate.
+
+Uploaded resumes are scoped to the assigned candidate and job (or candidate for fixed mode), renamed to the candidate's name with their original file extension, and parsed into skills and employment entries. Employment fills current/newest through oldest, keeping each employer, title, dates and description together. Manual edits are preserved; unsupported or ambiguous rows stay available for review. Successful attachment closes the resume editor and leaves the sidebar open.
+
+Browser navigation captures launch identifiers before redirects and carries the application into Apply-created tabs, including tabs without an opener ID. Login, wrapper and later application pages retain the same job association without a predefined route list. Backend identity/version verification still precedes actions on new pages. Page answers are collected per application across steps and sent with confirmed submission evidence. A correlated committed `APPLIED` acknowledgement displays completion immediately, with a background status refresh.
+
+Overview includes candidate copy controls, readiness steps and an **Already applied** acknowledgement shown only for a backend-confirmed duplicate. Candidate-wide matching across appliers needs ApplyFlow's `duplicateCheck` response described in the integration contract; a missing result does not prove that history was searched. Resume has original-file attach/download controls, expandable employment, skills and extracted text. Original attachment bytes stay unchanged. Main Q&A uses the versioned screening API, with per-answer copy/fill controls and **Fill ready answers** for reviewed or factual answers.
 
 The standalone rollout branch **feat/ai-questions-only** remains available with no SQC login or HUD. See [release variants](docs/RELEASES.md) and [Q&A features](docs/QA-README.md).
 
@@ -10,15 +24,15 @@ The standalone rollout branch **feat/ai-questions-only** remains available with 
 | `npm run build:qa` | `dist/qa/extension` | `dist/qa/applyflow-qa-extension.zip` |
 | `npm run build:all` | Both directories above | Both archives above |
 
-Builds clean only their own output folder, so producing one release preserves the other. `npm test` checks both variants; `npm run test:browser` runs the Q&A Chrome checks.
+Builds clean only their own output folder, so producing one release preserves the other. `npm test` checks both variants; `npm run test:browser` runs the standalone Q&A Chrome checks, and `npm run test:browser:sqc` checks the unified workspace.
 
 # 🛡️ Submission Quality Checker & Live Gatekeeper (Chrome Extension MV3)
 
 > ApplyFlow integration migration: Configure the endpoint, then sign in with your ApplyFlow applier email and password. SQC locks the candidate profile assigned to that applier and verifies each job against it. Temporary passwords can require a change before applying. The backend must implement [SQC contract version 2](docs/APPLYFLOW-INTEGRATION.txt), including authentication, profile assignment, context verification, AI screening answers, and event acknowledgements. Historical standalone examples below do not authenticate the integrated build.
 
-For each job, sync the approved job-tailored ApplyFlow resume, or open **HUD > Resume > Upload tailored resume**, review the extracted text/experience rows, and select **Use tailored resume**. SQC uses that document for supported work-history rows, skills, and explicit experience numbers. Identity, contact details, authorization, and other approved profile facts continue to come from ApplyFlow's locked base candidate profile.
+For each job, use the approved ApplyFlow resume or upload a replacement in the sidebar. SQC uses that document for supported work-history rows, skills, and explicit experience numbers. Identity, contact details, authorization, and other approved profile facts continue to come from ApplyFlow's locked candidate profile.
 
-**Questions > Q&A is manual-only.** Paste the questions you choose, click **Send pasted questions to ApplyFlow**, then review/edit and copy the returned answers. SQC does not collect all form questions, send AI requests automatically, or fill question fields automatically. **Check AI connection** reports the backend provider/model status; generation errors show the HTTP status, route, and backend reason. The backend must accept the local `resumeContext` envelope in the [integration contract](docs/APPLYFLOW-INTEGRATION.txt). Candidate and experience autofill are separate from Q&A.
+**Questions and answers live in the same sidebar.** Supported fields are detected automatically, configured defaults resolve locally, and the applier can request grounded AI answers for the remaining questions. Matching supported controls can be filled while preserving existing entries. The backend must accept the local `resumeContext` envelope in the [integration contract](docs/APPLYFLOW-INTEGRATION.txt).
 
 Build with `npm run build` and load `dist/extension`. Run `npm test` for the authentication, context isolation, and content autofill checks. On Windows PowerShell, use `npm.cmd` if script execution policy blocks `npm`.
 

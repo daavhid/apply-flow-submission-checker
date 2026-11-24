@@ -26,13 +26,20 @@ Notice period and start availability: Not specified - ask for confirmation.
 Location, onsite/hybrid preferences and travel: Not specified - ask for confirmation.
 
 Names, contact details, education and technical experience must match the selected resume. Do not reuse another candidate's details. If this template conflicts with the resume, ask for clarification.`;
-  function create({session,local,onChange=()=>{},id=()=>root.crypto.randomUUID()}){
+  function create({session,local,deployment=root.SQCDeployment,onChange=()=>{},id=()=>root.crypto.randomUUID()}){
     let queue=Promise.resolve();
     const serial=work=>{const result=queue.then(work);queue=result.catch(()=>{});return result;};
     const text=value=>{if(typeof value!=='string'||value.trim().length>100000)throw new Error('Answer facts must be text up to 100,000 characters.');return value.trim();};
-    async function read(version){const value=(await session.get('qaAnswerDefaults')).qaAnswerDefaults;return value&&value.resumeVersion===version?value:{text:starter,version:'extension-defaults-2.9.0',resumeVersion:version,source:'extension_defaults'};}
+    async function read(version){
+      if(deployment){const policy=await deployment.load(),a=policy.answers;let text=starter;
+        for(const [from,to] of [['Visa sponsorship now or in future: No.','Visa sponsorship now or in future: '+a.sponsorship+'.'],['Gender answer: Male.','Gender answer: '+a.gender+'.'],['Hispanic/Latino answer: No.','Hispanic/Latino answer: '+a.hispanicLatino+'.'],['Veteran status answer: I am not a protected veteran.','Veteran status answer: '+a.veteranStatus+'.'],['SMS application updates consent: No.','SMS application updates consent: '+a.smsUpdates+'.'],['Race/ethnicity answer preference: Two or more races; if unavailable, Prefer not to say.','Race/ethnicity answer preference: '+a.race+'; if unavailable, '+a.raceFallback+'.']])text=text.replace(from,to);
+        return {text,version:'deployment:'+JSON.stringify(a),resumeVersion:version,source:'extension_defaults'};
+      }
+      const value=(await session.get('qaAnswerDefaults')).qaAnswerDefaults;return value&&value.resumeVersion===version?value:{text:starter,version:'extension-defaults-2.9.0',resumeVersion:version,source:'extension_defaults'};
+    }
     const state=version=>serial(async()=>({active:await read(version),template:(await local.get('qaDefaultTemplate')).qaDefaultTemplate ?? starter,starter}));
     const save=(input,version)=>serial(async()=>{
+      if(deployment)throw new Error('Default answers are managed in config/settings.json.');
       if(!version || input?.resumeVersion!==version)throw new Error('The resume changed. Review these facts for the current resume.');
       const value=text(input.text);if(!value)throw new Error('Enter the answer facts first.');
       const active={text:value,version:id(),resumeVersion:version,source:'user_confirmed'};

@@ -14,7 +14,8 @@
     "build:qa": "node build-extension.js --profile=qa",
     "build:all": "node build-extension.js --all",
     "test:qa": "node --test tests/qa-*.test.js",
-    "test:browser": "node tests/browser-qa-smoke.js"
+    "test:browser": "node tests/browser-qa-smoke.js",
+    "test:browser:sqc": "node tests/browser-qa-smoke.js --sidebar"
   },
   "keywords": [
     "ats",

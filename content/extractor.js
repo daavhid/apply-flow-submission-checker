@@ -329,6 +329,7 @@ window.JobFormExtractor = (function () {
   function isFieldRequired(el, labelText) {
     if (el) {
       if (el.hasAttribute('required') || el.required === true) return true;
+      if (el.validity?.valueMissing || el.closest?.('[role="combobox"][aria-required="true"]')) return true;
       if (el.getAttribute('aria-required') === 'true') return true;
       if (el.getAttribute('data-required') === 'true' || el.getAttribute('data-required') === 'required') return true;
       if (el.classList && (el.classList.contains('required') || el.classList.contains('is-required') || el.classList.contains('mandatory') || el.classList.contains('jv-required'))) return true;
@@ -439,14 +440,14 @@ window.JobFormExtractor = (function () {
   function isJunkOrPhantomField(label, el) {
     if (!label) return true;
     const l = label.trim().toLowerCase();
-    if (l.length < 3) return true;
+    if (l.length < 3 && l!=='cv') return true;
     if (el && el.closest && el.closest('#sqc-hud-container, #sqc-modal-overlay, [id^="sqc-"], [class*="sqc-"]')) {
       return true;
     }
     if (l.includes('gatekeeper') || l.includes('apply-flow') || l.includes('active gate') || l.includes('subsidiary of apply-flow')) {
       return true;
     }
-    if (['--', 'pre', 'please', 'select', 'choose', 'select an item', 'checkbox label', '6 results are available.', 'performance cookies', 'required', 'optional', 'formpost'].includes(l)) {
+    if (['--', 'pre', 'please', 'select', 'choose', 'search', 'select an item', 'checkbox label', '6 results are available.', 'performance cookies', 'required', 'optional', 'formpost'].includes(l)) {
       return true;
     }
     if (/^(--|----)/.test(l)) return true;
@@ -457,6 +458,7 @@ window.JobFormExtractor = (function () {
   // Extract custom dropdown / combobox selected values from DOM widgets
   function extractCustomSelectValue(input) {
     if (!input) return '';
+    const committed=window.SQCFormState?.selected(input);if(committed)return committed;
 
     const container = (input.matches && input.matches('[role="combobox"], [role="listbox"], [data-automation-id*="select"], [data-automation-id*="dropdown"], .k-dropdown, [data-role="dropdownlist"], [class*="k-widget"], [class*="k-combobox"], .select2-container, .bootstrap-select, mat-select'))
       ? input
@@ -500,6 +502,10 @@ window.JobFormExtractor = (function () {
   function getElementLabel(el) {
     if (!el) return '';
     const rootScope = el.getRootNode ? el.getRootNode() : (el.ownerDocument || document);
+    if(String(el.type).toLowerCase()==='file'){
+      const owner=el.closest?.('label[aria-labelledby]'),refs=String(el.getAttribute('aria-labelledby')||owner?.getAttribute('aria-labelledby')||'').split(/\s+/);
+      for(const id of refs){const node=el.ownerDocument?.getElementById(id),text=node?cleanFieldLabel(getCleanNodeText(node)):'';if(/^(?:cv|resume|resume\s*\/\s*cv|curriculum vitae|cover letter)$/i.test(text))return text;}
+    }
 
     // 1. Explicit <label for="id">
     if (el.id) {
@@ -522,7 +528,7 @@ window.JobFormExtractor = (function () {
     // 3. ARIA attributes
     if (el.getAttribute && el.getAttribute('aria-label')) {
       const aria = cleanFieldLabel(clean(el.getAttribute('aria-label')));
-      if (aria && !isCodeOrJunk(aria) && !isDisclaimerOrInstruction(aria)) return aria;
+      if (aria && !/^(?:search|select|choose)$/i.test(aria) && !isCodeOrJunk(aria) && !isDisclaimerOrInstruction(aria)) return aria;
     }
     if (el.getAttribute && el.getAttribute('aria-labelledby')) {
       try {
@@ -692,7 +698,7 @@ window.JobFormExtractor = (function () {
     return null;
   }
 
-  // Determine if current page is an eligible ATS or job application portal
+  // Form detection identifies controls; only ApplyFlow tracking activates SQC.
   function isJobApplicationPortal() {
     const host = window.location.hostname.toLowerCase();
 
@@ -701,16 +707,11 @@ window.JobFormExtractor = (function () {
       return false;
     }
 
-    // Child iframes embedded inside an ATS portal must ALWAYS be eligible so sub-wizards report fields
-    if (window !== window.top) {
-      return true;
-    }
-
-    const current = window.__SQC_CONTEXT_SETTINGS?.verifiedContext;
-    if (window.SQCContextPolicy?.matchesUrl(window.location.href, current?.allowedRoutes) ||
+    if (window.SQCContextPolicy?.ready(window.__SQC_CONTEXT_SETTINGS, window.location.href) ||
         window.__SQC_PORTAL_ELIGIBLE_URL === window.location.href) return true;
-    const ats = detectAtsPlatform();
-    return Boolean(ats);
+    try {
+      return Boolean(window.SQCContextPolicy?.launchHints(window.location.href).applicationSessionId);
+    } catch (_) { return false; }
   }
 
   // Purge any lingering session storage and remove HUD from non-job pages
@@ -776,6 +777,10 @@ window.JobFormExtractor = (function () {
     if (name.includes('honeypot') || name.includes('bot_trap') || name.includes('nobot') || name.includes('botcheck')) {
       return true;
     }
+    if(type==='file'&&/^(?:cv|resume|resume\s*\/\s*cv|curriculum vitae|cover letter)$/i.test(txt.trim())){
+      const proxy=el.closest('label');
+      if(proxy?.getClientRects().length&&!proxy.closest('[hidden],[inert],[aria-hidden="true"]'))return false;
+    }
 
     try {
       const win = el.ownerDocument?.defaultView || window;
@@ -797,6 +802,8 @@ window.JobFormExtractor = (function () {
 
   // Detect if the job application is already submitted or already applied
   function detectAlreadyApplied() {
+    if(detectIntermediateWizardStep().isIntermediate || countVisibleFormInputs()>2)return {is_already_applied:false,message:''};
+    const noticeVisible=el=>Boolean(el?.getClientRects?.().length) && !el.closest('[hidden],[inert],[aria-hidden="true"]') && window.getComputedStyle(el).visibility!=='hidden';
     // 0. Active Apply Button Override:
     // If the active job view has an actionable "1-Click Apply" or "Apply" button visible and enabled,
     // the job is definitively NOT already applied (prevents feed/header false positives).
@@ -826,6 +833,7 @@ window.JobFormExtractor = (function () {
       'button, [role="button"], a, .btn, .applied-badge, .application-status, [data-automation-id*="applied"], [data-testid*="applied"], [class*="applied"], [class*="status"]'
     );
     for (const b of statusElements) {
+      if(!noticeVisible(b))continue;
       if (b.closest && b.closest('#sqc-hud-container, #sqc-modal-overlay, nav, header, footer, [role="navigation"], .header, .nav, .menu')) continue;
       const txt = clean(b.innerText || b.textContent || '');
       if (/^(applied|applied\s*✓|already\s*applied|submitted|already\s*submitted)$/i.test(txt)) {
@@ -844,7 +852,7 @@ window.JobFormExtractor = (function () {
 
     for (const sel of selectors) {
       const el = document.querySelector(sel);
-      if (el) {
+      if (el && noticeVisible(el)) {
         if (el.closest && el.closest('#sqc-hud-container, #sqc-modal-overlay, nav, header, footer, [role="navigation"]')) continue;
         const txt = getCleanNodeText(el);
         if (txt && /applied|submitted/i.test(txt)) {
@@ -869,6 +877,7 @@ window.JobFormExtractor = (function () {
 
     const elements = document.querySelectorAll('h1, h2, h3, h4, h5, .alert, .banner, .notification, .status-message, .flash-message, [class*="alert"], [class*="banner"], [class*="notice"], p, div');
     for (const el of elements) {
+      if(!noticeVisible(el))continue;
       if (el.closest && el.closest('#sqc-hud-container, #sqc-modal-overlay, nav, header, footer, [role="navigation"], .header, .nav, .menu')) continue;
       if (el.children.length > 6 && el.innerText.length > 400) continue;
 
@@ -883,6 +892,12 @@ window.JobFormExtractor = (function () {
     }
 
     return { is_already_applied: false, message: '' };
+  }
+
+  function visiblePortalNotice(el){
+    if(!el?.getClientRects?.().length||el.closest('[hidden],[inert],[aria-hidden="true"],.sqc-root,#sqc-hud-container,#sqc-modal-overlay,#sqc-portal-lock-banner'))return false;
+    for(let node=el;node&&node!==document;node=node.parentElement){const style=window.getComputedStyle(node);if(style.display==='none'||style.visibility==='hidden'||style.visibility==='collapse'||style.opacity==='0')return false;}
+    return true;
   }
 
   // Detect if the user is on an intermediate step of a multi-step form wizard (e.g. "Step 3 of 8")
@@ -901,9 +916,9 @@ window.JobFormExtractor = (function () {
       }
 
       // 2. Multi-step stepper / wizard DOM elements
-      const activeStepper = document.querySelector(
+      const activeStepper = Array.from(document.querySelectorAll(
         '.wizard-step.active, [aria-current="step"], [data-automation-id*="progressBarActiveStep"], .step-item.active, .stepper-item.active, [data-step-active="true"]'
-      );
+      )).find(visiblePortalNotice);
       if (activeStepper) {
         const parentList = activeStepper.closest('ol, ul, nav, [class*="wizard"], [class*="step"], [class*="progress"]');
         if (parentList) {
@@ -917,7 +932,7 @@ window.JobFormExtractor = (function () {
 
       // 3. Check for wizard buttons: presence of "Next", "Continue", "Save & Continue" without any final "Submit Application" button
       const allButtons = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"], a[role="button"]'))
-        .filter(b => !b.closest('#sqc-hud-container, #sqc-modal-overlay, .sqc-root') && b.offsetParent !== null);
+        .filter(visiblePortalNotice);
 
       const hasNextButton = allButtons.some(b => {
         const t = (b.innerText || b.textContent || b.value || '').trim();
@@ -945,9 +960,7 @@ window.JobFormExtractor = (function () {
       const inputs = Array.from(document.querySelectorAll(
         'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]), textarea, select'
       )).filter(el => {
-        if (el.closest && el.closest('#sqc-hud-container, #sqc-modal-overlay, #sqc-portal-lock-banner')) return false;
-        const rect = el.getBoundingClientRect();
-        return (rect.width > 0 || rect.height > 0) && window.getComputedStyle(el).display !== 'none' && window.getComputedStyle(el).visibility !== 'hidden';
+        return !el.disabled&&!el.readOnly&&visiblePortalNotice(el)&&!el.closest('nav, header, footer, [role="search"], #sqc-hud-container, #sqc-modal-overlay, .sqc-root');
       });
       return inputs.length;
     } catch (_) {
@@ -957,6 +970,7 @@ window.JobFormExtractor = (function () {
 
   // Detect if the job application was just successfully submitted / confirmed (Quick Apply or Standard ATS)
   function detectSubmissionSuccess() {
+    const noticeVisible=visiblePortalNotice;
     // Safeguard 1: Intermediate wizard steps (e.g. Step 3 of 8) are NEVER confirmation screens!
     const intermediateCheck = detectIntermediateWizardStep();
     if (intermediateCheck.isIntermediate) {
@@ -968,35 +982,29 @@ window.JobFormExtractor = (function () {
       return { is_success: false, message: '' };
     }
 
-    // 0. Global body text search for unambiguous, definitive confirmation phrases
-    const pageBodyText = clean(document.body ? (document.body.innerText || document.body.textContent || '') : '');
+    // Definitive phrases must be found in a visible portal notice below.
     const definitivePatterns = [
       /you(?:'ve| have)?\s+(?:successfully\s+)?applied\s+(?:for|to)\b/i,
       /you(?:'ve| have)\s+successfully\s+applied\b/i,
       /successfully\s+applied\s+(?:for|to)\b/i,
       /application\s+(?:has been|was|is)\s+(?:successfully\s+)?(?:submitted|sent|received)\b/i,
       /your\s+application\s+(?:for\s+.+\s+)?(?:was|has been)\s+(?:sent|submitted|received)\b/i,
-      /(?:thank\s*you|thanks)\s+for\s+applying(?:\s+(?:to|for)|!|\.)/i,
+      /(?:thank\s*you|thanks)\s+for\s+applying(?:\s+(?:to|for)\b|[!.]|$)/i,
+      /^(?:your\s+)?application\s+(?:submitted|received|sent)(?:\s+successfully)?[.!]?$/i,
       /we(?:'ve| have)\s+received\s+your\s+application\b/i,
       /your\s+application\s+has\s+been\s+received\b/i,
       /your\s+application\s+is\s+on\s+its\s+way\b/i,
       /you(?:'re| are)\s+all\s+set!?\s+your\s+application\b/i,
-      /application\s+submitted\s+successfully\b/i
+      /application\s+submitted\s+successfully\b/i,
+      /^(?:your\s+)?application\s+received[!.](?:\s|$)/i
     ];
-
-    for (const pat of definitivePatterns) {
-      if (pat.test(pageBodyText)) {
-        const match = pageBodyText.match(pat);
-        const snippet = match ? match[0] : 'Application confirmed on page';
-        return { is_success: true, message: snippet };
-      }
-    }
 
     // 1. Direct platform status badges/buttons
     const appliedButtons = document.querySelectorAll(
       'button, [role="button"], .applied-badge, .application-status, [data-automation-id*="applied"], [data-testid*="applied"], [class*="applied"]'
     );
     for (const b of appliedButtons) {
+      if(!noticeVisible(b))continue;
       if (b.closest && b.closest('#sqc-hud-container, #sqc-modal-overlay, .sqc-root')) continue;
       const txt = clean(b.innerText || b.textContent || '');
       if (/^(applied|applied\s*✓|application\s*submitted|application\s*sent)$/i.test(txt)) {
@@ -1005,31 +1013,13 @@ window.JobFormExtractor = (function () {
     }
 
     // 2. Headings, alerts, and banners indicating submission completion
-    const successPatterns = [
-      /you(?:'ve| have)?\s+(?:successfully\s+)?applied/i,
-      /successfully\s+applied/i,
-      /you\s+have\s+successfully\s+applied/i,
-      /application\s+(?:has been|was|is)\s+(?:successfully\s+)?(?:submitted|sent|received)/i,
-      /your\s+application\s+(?:for\s+.+\s+)?(?:was|has been)\s+(?:sent|submitted|received)/i,
-      /thank\s*you\s+for\s+applying/i,
-      /thanks\s+for\s+applying/i,
-      /thank\s*you\s+for\s+(?:your\s+interest|submitting)/i,
-      /we(?:'ve| have)\s+received\s+your\s+application/i,
-      /your\s+application\s+has\s+been\s+received/i,
-      /congratulations!?(?:\s+your\s+application\s+was\s+sent)?/i,
-      /application\s+submitted/i,
-      /application\s+sent/i,
-      /applied\s+on\s+ziprecruiter/i,
-      /applied\s+with\s+indeed/i,
-      /you\s+applied\s+to\s+this\s+job/i,
-      /your\s+application\s+is\s+on\s+its\s+way/i,
-      /you're\s+all\s+set/i
-    ];
+    const successPatterns = definitivePatterns;
 
     const elements = document.querySelectorAll(
       'h1, h2, h3, h4, h5, [role="heading"], .alert, .banner, .notification, .modal-body, .modal-title, .status-message, [class*="success"], [class*="confirmation"], [class*="applied"], p, span, strong, div, section, main'
     );
     for (const el of elements) {
+      if(!noticeVisible(el))continue;
       if (el.closest && el.closest('#sqc-hud-container, #sqc-modal-overlay, .sqc-root')) continue;
       if (el.children.length > 8 && el.innerText.length > 500) continue;
 
@@ -1043,25 +1033,16 @@ window.JobFormExtractor = (function () {
       }
     }
 
-    // 3. Check page URL / document title indicators paired with confirmation headers
-    const currentUrl = (window.location.href || '').toLowerCase();
-    const pageTitle = (document.title || '').toLowerCase();
-    const hasConfirmUrlOrTitle = /\/(confirmation|confirm|thank-you|thanks|submitted|success)\b/i.test(currentUrl) || /confirmation|application submitted|thank you for applying/i.test(pageTitle);
-
-    // Also check for top-level headers/titles saying "Confirmation" (e.g. Rippling ATS top bar)
-    const headerHasConfirmation = Array.from(document.querySelectorAll('h1, h2, h3, header, [role="banner"], [class*="header"], [class*="title"], div')).some(el => {
-      if (el.closest && el.closest('#sqc-hud-container, #sqc-modal-overlay, .sqc-root')) return false;
-      const t = clean(el.innerText || '');
-      return t === 'Confirmation' || /^confirmation\b/i.test(t);
-    });
-
-    if (hasConfirmUrlOrTitle || headerHasConfirmation) {
-      if (/applied|submitted|received|confirmation|thank you/i.test(pageBodyText)) {
-        return { is_success: true, message: 'Application confirmed on submission page' };
-      }
-    }
-
     return { is_success: false, message: '' };
+  }
+
+  function detectResumeUploadError(){
+    for(const node of document.querySelectorAll('.dz-error-message,[data-dz-errormessage],.file-upload-error,[role="alert"],[class*="error-message"],[class*="errorMessage"]')){
+      if(!visiblePortalNotice(node))continue;
+      const text=clean(node.innerText||node.textContent||'');
+      if(text.length<=1000&&/(?:file|resume|document|upload).{0,160}(?:can.t|cannot|failed|rejected|already.{0,30}processed|too large|invalid|unsupported|could not)/i.test(text))return text;
+    }
+    return '';
   }
 
   // Detect if the job application encountered an error / submission failure on portal
@@ -2264,6 +2245,8 @@ window.JobFormExtractor = (function () {
       if (processedElements.has(input)) return;
 
       const type = (input.type || 'text').toLowerCase();
+      const ownerWidget=input.closest('[role="combobox"]');
+      if(ownerWidget&&ownerWidget!==input)return; // The widget owns its search box and required state.
       const rawLabel = getElementLabel(input);
 
       if (isHoneypotOrLoginField(input, rawLabel) || isJunkOrPhantomField(rawLabel, input)) {
@@ -2274,32 +2257,14 @@ window.JobFormExtractor = (function () {
       // --- A. RESUME / FILE INPUT ---
       if (type === 'file') {
         markWidgetProcessed(input);
-        elementRefs.resume = input;
-        if (input.files && input.files.length > 0) {
-          resumeFilename = input.files[0].name;
-          resumeSize = input.files[0].size;
-        }
-
-        if (!resumeFilename) {
-          const parent = input.closest('.jv-form-field, .file-upload, .dropzone, fieldset, div, form');
-          if (parent) {
-            const uploadedText = parent.querySelector('.uploaded-file-name, .file-name, [class*="filename"], [class*="fileName"], .file-preview-chip, .file-item, .attachment-name');
-            if (uploadedText && clean(uploadedText.innerText)) {
-              const txt = clean(uploadedText.innerText);
-              if (/\.(pdf|docx?|doc|rtf|txt|odt)/i.test(txt)) {
-                resumeFilename = txt;
-              } else if (/success|uploaded|attached|complete/i.test(txt)) {
-                resumeFilename = 'Resume Attached (Verified)';
-              } else {
-                resumeFilename = txt;
-              }
-            }
-          }
-        }
-
-        const fileLabel = 'Resume / Attachment';
+        const identity=clean([rawLabel,input.id,input.name].join(' '));
+        const isResume=/resume|curriculum|\bcv\b/i.test(identity)&&!/cover.?letter/i.test(identity);
+        let filename=input.files?.[0]?.name||window.SQCFormState?.uploaded(input)||'';
+        if(!filename){const parent=input.closest('.jv-form-field,.file-upload,.dropzone,fieldset,div');const chip=parent?.querySelector('.uploaded-file-name,.file-name,[class*="filename"],[class*="fileName"],.file-preview-chip,.file-item,.attachment-name');const value=clean(chip?.textContent);if(/\.(pdf|docx?|rtf|txt|odt)$/i.test(value))filename=value;}
+        if(isResume){elementRefs.resume=input;if(filename){resumeFilename=filename;resumeSize=input.files?.[0]?.size||null;}}
+        const fileLabel = rawLabel || (isResume?'Resume / CV':/cover.?letter/i.test(identity)?'Cover letter':'Attachment');
         const isReq = isFieldRequired(input, fileLabel);
-        allFormEntries.push({ label: fileLabel, type: 'file', value: resumeFilename || 'No file chosen', required: isReq, is_required: isReq, element: input });
+        allFormEntries.push({ label: fileLabel, type: 'file', value: filename || 'No file chosen', required: isReq, is_required: isReq, element: input });
         return;
       }
 
@@ -2403,8 +2368,10 @@ window.JobFormExtractor = (function () {
 
       if (isUnansweredPlaceholder(val)) val = '';
 
+      const committedCombo=input.getAttribute('role')==='combobox'&&window.SQCFormState;
+      if(committedCombo)val=window.SQCFormState.selected(input);
       // If still empty and the input itself has a non-empty aria-valuenow or data-value, use that
-      if (!val) {
+      if (!val && !committedCombo) {
         const ariaVal = clean(input.getAttribute('aria-valuenow') || input.getAttribute('data-value') || input.getAttribute('data-val') || '');
         if (ariaVal && !isUnansweredPlaceholder(ariaVal)) val = ariaVal;
       }
@@ -2517,8 +2484,8 @@ window.JobFormExtractor = (function () {
       if (isJunkOrPhantomField(label, sel)) return;
 
       let targetElement = sel;
-      const visibleInput = sel.querySelector('input.k-input') || sel.querySelector('input:not([style*="display: none"]):not([type="hidden"])');
-      if (visibleInput) targetElement = visibleInput;
+      // A custom select's editable search input is not its committed value or
+      // application-level validity. Validate the labelled widget itself.
 
       const isReq = isFieldRequired(targetElement, label);
       let val = '';
@@ -2554,7 +2521,20 @@ window.JobFormExtractor = (function () {
     });
 
     // 4. CHECK FOR RESUME DOM CHIPS / UPLOADED BADGES
+    const liveResumeGroup=window.SQCFormState?.attachments(document).find(group=>/resume|curriculum|\bcv\b/i.test(group.question)&&!/cover/i.test(group.question));
+    if(liveResumeGroup?.filename){
+      resumeFilename=liveResumeGroup.filename;
+      for(const entry of allFormEntries)if(entry.type==='file'&&/resume|curriculum|\bcv\b/i.test(entry.label)&&!/cover/i.test(entry.label))entry.value=resumeFilename;
+    }
     if (!resumeFilename) {
+      for(const input of queryAllDeep('input[type=file]')){
+        if(input.closest('#sqc-hud-container, #sqc-modal-overlay, .sqc-root'))continue;
+        const name=clean([input.name,input.id,getElementLabel(input)].join(' '));
+        if(!/resume|curriculum|\bcv\b/i.test(name)||/cover.?letter/i.test(name))continue;
+        const attached=window.SQCFormState?.uploaded(input);if(attached){resumeFilename=attached;break;}
+      }
+    }
+    if (!resumeFilename&&!liveResumeGroup) {
       const chipSelectors = [
         '[data-automation-id="file-upload-item"]',
         '[data-automation-id*="uploadedFile"]',
@@ -2648,8 +2628,8 @@ window.JobFormExtractor = (function () {
     const tailoredResumeActive = typeof sessionStorage !== 'undefined' && Boolean(sessionStorage.getItem('sqc_tailored_resume'));
     const tailoredFilename = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('sqc_tailored_resume_filename') : null;
     // Never wipe out a previously uploaded resume from Step 1 just because Step 2/3 has an empty file input (e.g. Cover Letter)
-    let mergedResume = resumeFilename || (isSameCandidate ? savedState.resume_uploaded : '') || '';
-    if (!mergedResume && tailoredResumeActive) {
+    let mergedResume = resumeFilename || (!elementRefs.resume&&!liveResumeGroup&&isSameCandidate ? savedState.resume_uploaded : '') || '';
+    if (!mergedResume && !elementRefs.resume&&!liveResumeGroup&&tailoredResumeActive) {
       mergedResume = tailoredFilename || 'Tailored Resume Loaded (Verified)';
     }
     const mergedResumeSize = resumeSize || (isSameCandidate ? savedState.resume_size : null);
@@ -2790,6 +2770,7 @@ window.JobFormExtractor = (function () {
       submission_success_message: submissionSuccessInfo.message,
 
       is_submission_failed: submissionFailureInfo.is_failed,
+      portal_upload_error:detectResumeUploadError(),
       submission_failure_message: submissionFailureInfo.message,
 
       logged_in_account: extractLoggedInAccount(),
@@ -2901,31 +2882,12 @@ window.JobFormExtractor = (function () {
       input.value = sVal;
     }
 
-    // Trigger full event pipeline for React, Angular, Kendo UI, jQuery (without focus-scroll jumping)
+    // Notify the framework without synthesizing focus changes or outside clicks.
     input.dispatchEvent(new Event('input', { bubbles: true }));
     input.dispatchEvent(new Event('change', { bubbles: true }));
-    input.dispatchEvent(new Event('blur', { bubbles: true }));
-    input.dispatchEvent(new Event('focusout', { bubbles: true }));
 
-    // If part of Kendo UI or custom widget, synchronize companion inputs
-    const kendoWidget = input.closest('.k-widget, .k-combobox, .k-dropdown, .k-autocomplete');
-    if (kendoWidget) {
-      const companionInputs = kendoWidget.querySelectorAll('input');
-      companionInputs.forEach(ci => {
-        if (ci !== input && ci.value !== sVal) {
-          try {
-            const proto = Object.getPrototypeOf(ci);
-            const descriptor = Object.getOwnPropertyDescriptor(proto, 'value') || Object.getOwnPropertyDescriptor(ci, 'value');
-            if (descriptor && descriptor.set) descriptor.set.call(ci, sVal);
-            else ci.value = sVal;
-          } catch (_) {
-            ci.value = sVal;
-          }
-          ci.dispatchEvent(new Event('input', { bubbles: true }));
-          ci.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-      });
-    }
+    // Framework-owned hidden IDs and companion fields must be updated by the
+    // portal itself. Copying display text into them corrupts widget state.
 
     if (window.scrollY !== sy || window.scrollX !== sx) {
       window.scrollTo(sx, sy);
@@ -2963,8 +2925,6 @@ window.JobFormExtractor = (function () {
     // Dispatch input & change events (avoid focus triggering viewport scrolling)
     ta.dispatchEvent(new Event('input', { bubbles: true }));
     ta.dispatchEvent(new Event('change', { bubbles: true }));
-    ta.dispatchEvent(new Event('blur', { bubbles: true }));
-    ta.dispatchEvent(new Event('focusout', { bubbles: true }));
 
     if (window.scrollY !== sy || window.scrollX !== sx) {
       window.scrollTo(sx, sy);
@@ -3083,6 +3043,7 @@ window.JobFormExtractor = (function () {
       }
 
       if (matchedIndex !== -1) {
+        if(actualSelect.selectedIndex===matchedIndex&&actualSelect.value===actualSelect.options[matchedIndex].value)return false;
         const sx = window.scrollX;
         const sy = window.scrollY;
 
@@ -3108,20 +3069,8 @@ window.JobFormExtractor = (function () {
       }
     }
 
-    // Update visible label / span in custom UI dropdowns
-    const container = sel.closest('.k-dropdown, [role="combobox"], .bootstrap-select, .select2-container, .form-group, .field, div');
-    if (container) {
-      const displaySpan = container.querySelector('.k-input, .filter-option-inner-inner, .filter-option, .select2-selection__rendered, [class*="singleValue"], [class*="selected"], [class*="placeholder"], [class*="value"], button[role="combobox"], button.dropdown-toggle');
-      if (displaySpan) {
-        const textToShow = (matchedIndex !== -1 && actualSelect && actualSelect.options ? actualSelect.options[matchedIndex].text : targetVal);
-        if (displaySpan.tagName === 'INPUT') {
-          displaySpan.value = textToShow;
-        } else {
-          displaySpan.innerText = textToShow;
-        }
-      }
-    }
-
+    // Framework-owned labels must update through their native change handler.
+    // Writing fallback text into an unsupported dropdown creates mutation loops.
     return matchedIndex !== -1;
   }
 
@@ -3218,28 +3167,134 @@ window.JobFormExtractor = (function () {
   }
 
   // Restore form fields on the page from sessionStorage and active candidate profile
+  function isApplicationControl(field){
+    if(!field||field.type==='search'||field.closest?.('nav,header,footer,[role="search"],.sqc-root,#sqc-hud-container'))return false;
+    const describe=node=>[node?.id,node?.className,node?.getAttribute?.('name'),node?.getAttribute?.('role'),node?.getAttribute?.('data-automation-id')].filter(value=>typeof value==='string').join(' ');
+    for(let parent=field,depth=0;parent&&depth<5;parent=parent.parentElement,depth++)if(/newsletter|subscribe|cookie|(?:job|career|site)[-_ ]?(?:search|filter)|(?:search|filter)[-_ ]?(?:job|career)/i.test(describe(parent)))return false;
+    const form=field.form||field.closest?.('form'),region=form||field.closest?.('[role="form"],.application-form,[data-sqc-experience],[data-automation-id^="workExperience"],.experience-item,.work-experience-item')||field.ownerDocument?.body;
+    if(!region)return false;
+    const description=describe(region);
+    if(/newsletter|subscribe|login|sign.?in|contact.?us|search|filter/i.test(description))return false;
+    if(/application|applicant|candidate|work.?experience|employment|experience-item|education|demographic/i.test(description))return true;
+    const signals=new Set();
+    for(const node of region.querySelectorAll?.('input,textarea,select')||[]){
+      if(node.closest?.('nav,header,footer,[role="search"],.sqc-root'))continue;
+      const label=[node.name,node.id,node.autocomplete,getElementLabel(node)].join(' ');
+      if(node.type==='file'&&/resume|curriculum|\bcv\b/i.test(label))return true;
+      if(!visiblePortalNotice(node))continue;
+      if(/first.?name|given-name/i.test(label))signals.add('first');
+      if(/last.?name|family-name/i.test(label))signals.add('last');
+      if(/full.?name|legal.?name/i.test(label))signals.add('name');
+      if(node.type==='email'||/\bemail\b|e-mail/i.test(label))signals.add('email');
+      if(node.type==='tel'||/phone|telephone/i.test(label))signals.add('phone');
+      if(form&&/sponsor|work authorization|legally authorized|salary|years.*experience|cover.?letter/i.test(label))return true;
+    }
+    return signals.size>=2;
+  }
+
   const verifiedAutofillValues = new WeakMap();
+  const verifiedAutofillVersions=new WeakMap();
   function restoreVerifiedForm(profile, settings) {
     if (!window.SQCContextPolicy?.ready(settings, window.location.href) || profile?.id !== settings.verifiedContext.profileId) return { count: 0 };
+    const focused=document.activeElement;
+    if(!settings.userInitiatedFill&&(focused?.matches?.('input:not([type=hidden]):not([type=button]):not([type=submit]),select,textarea,[role=combobox],[contenteditable=true]')||
+      Array.from(document.querySelectorAll('[role=combobox][aria-expanded=true],[role=listbox]')).some(node=>node.getClientRects().length>0&&!node.closest('[hidden],[aria-hidden=true]'))))return {count:0,paused:true};
     const p = profile;
-    const experienceGroups = new Map();
+    const experienceGroups = new Map(),educationGroups=new Map();
+    const version=String(p.resumeId||'')+':'+String(p.resumeVersion||p.resumeText||'');
+    function savedValue(label,field){
+      if(settings.autoFillCustomQuestions===false||/password|captcha|one.time|consent|agree|privacy|terms|signature|subscribe|sms|text messages/i.test(label))return undefined;
+      let matches=(settings.savedFormAnswers||[]).filter(item=>getCanonicalLabelKey(item.question)===getCanonicalLabelKey(label));
+      if(field?.id&&matches.some(item=>item.fieldId===field.id))matches=matches.filter(item=>item.fieldId===field.id);
+      if(matches.some(item=>item.source==='local'))matches=matches.filter(item=>item.source==='local');
+      const values=[...new Set(matches.map(item=>String(item.answer??'')).filter(value=>value&&!isUnansweredPlaceholder(value)))];
+      return values.length===1?values[0]:undefined;
+    }
+    const normal=value=>String(value||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+    const employmentLabel=node=>{
+      const key=getCanonicalLabelKey(cleanFieldLabel(getElementLabel(node)));
+      if(!/^(month|year)$/.test(key))return key;
+      for(let parent=node.parentElement,depth=0;parent&&depth<5;parent=parent.parentElement,depth++){
+        const text=(parent.textContent||'').toLowerCase();
+        if(/start date/.test(text)&&!/end date/.test(text))return 'start '+key;
+        if(/end date/.test(text)&&!/start date/.test(text))return 'end '+key;
+      }return key;
+    };
+    function historySection(field,pattern){
+      for(let parent=field.parentElement,depth=0;parent&&depth<12;parent=parent.parentElement,depth++){
+        if(parent===document.body||parent===document.documentElement||parent.tagName==='FORM')break;
+        const heading=parent.querySelector?.('legend,h2,h3,h4,[role="heading"]');
+        if(heading&&(heading.compareDocumentPosition(field)&4)!==0&&pattern.test((heading.textContent||'').trim()))return parent;
+      }return null;
+    }
+    function educationGroupFor(field){
+      return field.closest('[data-sqc-education],.education-item,[data-education-row],.education-entry')||historySection(field,/^(?:education(?: history)?|academic (?:background|qualifications))$/i);
+    }
+    function educationIndex(group){
+      if(educationGroups.has(group))return educationGroups.get(group);
+      const used=new Set(educationGroups.values()),history=p.resumeContext?.education||[];
+      const controls=Array.from(group.querySelectorAll('input,textarea,select'));
+      const schools=controls.filter(node=>/^(?:school|school name|university|college|institution)$/.test(employmentLabel(node)));
+      const existing=schools.find(node=>node.value&&node.value!==verifiedAutofillValues.get(node));
+      let index=history.findIndex((entry,i)=>!used.has(i));
+      if(schools.length>1)index=-1;
+      else if(existing){const matches=history.map((entry,i)=>({entry,i})).filter(({entry})=>normal(entry.school)===normal(existing.value));index=matches.length===1?matches[0].i:-1;}
+      educationGroups.set(group,index);group.dataset.sqcEducationIndex=String(index);return index;
+    }
+    function experienceGroupFor(field){
+      const explicit=field.closest('[data-sqc-experience], [data-automation-id^="workExperience-"], [data-testid^="work-experience-"]');
+      if(explicit)return explicit;
+      const repeat=field.closest('.experience-item,.work-experience-item,[data-employment-row],.employment-entry');
+      if(repeat)return repeat;
+      const candidate=field.closest('fieldset, section, [role="group"]')||historySection(field,/^(?:work experience|employment history|professional experience)$/i);
+      const history=candidate&&/work experience|employment history|professional experience/i.test((candidate.textContent||'').slice(0,250));
+      if(!history)return null;
+      for(let parent=field.parentElement,depth=0;parent&&depth<7;parent=parent.parentElement,depth++){
+        const controls=Array.from(parent.querySelectorAll?.('input,textarea,select')||[]);
+        const employers=controls.filter(n=>/^(?:company|company name|employer|employer name|organization|organisation)$/.test(employmentLabel(n)));
+        const titles=controls.filter(n=>/^(?:job title|title|position|position title|role)$/.test(employmentLabel(n)));
+        if(employers.length===1&&titles.length===1&&controls.length<=24)return parent;
+        if(parent===candidate)break;
+      }
+      return candidate;
+    }
+    function experienceIndex(group){
+      if(experienceGroups.has(group))return experienceGroups.get(group);
+      const controls=Array.from(group.querySelectorAll?.('input,textarea,select')||[]),history=p.resumeContext?.workHistory||[];
+      const companies=controls.filter(n=>/^(?:company|company name|employer|employer name|organization|organisation)$/.test(employmentLabel(n)));
+      const used=new Set(experienceGroups.values());
+      let index=history.findIndex((entry,i)=>!used.has(i));
+      const heading=group.querySelector?.('legend,h2,h3,[data-row-label]')?.textContent||group.getAttribute?.('aria-label')||'';
+      const ordinal=/(?:work experience|employment|position|job|employer)\s*#?\s*(\d+)/i.exec(heading);
+      if(ordinal&&Number(ordinal[1])>0)index=Number(ordinal[1])-1;
+      const existing=companies.find(n=>n.value&&!isUnansweredPlaceholder(n.value)&&n.value!==verifiedAutofillValues.get(n));
+      if(companies.length>1)index=-1;
+      else if(existing){const matches=history.map((entry,i)=>({entry,i})).filter(({entry})=>normal(entry.company)===normal(existing.value));index=matches.length===1?matches[0].i:-1;}
+      if(used.has(index))index=-1;
+      experienceGroups.set(group,index);
+      if(group.dataset){if(group.dataset.sqcResumeGroup!=='true')group.dataset.sqcResumeGroup='true';if(group.dataset.sqcExperienceIndex!==String(index))group.dataset.sqcExperienceIndex=String(index);}
+      return index;
+    }
     const valueFor = label => {
       const key = getCanonicalLabelKey(label);
       const custom = (p.customFields || []).find(f => getCanonicalLabelKey(f.label || '') === key);
       if (settings.autoFillCustomQuestions !== false && custom?.value !== undefined) return custom.value;
       const resumeReady = !p.resumeTailoringRequired || p.resumeIsTailored === true;
       if (resumeReady && /^(resume|resume text|paste resume|paste your resume|cv|curriculum vitae)$/.test(key)) return p.resumeText;
-      if (resumeReady && /^(skills|technical skills|skills summary|primary skills|list your skills|technologies|programming languages)$/.test(key)) return (p.primaryStackKeywords || []).join(', ');
-      if (/^(first name|legal first name|given name)$/.test(key)) return p.firstName;
-      if (/^(last name|legal last name|family name|surname)$/.test(key)) return p.lastName;
+      if (resumeReady && settings.autoFillSkills!==false && /^(skills|technical skills|skills summary|primary skills|list your skills|technologies|programming languages)$/.test(key)) return (p.primaryStackKeywords || []).join(', ');
+      if (/^(first name|legal first name|given name)$/.test(key)) return p.firstName||p.fullName?.trim().split(/\s+/)[0];
+      if (/^(last name|legal last name|family name|surname)$/.test(key)) return p.lastName||(p.fullName?.trim().split(/\s+/).length>1?p.fullName.trim().split(/\s+/).at(-1):undefined);
       if (/^(name|full name|full legal name|first and last name)$/.test(key)) return p.legalName || p.fullName;
-      if (/^(email|email address|primary email)$/.test(key)) return p.primaryEmail;
+      if (/^(email|email address|primary email)$/.test(key)) return p.primaryEmail||p.email;
       if (/^(phone|phone number|mobile|mobile phone|telephone)$/.test(key)) return p.phone;
       if (/^(address|street address|address line 1)$/.test(key)) return p.address;
       if (/^(city|town)$/.test(key)) return p.city;
       if (/^(state|province|state province)$/.test(key)) return p.state;
       if (/^(zip|zip code|postal code)$/.test(key)) return p.zip;
       if (/^(country|country of residence)$/.test(key)) return p.country;
+      if (/^(graduation year|year of graduation|year graduated)$/.test(key)) return p.graduationYear||p.education?.[0]?.graduationYear;
+      if (/^(university|college|school|school name)$/.test(key)) return p.education?.[0]?.school;
+      if (/^(degree|degree earned|highest degree)$/.test(key)) return p.education?.[0]?.degree;
       if (/^(linkedin|linkedin profile|linkedin url|linkedin profile url)$/.test(key)) return p.linkedin;
       if (/^(github|github url|github profile)$/.test(key)) return p.github;
       if (/^(website|portfolio|portfolio url|personal website)$/.test(key)) return p.website || p.portfolio;
@@ -3257,8 +3312,11 @@ window.JobFormExtractor = (function () {
     let count = 0;
     const groups = new Set();
     for (const field of queryAllDeep('input, textarea, select')) {
-      if (field.closest('#sqc-hud-container, #sqc-modal-overlay, .sqc-root') || field.disabled || field.readOnly ||
-          ['hidden', 'file', 'submit', 'button', 'reset', 'password', 'checkbox'].includes(field.type)) continue;
+      if(!isApplicationControl(field))continue;
+      if(!visiblePortalNotice(field))continue;
+      if(field.tagName!=='SELECT'&&field.getAttribute?.('role')==='combobox')continue;
+      if (field.closest('#sqc-hud-container, #sqc-modal-overlay, .sqc-root, [hidden], [inert], [aria-hidden="true"]') || field.disabled || field.readOnly || field.dataset?.sqcUserCleared==='true' ||
+          ['hidden', 'file', 'submit', 'button', 'reset', 'password'].includes(field.type)) continue;
       let value;
       if (field.type === 'radio') {
         if (!field.name || groups.has(field.name)) continue;
@@ -3266,35 +3324,131 @@ window.JobFormExtractor = (function () {
         const radios = queryAllDeep(`input[type="radio"][name="${CSS.escape(field.name)}"]`);
         if (radios.some(r => r.checked)) continue;
         value = valueFor(getRadioGroupQuestion(radios));
+        if(value===undefined||value===null||value==='')value=savedValue(getRadioGroupQuestion(radios),field);
         if (typeof value === 'boolean') value = value ? 'Yes' : 'No';
         if (value !== undefined && value !== null && value !== '' && setNativeRadioValue(radios, String(value))) count++;
         continue;
       }
+      if(field.type==='checkbox'){
+        const saved=savedValue(cleanFieldLabel(getElementLabel(field)),field);
+        if(saved!==undefined&&verifiedAutofillValues.get(field)===undefined&&!field.checked&&/^(?:checked \(yes\)|yes|true)$/i.test(saved)&&setNativeCheckboxValue(field,true)){verifiedAutofillValues.set(field,true);count++;}
+        const group=experienceGroupFor(field),label=employmentLabel(field);
+        if(group&&settings.autoFillExperience!==false&&(p.resumeReady||p.resumeIsTailored)&&/currently (?:work|working|employed)|current (?:job|position|employer)|still (?:work|working)/i.test(label)){
+          const entry=p.resumeContext?.workHistory?.[experienceIndex(group)],owned=verifiedAutofillValues.get(field);
+          if(entry&&field.checked!==(entry.current===true)&&(owned===undefined?!field.checked:owned===field.checked)&&setNativeCheckboxValue(field,entry.current===true)){verifiedAutofillValues.set(field,field.checked);verifiedAutofillVersions.set(field,version);count++;}
+          else if(!entry&&owned!==undefined&&field.checked===owned&&verifiedAutofillVersions.get(field)!==version){setNativeCheckboxValue(field,false);verifiedAutofillValues.delete(field);}
+        }
+        continue;
+      }
       if (field.value && !isUnansweredPlaceholder(field.value) && field.value !== verifiedAutofillValues.get(field)) continue;
       const label = cleanFieldLabel(getElementLabel(field));
-      let experienceGroup = field.closest('[data-sqc-experience], [data-automation-id^="workExperience-"], [data-testid^="work-experience-"]');
-      if (!experienceGroup) {
-        const candidate = field.closest('fieldset, section, [role="group"]');
-        if (candidate && /work experience|employment history|professional experience/i.test((candidate.textContent || '').slice(0,250))) experienceGroup = candidate;
+      const educationGroup=educationGroupFor(field);
+      if(educationGroup){
+        if(!(p.resumeReady||p.resumeIsTailored)||!window.SQCResumeContext)continue;
+        educationGroup.dataset.sqcResumeGroup='true';
+        value=window.SQCResumeContext.educationValue(p.resumeContext?.education||[],employmentLabel(field),educationIndex(educationGroup),field.type);
+        if(value===undefined||value===null||value===''){
+          if(verifiedAutofillValues.get(field)!==undefined&&verifiedAutofillVersions.get(field)!==version){
+            if(field.tagName==='SELECT'){
+              const empty=Array.from(field.options||[]).find(option=>!option.value||isUnansweredPlaceholder(option.textContent));
+              if(empty){Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype,'value').set.call(field,empty.value);field.dispatchEvent(new Event('change',{bubbles:true}));}
+            }else if(field.tagName==='TEXTAREA')setNativeTextareaValue(field,'');else setNativeInputValue(field,'');
+            verifiedAutofillValues.delete(field);verifiedAutofillVersions.delete(field);
+          }continue;
+        }
       }
-      if (experienceGroup) {
-        if (!p.resumeIsTailored || !window.SQCResumeContext) continue;
-        if (!experienceGroups.has(experienceGroup)) experienceGroups.set(experienceGroup, experienceGroups.size);
-        value = window.SQCResumeContext.experienceValue(p.resumeContext?.workHistory || [],label,experienceGroups.get(experienceGroup),field.type);
-        if (value === undefined) continue;
+      const experienceGroup=experienceGroupFor(field);
+      if (experienceGroup&&!educationGroup) {
+        if(experienceGroup.dataset&&experienceGroup.dataset.sqcResumeGroup!=='true')experienceGroup.dataset.sqcResumeGroup='true';
+        if (settings.autoFillExperience===false||!(p.resumeReady||p.resumeIsTailored)||!window.SQCResumeContext) continue;
+        const index=experienceIndex(experienceGroup);
+        value=window.SQCResumeContext.experienceValue(p.resumeContext?.workHistory||[],employmentLabel(field),index,field.type);
+        if(value===undefined){
+          if(field.value&&field.value===verifiedAutofillValues.get(field)&&(index<0||verifiedAutofillVersions.get(field)!==version)){
+            let cleared;
+            if(field.tagName==='SELECT'){
+              const empty=Array.from(field.options||[]).find(option=>!option.value||isUnansweredPlaceholder(option.textContent));
+              if(empty){Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype,'value').set.call(field,empty.value);field.dispatchEvent(new Event('change',{bubbles:true}));cleared=true;}
+            }else cleared=field.tagName==='TEXTAREA'?setNativeTextareaValue(field,''):setNativeInputValue(field,'');
+            if(cleared){verifiedAutofillValues.delete(field);verifiedAutofillVersions.delete(field);}
+          }
+          continue;
+        }
       }
-      if (value === undefined && p.resumeIsTailored && ['number','text'].includes(field.type)) {
+      if (value === undefined && (p.resumeReady||p.resumeIsTailored) && ['number','text'].includes(field.type)) {
         value=window.SQCResumeContext?.numericFact(label,p.resumeContext)?.value;
       }
       if (value === undefined) value = valueFor(label);
+      if(value===undefined||value===null||value==='')value=savedValue(label,field);
       if (typeof value === 'boolean') value = value ? 'Yes' : 'No';
       if (value === undefined || value === null || value === '') continue;
       if (field.maxLength > 0 && String(value).length > field.maxLength) continue;
       const ok = field.tagName === 'SELECT' ? setNativeSelectValue(field, String(value)) :
         field.tagName === 'TEXTAREA' ? setNativeTextareaValue(field, String(value)) : setNativeInputValue(field, String(value));
-      if (ok) { verifiedAutofillValues.set(field, field.value); count++; }
+      if (ok) { verifiedAutofillValues.set(field, field.value);verifiedAutofillVersions.set(field,version); count++; }
     }
     return { count };
+  }
+
+  async function fillResumeHistory(profile,settings){
+    const identity=(settings,profile)=>{const c=settings?.verifiedContext;return JSON.stringify([c?.applicationSessionId,c?.applierId,c?.jobId,c?.profileId,c?.profileVersion,c?.profileAssignmentVersion,profile?.id,profile?.resumeId,profile?.resumeVersion]);};
+    const stamp=identity(settings,profile);
+    const valid=()=>{const liveSettings=window.__SQC_CONTEXT_SETTINGS||settings,liveProfile=window.__SQC_ACTIVE_PROFILE===undefined?profile:window.__SQC_ACTIVE_PROFILE;return window.SQCContextPolicy?.ready(liveSettings,window.location.href)&&profile.id===liveSettings.verifiedContext.profileId&&stamp===identity(liveSettings,liveProfile);};
+    if(!valid()||!(profile.resumeReady||profile.resumeIsTailored))return {count:0,review:['Verify this job and load its original resume first.']};
+    if(settings.autoFillExperience===false)return {count:0,review:['Resume history filling is disabled by your workspace settings.']};
+    const options={...settings,userInitiatedFill:true},review=[],resumeStamp=String(profile.resumeId||'')+':'+String(profile.resumeVersion||profile.resumeText||'');let count=restoreVerifiedForm(profile,options).count||0;
+    for(const [kind,history,selector,addPattern] of [
+      ['work',profile.resumeContext?.workHistory||[],'[data-sqc-experience-index]',/^(?:\+\s*)?add (?:another |work )?experience$|^add (?:another )?employment$/i],
+      ['education',profile.resumeContext?.education||[],'[data-sqc-education-index]',/^(?:\+\s*)?add (?:another )?education$/i]
+    ]){
+      for(let attempt=0;attempt<Math.min(history.length,30)&&valid();attempt++){
+        const before=document.querySelectorAll(selector).length;if(before>=history.length)break;
+        const buttons=Array.from(document.querySelectorAll('button,[role="button"]')).filter(node=>visiblePortalNotice(node)&&!node.disabled&&addPattern.test(clean(node.innerText||node.textContent)));
+        if(buttons.length!==1)break;
+        buttons[0].click();let added=false;
+        for(let poll=0;poll<40&&valid();poll++){
+          await new Promise(resolve=>setTimeout(resolve,25));count+=restoreVerifiedForm(profile,options).count||0;
+          if(document.querySelectorAll(selector).length>before){added=true;break;}
+        }
+        if(!added){review.push('The portal needs manual review to add another '+kind+' entry.');break;}
+      }
+    }
+    // Custom dropdowns are filled only on this explicit action and only when an
+    // exact, unique offered option matches the parsed row. Never type display
+    // text into a framework-owned hidden ID or pick the first result.
+    for(const node of queryAllDeep('[role="combobox"],[aria-haspopup="listbox"]')){
+      if(!valid())return {count,review:[...review,'Application context changed. Filling stopped.']};
+      if(node.tagName==='SELECT'||!visiblePortalNotice(node)||node.disabled)continue;
+      const group=node.closest('[data-sqc-education-index],[data-sqc-experience-index]');if(!group)continue;
+      const education=group.hasAttribute('data-sqc-education-index'),index=Number(group.dataset[education?'sqcEducationIndex':'sqcExperienceIndex']);
+      let label=cleanFieldLabel(getElementLabel(node)).toLowerCase();
+      if(/^(?:month|year)$/.test(label))for(let parent=node.parentElement,depth=0;parent&&depth<5;parent=parent.parentElement,depth++){
+        const text=parent.textContent||'';if(/start date/i.test(text)&&!/end date/i.test(text)){label='start '+label;break;}if(/end date/i.test(text)&&!/start date/i.test(text)){label='end '+label;break;}
+      }
+      const value=education?window.SQCResumeContext.educationValue(profile.resumeContext.education||[],label,index,node.type):window.SQCResumeContext.experienceValue(profile.resumeContext.workHistory||[],label,index,node.type);
+      const selected=window.SQCFormState?.selected(node)||node.getAttribute('aria-valuetext')||node.value||'',owned=verifiedAutofillValues.get(node);
+      if(!value){if(owned&&owned===selected)review.push('Review '+label+': its selection came from the previous resume.');continue;}
+      if(selected&&!isUnansweredPlaceholder(selected)&&selected!==owned)continue;
+      if(selected&&selected===owned&&verifiedAutofillVersions.get(node)===resumeStamp)continue;
+      node.click();let offered=[];
+      for(let poll=0;poll<20&&valid();poll++){
+        const ids=(node.getAttribute('aria-controls')||node.getAttribute('aria-owns')||'').split(/\s+/).filter(Boolean);
+        const lists=ids.length?ids.map(id=>document.getElementById(id)).filter(Boolean):Array.from(document.querySelectorAll('[role="listbox"]')).filter(visiblePortalNotice);
+        if(lists.length===1)offered=Array.from(lists[0].querySelectorAll('[role="option"]')).filter(visiblePortalNotice);
+        if(offered.length)break;await new Promise(resolve=>setTimeout(resolve,25));
+      }
+      const normal=value=>String(value).toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+      const target=normal(value),degreeTarget=education&&/degree/.test(label)?normal(String(value).split(/\s+in\s+/i)[0]):target;
+      const matches=offered.filter(option=>option.getAttribute('aria-disabled')!=='true'&&[target,degreeTarget].includes(normal(option.textContent)));
+      if(matches.length===1&&valid()){
+        matches[0].click();await new Promise(resolve=>setTimeout(resolve,25));
+        if(!valid())return {count,review:[...review,'Application context changed. Filling stopped.']};
+        const committed=window.SQCFormState?.selected(node)||node.getAttribute('aria-valuetext')||'';
+        if([target,degreeTarget].includes(normal(committed))){verifiedAutofillValues.set(node,committed);verifiedAutofillVersions.set(node,resumeStamp);count++;}else review.push('The portal did not confirm '+label+'. Select it manually: '+value);
+      }else{review.push('Select '+label+' manually: '+value);node.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));}
+    }
+    const workRows=document.querySelectorAll('[data-sqc-experience-index]').length,educationRows=document.querySelectorAll('[data-sqc-education-index]').length;
+    return {count,workRows,educationRows,review};
   }
 
   function restoreSavedForm(profile, settings = {}) {
@@ -4275,6 +4429,7 @@ ${targetQuestions.map((q, idx) => `    {
     detectIntermediateWizardStep,
     detectSubmissionSuccess,
     detectSubmissionFailure,
+    detectResumeUploadError,
     extractLoggedInAccount,
     detectCaptcha,
     detectJdSalaryRange,
@@ -4284,6 +4439,8 @@ ${targetQuestions.map((q, idx) => `    {
     applyParsedAnswers,
     extractApplyFlowParams,
     extractAllFields,
-    restoreSavedForm
+    restoreSavedForm,
+    fillResumeHistory,
+    isApplicationControl
   };
 })();

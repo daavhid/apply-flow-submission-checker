@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><title>ApplyFlow workspace</title><link rel="stylesheet" href="../ai/app.css"><link rel="stylesheet" href="sidebar.css"><link rel="stylesheet" href="polish.css"></head>
+<body>
+  <main>
+    <header><div class="brand">AF</div><div><p class="eyebrow">APPLYFLOW ASSISTANT</p><h1>Application workspace</h1></div><span id="sync-indicator" class="sync-indicator" role="status" title="Current ApplyFlow synchronization status">Connecting</span></header>
+    <p id="workspace-feedback" class="workspace-feedback" role="status" aria-live="polite" hidden></p>
+    <section id="account-gate" class="account-gate" aria-label="Connect your account">
+      <div class="auth-emblem" aria-hidden="true"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></svg></div><p class="eyebrow">YOUR PROTECTED WORKSPACE</p><h2 id="auth-title">Connect to ApplyFlow</h2><p id="auth-description" class="help">Sign in to sync your assigned profiles and job resumes.</p>
+      <form id="endpoint-form" autocomplete="on" hidden><label for="api-origin">ApplyFlow API URL</label><input id="api-origin" name="api-origin" type="url" placeholder="https://api.your-applyflow.com" required><button class="primary" type="submit">Connect workspace</button></form>
+      <form id="signin-form" autocomplete="on" hidden><label for="login-email">Email address</label><input id="login-email" name="username" type="email" autocomplete="username" required><label for="login-password">Password</label><div class="password-field"><input id="login-password" name="password" type="password" autocomplete="current-password" required><button id="reveal-password" type="button" aria-label="Show password" aria-pressed="false">Show</button></div><button class="primary" type="submit">Sign in</button><button id="change-endpoint" type="button" class="quiet">Change workspace URL</button></form>
+      <form id="password-form" autocomplete="on" hidden><label for="current-password">Current password</label><input id="current-password" name="current-password" type="password" autocomplete="current-password" required><label for="new-password">New password</label><input id="new-password" name="new-password" type="password" autocomplete="new-password" required><button class="primary" type="submit">Update password</button></form>
+      <p id="account-feedback" role="status" aria-live="polite">Checking your account...</p>
+      <button id="account-retry" class="quiet" type="button">Refresh connection</button>
+    </section>
+    <div id="connected-workspace" hidden>
+    <aside id="portal-state" class="job-verification" role="status" aria-live="polite" hidden><strong id="portal-state-title"></strong><p id="portal-state-message"></p><p id="portal-state-sync"></p></aside>
+    <section id="job-verification" class="job-verification" role="status" aria-live="polite" hidden><div><strong id="job-verification-title">Verifying your job</strong><p id="job-verification-message">Checking the active tab with ApplyFlow...</p></div><div class="actions"><button id="retry-job-verification" type="button">Retry verification</button><button id="copy-job-diagnostic" type="button" title="Copy verification details without passwords, cookies or resume content">Copy details</button></div><details id="job-verification-details"><summary>Verification details</summary><pre id="job-verification-diagnostic"></pre></details></section>
+    <nav class="workspace-tabs" role="tablist" aria-label="Workspace"><button id="tab-overview" type="button" role="tab" aria-selected="true" aria-controls="panel-overview" tabindex="0" data-tab="overview">Overview</button><button id="tab-resume" type="button" role="tab" aria-selected="false" aria-controls="panel-resume" tabindex="-1" data-tab="resume">Resume <span id="resume-tab-dot" hidden>&bull;</span></button><button id="tab-qa" type="button" role="tab" aria-selected="false" aria-controls="panel-qa" tabindex="-1" data-tab="qa">Q&amp;A</button></nav>
+    <p id="target-candidate-summary" class="target-candidate-summary" role="status">Resolving the candidate for this job...</p>
+    <section id="panel-overview" class="tab-panel" role="tabpanel" aria-labelledby="tab-overview">
+    <details id="account-panel" class="panel account-panel" open><summary>Your account &amp; profiles</summary><p class="eyebrow">SIGNED IN</p><h2 id="account-name"></h2><p id="account-email" class="help"></p><div class="profiles-heading"><h3>Assigned profiles</h3><button id="refresh-profiles" type="button" class="quiet" title="Fetch the latest profile assignments from ApplyFlow">Refresh</button></div><div id="assigned-profiles"></div><p id="profiles-feedback" role="status" aria-live="polite"></p><div class="actions"><button id="sign-out" type="button" class="quiet">Sign out</button><button id="account-settings" type="button" class="quiet">Settings</button></div></details>
+    <section id="job-waiting" class="panel empty-job"><span class="empty-job-icon" aria-hidden="true">&#8599;</span><h2>Ready for your next application</h2><p class="help" id="job-waiting-message">Open a job from ApplyFlow. We'll check its status and load its resume automatically.</p></section>
+    <section id="sqc-context" class="panel protection-panel" aria-label="Application protection">
+      <div class="section-heading"><span class="step">SQC</span><div><p class="eyebrow">CURRENT APPLICATION</p><h2 id="sqc-job-title">Waiting for an assigned job</h2><p id="sqc-company"></p></div></div>
+      <div class="context-status"><span id="sqc-lifecycle" class="readiness">Checking context</span><span id="sqc-fields"></span></div>
+      <ol class="sync-steps" aria-label="Application readiness"><li id="step-account">Account</li><li id="step-job">Job</li><li id="step-resume">Resume</li><li id="step-form">Form</li></ol>
+      <aside id="duplicate-notice" class="duplicate-notice" hidden><strong>Already applied for this candidate</strong><p id="duplicate-message"></p><button id="already-applied" type="button" title="Acknowledge the existing application confirmed by ApplyFlow. This does not create a new submission.">Already applied</button><p id="duplicate-acknowledged" hidden>Existing application acknowledged. No new submission recorded.</p></aside>
+      <dl class="context-facts"><div><dt>Candidate</dt><dd id="sqc-candidate">Not verified</dd></div><div><dt>Applier</dt><dd id="sqc-applier">Not connected</dd></div><div><dt>Job</dt><dd id="sqc-job-id">Waiting</dd></div></dl>
+      <p id="sqc-context-message" role="status" aria-live="polite">Checking this tab's job assignment.</p>
+      <p id="live-sync-note" class="help" role="status" aria-live="polite"></p>
+      <p id="portal-resume-summary" class="help" role="status"></p>
+      <p id="candidate-location-source" class="help"></p>
+      <ul id="sqc-issues" class="context-issues"></ul>
+      <details class="contact-details"><summary>Candidate details <span>Copy or assign to a page field</span></summary><div id="contact-copy-list"></div></details>
+      <div class="actions"><button id="sqc-autofill" class="primary" type="button" title="Fill supported candidate and employment fields; preserve manual edits">Fill form</button><button id="sqc-refresh" type="button" title="Check the latest job status and existing resume in ApplyFlow">Refresh status</button></div>
+      <div class="actions"><button id="sqc-setup" type="button">View account</button><button id="sqc-settings" type="button">Settings</button></div>
+      <p class="help">Complete and submit on the employer portal. This workspace records completion only after a portal success notice and ApplyFlow acknowledgement.</p>
+      <p id="submission-sync-status" class="help" role="status" aria-live="polite" hidden></p><button id="retry-submission-sync" type="button" hidden>Retry submission sync</button>
+      <details id="application-evidence"><summary>Application screenshots <span id="evidence-count">0</span></summary><p id="evidence-status" class="help">Screenshots are captured as you fill and move through application steps.</p><div id="evidence-list"></div><button id="capture-step" type="button">Capture current step</button></details>
+      <p id="sqc-deployment-note" class="help" hidden>Your team's application preferences are applied automatically.</p>
+    </section>
+    </section>
+    <section id="panel-resume" class="tab-panel" role="tabpanel" aria-labelledby="tab-resume" hidden><h2>Job resume</h2><p id="resume-candidate" class="eyebrow"></p><p id="resume-overview" class="help">Open a verified job to load its resume.</p><button id="resume-edit" type="button">Upload or replace resume</button>
+    <section id="original-file-panel" class="panel original-file"><p class="eyebrow">SELECTED ORIGINAL JOB FILE</p><h3 id="original-filename">No file loaded</h3><p id="original-file-status" class="help">Load the original PDF, DOCX or TXT file.</p><p id="portal-upload-state" class="help" role="status">Checking the job site's Resume / CV control...</p><button id="use-portal-resume" type="button" hidden title="Parse the original attached file for this candidate, then normalize its filename without changing bytes">Use attached resume as context</button><div class="actions"><button id="attach-resume-now" type="button" title="Attach the original bytes to the current Resume / CV upload field">Attach to page</button><button id="download-named-resume" type="button" title="Download the original file renamed to the candidate's name">Download original</button></div><p id="attachment-status" role="status" aria-live="polite"></p></section>
+    <div class="environment"><label for="environment">Server</label><select id="environment"><option value="deployed">ApplyFlow (deployed)</option><option value="local">Localhost :5000</option></select></div>
+    <p id="resume-status" role="status" aria-live="polite"></p>
+    <details id="resume-section" class="panel"><summary>Resume preview <span id="resume-name"></span></summary>
+      <p id="sqc-resume-policy" class="help">Your assigned candidate and this application's resume provide the answer context.</p>
+      <p class="help">PDF, DOCX or TXT, up to 10 MB. Selecting a file saves its original bytes and parses the answer context automatically.</p><input id="resume-file" type="file" accept=".pdf,.docx,.txt" aria-label="Select original job resume" hidden>
+      <label for="candidate-name">Candidate name for attachment filename</label><input id="candidate-name" type="text" maxlength="120" placeholder="Detected from the resume heading">
+      <label class="toggle"><input id="attach-resume" type="checkbox" checked>Attach this resume to matching application upload fields</label>
+
+      <details class="parsed-text"><summary>Extracted text <span>Used for answers, never converted to an attachment</span></summary><textarea id="resume-text" aria-label="Extracted resume text" rows="6" maxlength="200000" readonly></textarea><button id="copy-resume-text" type="button">Copy text</button></details>
+      <div class="actions"><button id="save-resume" type="button" hidden>Use this resume</button><button id="clear-resume" type="button" hidden>Restore ApplyFlow resume</button></div>
+    </details>
+      <div id="sqc-resume-facts"><div class="panel"><button id="fill-resume-history" type="button">Fill education &amp; work history</button><p id="history-feedback" role="status" aria-live="polite"></p></div><details class="panel experience-preview" open><summary>Experience <span>Current to earliest</span></summary><ol id="sqc-work-history"></ol></details><details class="panel"><summary>Education</summary><ol id="sqc-education-history"></ol></details><section class="panel skills-preview"><div class="batch-heading"><h3>Skills</h3><button id="copy-skills" type="button" title="Copy the skills parsed from this job's resume">Copy skills</button></div><p id="sqc-resume-skills" class="help"></p><div id="skill-chips"></div></section></div>
+    <details id="defaults-section" class="panel"><summary>Answer defaults <span id="defaults-state">Extension defaults active</span></summary>
+      <p class="help">Standard answers are active automatically across job forms. Names, contact details and experience come from the selected resume. Save optional overrides here when this resume needs different answers.</p>
+      <label for="defaults-file">Import your question-and-answer notes (TXT)</label><input id="defaults-file" type="file" accept=".txt,text/plain">
+      <label for="default-facts">Confirmed facts and answer preferences</label><textarea id="default-facts" rows="8" maxlength="100000" placeholder="Work authorization country and status: ...&#10;Sponsorship now or in future: ...&#10;Desired salary range, currency and pay period: ...&#10;Start availability: ..."></textarea>
+      <div class="actions"><button id="use-defaults" type="button" class="primary">Save resume overrides</button><button id="clear-defaults" type="button">Reset to extension defaults</button></div>
+      <div class="actions"><button id="save-default-template" type="button">Save reusable template</button><button id="load-default-template" type="button">Load template</button><button id="delete-default-template" type="button">Delete saved template</button></div>
+      <p id="defaults-status" role="status" aria-live="polite">Extension defaults are always active. Save only when you want to override them for the current resume.</p>
+      <button id="load-standard-defaults" type="button">Load updated standard defaults</button>
+    </details>
+    </section>
+    <section id="panel-qa" class="tab-panel" role="tabpanel" aria-labelledby="tab-qa" hidden>
+    <p id="qa-unavailable" class="empty">Open a verified job to detect and answer its application questions.</p><div id="qa-tools" hidden>
+    <section class="insights" aria-label="Q&A overview">
+      <div class="insights-heading"><div><p class="eyebrow">YOUR WORKSPACE</p><h2>Questions and answers</h2></div><span id="resume-readiness" class="readiness">Add resume</span></div>
+      <p id="insight-message">Select a resume to ground your answers.</p>
+      <p id="qa-progress-status" class="qa-progress-status" role="status" aria-live="polite">Waiting for application questions</p>
+      <div class="qa-stage-counts"><span><strong id="qa-unsent">0</strong> Not sent</span><span><strong id="qa-processing">0</strong> Processing</span><span><strong id="qa-failed">0</strong> Failed</span></div>
+      <div class="insight-grid"><button type="button" data-jump="questions-form"><strong id="insight-queued">0</strong><span>In batch</span></button><button type="button" data-jump="answers-title"><strong id="insight-answered">0</strong><span>Answered</span></button><button type="button" id="jump-review"><strong id="insight-review">0</strong><span>To review</span></button><button type="button" id="jump-applied"><strong id="insight-applied">0</strong><span>Applied</span></button></div>
+    </section>
+    <section class="panel" id="detection-section" aria-label="Application question detection">
+      <label class="toggle"><input id="auto-detect" type="checkbox" checked>Auto-detect application fields and questions</label>
+      <label class="toggle"><input id="apply-choices" type="checkbox" checked>Apply matching radio, checkbox and dropdown answers</label>
+      <label class="toggle"><input id="apply-text" type="checkbox" checked>Also fill supported written and numeric answers</label>
+      <button id="detect-questions" type="button">Refresh page questions</button>
+      <button id="connect-page" type="button" class="primary" hidden>Connect application page</button>
+      <p id="detection-status" role="status" aria-live="polite">Checking access to the active application page...</p>
+      <details id="detection-details" hidden><summary>Detection details</summary><p id="detection-error-detail"></p></details>
+      <p class="help">Existing entries are preserved. Matching fields use your profile and resume. Review generated answers before continuing.</p>
+    </section>
+    <form id="questions-form" class="panel">
+      <div class="section-heading"><span class="step">02</span><div><h2>Build your question batch</h2><p>Detected questions appear below. Add anything missed.</p></div></div>
+      <details id="manual-entry"><summary>Add questions manually</summary><label for="questions">Paste questions</label>
+      <p id="question-help">Paste questions in a numbered list or one per line. Put answer choices on separate lines beginning with a dash. Review types and choices before sending.</p>
+      <textarea id="questions" rows="5" maxlength="400099" aria-describedby="question-help" placeholder="1. Do you have Python experience?&#10;- Yes&#10;- No&#10;&#10;2. Describe your most relevant project."></textarea>
+      <div class="actions"><button id="add-pasted" type="button">Add pasted questions</button><button id="add-question" type="button">Add a question</button></div>
+      </details>
+      <div class="batch-heading"><h2>Question batch <span id="batch-count">(0)</span></h2><button id="clear-questions" type="button">Clear batch</button></div>
+      <div id="question-list"></div>
+      <div class="actions"><button id="send" type="submit" class="primary" aria-describedby="generate-help">Get answers</button><button id="fill-ready-answers" type="button" title="Fill reviewed and factual answers. Drafts still require review.">Fill ready answers</button><button id="stop" type="button" hidden>Stop request</button></div>
+      <p id="generate-help" class="help" role="status" aria-live="polite"></p>
+      <div id="loading" role="status" hidden><span class="spinner" aria-hidden="true"></span><span id="progress-text">Fetching answers from ApplyFlow…</span></div>
+      <p id="status" role="status" aria-live="polite">Ready when you are.</p>
+    </form>
+    <section class="results" aria-labelledby="answers-title"><div class="results-heading"><div><p class="eyebrow">03 / REVIEW &amp; USE</p><h2 id="answers-title">Your answers <span id="answer-count"></span></h2></div><button id="copy-all" type="button" disabled>Copy all answers</button></div><div class="answer-filters" role="group" aria-label="Filter answers"><button type="button" data-answer-filter="all" aria-pressed="true">All</button><button type="button" data-answer-filter="review" aria-pressed="false">To review</button><button type="button" data-answer-filter="draft" aria-pressed="false">Drafts</button><button type="button" data-answer-filter="applied" aria-pressed="false">Applied</button></div><p id="filtered-empty" class="empty" hidden>No answers match this view.</p><div id="answers"><p class="empty">Your answers will appear here after you send a batch.</p></div></section>
+    </div>
+    </section>
+    </div>
+  </main>
+  <template id="answer-template"><article class="panel answer"><div class="answer-meta"><span class="answer-type"></span><span class="answer-state"></span></div><div class="answer-heading"><h3></h3><button type="button" class="copy">Copy answer</button></div><p class="reason" hidden></p><label class="sr-only">Review or edit this answer</label><textarea rows="7"></textarea><div class="answer-actions"><button type="button" class="mark-reviewed">Mark reviewed</button></div></article></template>
+  <template id="question-template"><details class="question-editor"><summary></summary><label>Question<textarea class="question-text" rows="2" maxlength="4000"></textarea></label><label>Answer type<select class="question-type"><option value="textarea">Open answer / paragraph</option><option value="text">Short text</option><option value="yes_no">Yes / No</option><option value="radio">Radio / one choice</option><option value="select">Dropdown / one choice</option><option value="checkbox">Checkbox / multiple choices</option><option value="number">Number</option><option value="date">Date</option><option value="email">Email</option><option value="url">URL</option><option value="tel">Phone</option></select></label><label class="question-options" hidden>Choices (one per line)<textarea rows="3"></textarea></label><label>Character limit (optional)<input class="question-limit" type="number" min="1" max="50000"></label><button type="button" class="remove-question">Remove question</button></details></template>
+  <script src="../ai/lib/jszip.min.js"></script><script src="../ai/document-parser.js"></script><script src="../ai/resume.js"></script><script src="../ai/questions.js"></script><script src="../ai/question-status.js"></script><script src="managed.js"></script><script src="../ai/app.js"></script>
+<script src="sidebar.js"></script></body></html>

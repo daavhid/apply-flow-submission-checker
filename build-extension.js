@@ -5,7 +5,7 @@ const JSZip=require('jszip');
 const client=require('./ai/client');
 const ROOT_DIR=__dirname;
 const PROFILES={
-  sqc:{manifest:'manifest.json',files:['background','content','popup','onboarding','ui','options','ai','icons'],folder:'extension',zip:'submission-checker-extension.zip'},
+  sqc:{manifest:'manifest.json',files:['background','content','popup','onboarding','ui','options','ai','sidebar','config','icons'],folder:'extension',zip:'submission-checker-extension.zip'},
   qa:{manifest:'manifests/qa.json',files:['ai','icons'],folder:'qa/extension',zip:'qa/applyflow-qa-extension.zip'}
 };
 function safeOutput(relative){
@@ -17,6 +17,7 @@ function safeOutput(relative){
 async function build(profileName='sqc'){
   const profile=PROFILES[profileName];if(!profile)throw new Error('Choose --profile=sqc or --profile=qa.');
   const manifest=JSON.parse(fs.readFileSync(path.join(ROOT_DIR,profile.manifest),'utf8'));
+  if(profileName==='sqc')require('./config/runtime').validate(JSON.parse(fs.readFileSync(path.join(ROOT_DIR,'config/settings.json'),'utf8')));
   if(profileName==='qa'){
     const scope={};vm.runInNewContext(fs.readFileSync(path.join(ROOT_DIR,'ai/config.js'),'utf8'),scope);
     const config=scope.SQC_AI_CONFIG;

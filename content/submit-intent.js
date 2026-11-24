@@ -5,12 +5,12 @@
   const actions = 'button, input[type="submit"], input[type="image"], input[type="button"], a, [role="button"]';
   const entry = /^(?:start|begin)(?: (?:a|your|my|this|the))? application$|^apply manually$|^autofill with resume$|^use my last application$/i;
   const apply = /^apply(?: now| for (?:this )?job| to (?:this )?position| for this position)?$/i;
-  const step = /^(?:next(?: step)?|continue|save\s*(?:&|and)\s*continue|proceed|review(?: application| your application)?)$/i;
+  const step = /^(?:next(?: step)?|continue|save\s*(?:&|and)\s*continue|proceed|review(?: application| your application)?)(?:\s*[:\-–—]\s*[^\n]+|\s+(?:to|with)\s+[^\n]+)?$/i;
   const otherNavigation = /^(?:log ?in|sign ?in|register|back|previous|prev|upload|choose file|browse|agree|i agree|accept|cancel|close|exit|save|save draft|save and exit|save for later)$/i;
   const explicitFinal = /^(?:submit(?: (?:my |your )?application| profile)?|send application|complete application|finish(?: and submit)?|confirm and submit|complete submission|review and submit)$/i;
 
   function classify(facts) {
-    const label = String(facts.label || '').trim().replace(/\s+/g, ' ');
+    const label = String(facts.label || '').trim().replace(/\s+/g, ' ').replace(/^[←→‹›«»\s]+|[←→‹›«»\s]+$/g,'');
     if (facts.ignored) return 'ignore';
     if (facts.navigation || facts.opensForm || entry.test(label) ||
         /apply\s+(?:on\s+(?:company\s+site|website|ziprecruiter)|externally|with\s+(?:indeed|linkedin))/i.test(label)) return 'navigation';
@@ -60,6 +60,9 @@
     return /^(?:modal|collapse|dialog)$/i.test(action.getAttribute('data-toggle') || action.getAttribute('data-bs-toggle') || '');
   }
   function inspect(target, { form = null, submitEvent = false, intermediate = false } = {}) {
+    // Option labels can be "Continue", "Apply", etc. Editing a field is never a
+    // submission click, even when its widget sits inside a button-like wrapper.
+    if (!submitEvent && target?.closest?.('select, textarea, input:not([type="submit"]):not([type="image"]):not([type="button"]), [role="combobox"], [role="listbox"], [role="option"], .select2-container, .select2-dropdown')) return 'ignore';
     const action = target?.closest?.(actions);
     if (target?.closest?.(ignored)) return 'ignore';
     const doc = (action || form || target)?.ownerDocument;
@@ -76,7 +79,8 @@
       }
     }
     scope ||= action?.parentElement || form;
-    const label = (action?.innerText || action?.textContent || action?.value || action?.getAttribute('aria-label') || '').trim();
+    const visibleLabel=(action?.innerText || action?.textContent || action?.value || '').trim();
+    const label = visibleLabel.replace(/[←→‹›«»\s]/g,'') ? visibleLabel : (action?.getAttribute('aria-label') || action?.getAttribute('title') || visibleLabel).trim();
     const href = action?.tagName === 'A' ? (action.getAttribute('href') || '').trim() : '';
     const navigation = Boolean(href && href !== '#' && !/^javascript:/i.test(href));
     const id = [action?.id, action?.getAttribute('data-automation-id'), action?.getAttribute('data-qa')].filter(Boolean).join(' ');

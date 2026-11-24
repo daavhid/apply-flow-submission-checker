@@ -72,8 +72,18 @@ async function openSettings(section) {
   return { success: true };
 }
 
-importScripts('../content/context-policy.js', '../content/screening-policy.js', '../content/resume-context.js', 'local-resume.js', 'applyflow-session.js');
+importScripts('../content/context-policy.js', '../content/screening-policy.js', '../content/resume-context.js','../content/candidate-reference.js','../content/portal-availability.js','../content/live-progress.js', 'local-resume.js', 'application-journal.js', 'applyflow-session.js','job-activation.js','portal-availability.js');
 const sqcApplyFlow = SQCApplyFlowSession.create({ chrome, fetch: (...args) => fetch(...args), policy: SQCContextPolicy, defaults: DEFAULT_SETTINGS });
+const sqcAvailability=globalThis.SQCPortalAvailabilityService?.create({chrome,session:sqcApplyFlow});
+const sqcActivator=globalThis.SQCJobActivation?.create({chrome,session:sqcApplyFlow,policy:SQCContextPolicy,onVerified:(tabId,cfg)=>sqcAvailability?.check(tabId,cfg)});
+chrome.runtime.onStartup?.addListener(async()=>{
+  // Browser tab IDs can be reused. Detach old IDs, preserving exact-page claims
+  // for unambiguous restored tabs instead of throwing all recovery away.
+  const {sqcApplicationRecovery={}}=await chrome.storage.local.get('sqcApplicationRecovery');
+  await chrome.storage.local.set({sqcApplicationRecovery:Object.fromEntries(Object.entries(sqcApplicationRecovery).map(([id,record])=>[id,{...record,browserDetached:true}]))});
+  sqcActivator?.activateOpenTabs().catch(()=>{});
+});
+sqcMigration.then(()=>sqcActivator?.activateOpenTabs()).catch(()=>{});
 
 // In-Memory Tab-Isolated Sessions Map (tabId -> SessionData)
 const tabApplyFlowSessions = new Map();
@@ -84,7 +94,7 @@ const sqcEvidenceReady = chrome.storage.session.get('sqcEvidence').then(({ sqcEv
 function bindEvidenceContext(config, tabId) {
   const c = config.settings?.verifiedContext;
   if (!tabId || !c) return;
-  const key = [c.applicationSessionId, c.applierId, c.profileAssignmentId, c.profileAssignmentVersion, c.profileId, c.profileVersion, c.jobVersion, c.resumeVersion].join(':');
+  const key = [c.applicationSessionId, c.applierId, c.profileAssignmentId, c.profileAssignmentVersion, c.profileId, c.profileVersion, c.jobId].join(':');
   if (tabApplyFlowSessions.get(tabId)?.contextKey !== key) {
     const existing=[...tabApplyFlowSessions.values()].find(session=>session.contextKey===key);
     tabApplyFlowSessions.set(tabId, {contextKey:key,screenshots:existing ? structuredClone(existing.screenshots || []) : []});
@@ -104,24 +114,69 @@ function compactEvidence() {
 
 // Clean up tab tracking when a tab is closed
 chrome.tabs.onRemoved.addListener(async (tabId) => {
+  await sqcAvailability?.clear(tabId);
+  await sqcApplyFlow.forgetTab?.(tabId);
   await sqcEvidenceReady;
   tabApplyFlowSessions.delete(tabId);
   await chrome.storage.session.set({ sqcEvidence: compactEvidence() });
 });
 
 // Browser navigation events also cover history changes made in the site's main world.
-chrome.tabs.onUpdated?.addListener((tabId, changeInfo) => {
+chrome.webNavigation?.onBeforeNavigate?.addListener(details=>{
+  if(details.frameId===0)sqcAvailability?.clear(details.tabId).catch(()=>{});
+  if(details.frameId===0)sqcApplyFlow.rememberLaunch?.(details.tabId,details.url).catch(()=>{});
+});
+chrome.webRequest?.onCompleted?.addListener(details=>{sqcAvailability?.network(details).then(()=>sqcActivator?.activate(details.tabId)).catch(()=>{});},{urls:['<all_urls>'],types:['main_frame']});
+chrome.webRequest?.onErrorOccurred?.addListener(details=>{sqcAvailability?.network(details).then(()=>sqcActivator?.activate(details.tabId)).catch(()=>{});},{urls:['<all_urls>'],types:['main_frame']});
+chrome.tabs.onActivated?.addListener(({tabId})=>{
+  sqcActivator?.activate(tabId);
+});
+chrome.tabs.onUpdated?.addListener((tabId, changeInfo, tab) => {
+  if(changeInfo.status==='complete')sqcActivator?.activate(tabId);
   if (!changeInfo.url) return;
+  sqcApplyFlow.rememberLaunch?.(tabId,changeInfo.url).then(()=>Number.isInteger(tab?.openerTabId)?sqcApplyFlow.inheritTab?.(tab.openerTabId,tabId,changeInfo.url):undefined).then(()=>sqcActivator?.activate(tabId)).catch(()=>{});
   chrome.tabs.sendMessage(tabId, {type:'SQC_ROUTE_CHANGED'}).catch(()=>{});
+});
+chrome.tabs.onCreated?.addListener(tab=>{
+  const url=tab.pendingUrl||tab.url||'';
+  sqcApplyFlow.rememberLaunch?.(tab.id,url).then(()=>Number.isInteger(tab.openerTabId)?sqcApplyFlow.inheritTab?.(tab.openerTabId,tab.id,url):undefined).then(()=>sqcActivator?.activate(tab.id)).catch(()=>{});
+});
+chrome.webNavigation?.onCreatedNavigationTarget?.addListener(details=>{
+  sqcApplyFlow.inheritTab?.(details.sourceTabId,details.tabId,details.url).then(()=>sqcActivator?.activate(details.tabId)).catch(()=>{});
+});
+chrome.webNavigation?.onCommitted?.addListener(details=>{if(details.frameId===0)sqcActivator?.activate(details.tabId);});
+chrome.webNavigation?.onHistoryStateUpdated?.addListener(details=>{
+  if(details.frameId===0)chrome.tabs.sendMessage(details.tabId,{type:'SQC_ROUTE_CHANGED'}).catch(()=>{});
 });
 
 // Message Bus Handler
+const sqcSidebarPorts=new Map();
+function broadcastSidebarVisibility(windowId){
+  const visible=[...sqcSidebarPorts.values()].some(panel=>panel.windowId===windowId&&panel.visible);
+  chrome.tabs.query({windowId}).then(tabs=>Promise.all(tabs.map(tab=>chrome.tabs.sendMessage(tab.id,{type:'SQC_SIDEBAR_VISIBILITY',visible}).catch(()=>{})))).catch(()=>{});
+}
+chrome.runtime.onConnect?.addListener(port=>{
+  if(port.name!=='sqc-workspace'||port.sender?.url!==chrome.runtime.getURL('sidebar/sidebar.html'))return;
+  port.onMessage.addListener(message=>{if(!Number.isInteger(message.windowId))return;const previous=sqcSidebarPorts.get(port);sqcSidebarPorts.set(port,{windowId:message.windowId,visible:message.visible!==false});if(previous&&previous.windowId!==message.windowId)broadcastSidebarVisibility(previous.windowId);broadcastSidebarVisibility(message.windowId);});
+  port.onDisconnect.addListener(()=>{const windowId=sqcSidebarPorts.get(port)?.windowId;sqcSidebarPorts.delete(port);if(Number.isInteger(windowId))broadcastSidebarVisibility(windowId);});
+});
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if(message.type==='SQC_JOB_ACTIVATION')return;
+  if (typeof message.type==='string' && message.type.startsWith('SQC_SIDEBAR_')) return;
+  if(message.type==='SQC_LAUNCH_STATUS'&&sender.tab){
+    sqcApplyFlow.handle({type:'GET_LAUNCH_STATUS'},sender).then(result=>sendResponse({...result,sidebarVisible:[...sqcSidebarPorts.values()].some(panel=>panel.windowId===sender.tab.windowId&&panel.visible)})).catch(error=>sendResponse({success:false,error:error.message}));return true;
+  }
+  if (message.type==='OPEN_SQC_SIDEBAR') {
+    if(!sender.tab?.id){sendResponse({success:false,error:'Open the workspace from the extension toolbar.'});return;}
+    chrome.sidePanel.open(Number.isInteger(sender.tab.windowId)?{windowId:sender.tab.windowId}:{tabId:sender.tab.id}).then(()=>sendResponse({success:true})).catch(error=>sendResponse({success:false,error:error.message}));return true;
+  }
   // The dedicated Q&A listener owns these messages and must be the only responder.
   if (typeof (message.type || message.action) === "string" && (message.type || message.action).startsWith("QA_")) return;
   const handler = async () => {
     await sqcMigration;
     await sqcEvidenceReady;
+    if(message.type==='SQC_CHECK_PORTAL_AVAILABILITY'&&sender.tab&&sender.frameId!==undefined&&sender.frameId!==0)return {success:false,error:'Only the main job page can request availability checks.'};
+    if(message.type==='SQC_CHECK_PORTAL_AVAILABILITY'&&sender.tab){const cfg=await sqcApplyFlow.handle({type:'GET_CONFIG'},{url:sender.tab.url,tab:sender.tab});return {success:true,availability:await sqcAvailability?.check(sender.tab.id,cfg)};}
     const integrated = await sqcApplyFlow.handle(message, sender);
     if (integrated !== undefined) {
       if (['SQC_CONNECT', 'SQC_DISCONNECT', 'SQC_LOGIN', 'SQC_LOGOUT', 'SQC_CHANGE_PASSWORD'].includes(message.type)) tabApplyFlowSessions.clear();
@@ -132,6 +187,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         chrome.tabs.sendMessage(message.tabId, {type: 'SQC_CONTEXT_AVAILABLE'}).catch(() => {});
       }
       if (['SQC_CONNECT', 'SQC_DISCONNECT', 'SQC_LOGIN', 'SQC_LOGOUT', 'SQC_CHANGE_PASSWORD', 'SAVE_SETTINGS', 'SET_INTERCEPTION_MODE'].includes(message.type)) notifyTabsAboutStateChange();
+      if(['SQC_LOGIN','SQC_CHANGE_PASSWORD'].includes(message.type)&&integrated.integration?.applier)sqcActivator?.activateOpenTabs().catch(()=>{});
+      if(sender.tab&&message.payload?.is_final_submission===true&&['LOG_SUBMISSION','APPLYFLOW_WEBHOOK'].includes(message.action||message.type)){
+        try{chrome.runtime.sendMessage?.({type:'SQC_SUBMISSION_CHANGED',tabId:sender.tab.id,windowId:sender.tab.windowId}).catch(()=>{});}catch(_){}
+      }
       return integrated;
     }
     // Only extension UI can invoke maintenance commands. Portal scripts get a narrow allowlist.
@@ -213,6 +272,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const tabId = sender.tab?.id;
         const windowId = sender.tab?.windowId;
         let rawDataUrl = meta.preCapturedDataUrl || message.preCapturedDataUrl || '';
+        const cachedSession=tabApplyFlowSessions.get(tabId),captureJobId=meta.job_id||meta.jobId||message.jobId||'';
+        if(meta.trigger==='QUESTIONS_ANSWERED'&&meta.form_fingerprint&&(!captureJobId||!cachedSession?.jobId||captureJobId===cachedSession.jobId)){
+          const previous=cachedSession?.screenshots?.find(shot=>shot.form_fingerprint===meta.form_fingerprint&&shot.page_url?.split('#')[0]===String(meta.page_url||sender.tab?.url||'').split('#')[0]);
+          if(previous)return {success:true,duplicate:true,screenshot:previous,screenshots:cachedSession.screenshots};
+        }
 
         if (windowId !== undefined) {
           try {
@@ -252,7 +316,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const pageUrl = meta.page_url || meta.pageUrl || message.pageUrl || sender.tab?.url || "";
         const scrollBucket = Math.round((Number(meta.scroll_y || message.scrollY) || 0) / 450);
         const answeredCount = Number(meta.answered_count || message.answeredCount) || 0;
-        const stepKey = `${pageUrl.split('#')[0]}::${stepLabel}::${scrollBucket}::${trigger}`;
+        const stepKey = `${pageUrl.split('#')[0]}::${stepLabel}::${scrollBucket}`;
 
         const shotId = `shot_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
         const shotItem = {
@@ -265,6 +329,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           req_id: incomingReqId || prevSession.reqId || "",
           answered_count: answeredCount,
           total_fields_count: Number(meta.total_fields_count || message.totalFieldsCount) || 0,
+          form_fingerprint:meta.form_fingerprint||'',
           scroll_y: Number(meta.scroll_y || message.scrollY) || 0,
           captured_at: new Date().toISOString(),
           data_url: rawDataUrl,
@@ -276,15 +341,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         };
 
         // Deduplicate by stepKey unless manual snap or final submit
-        const existingIdx = existingShots.findIndex(s => s.step_key === stepKey);
-        if (existingIdx >= 0 && trigger !== "MANUAL_SNAP" && trigger !== "FINAL_SUBMIT") {
-          existingShots[existingIdx] = shotItem;
-        } else {
-          existingShots.push(shotItem);
-        }
-
-        // Keep up to 8 most relevant screenshots per job application
-        const trimmedShots = existingShots.slice(-8);
+        const merged=SQCLiveProgress.mergeScreenshots(existingShots,shotItem);
+        const trimmedShots=merged.screenshots;
 
         if (tabId) {
           tabApplyFlowSessions.set(tabId, {
@@ -298,7 +356,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         return {
           success: true,
-          screenshot: shotItem,
+          screenshot: merged.screenshot,
+          duplicate:merged.duplicate,
           screenshots: trimmedShots
         };
       }

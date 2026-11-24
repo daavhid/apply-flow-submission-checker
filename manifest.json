@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Apply-Flow Quality Gatekeeper",
-  "version": "1.1.0",
-  "version_name": "1.1.0 - SQC with AI Q&A",
+  "version": "1.6.23",
+  "version_name": "1.6.23 - Rippling clickable CV chip detection",
   "description": "An Apply-Flow Subsidiary Suite — Real-time ATS form extractor, submission quality validator, live HUD, and duplicate prevention gatekeeper.",
   "permissions": [
     "storage",
@@ -10,7 +10,9 @@
     "tabs",
     "scripting",
     "notifications",
-    "sidePanel"
+    "sidePanel",
+    "webNavigation",
+    "webRequest"
   ],
   "host_permissions": [
     "http://localhost:5000/*",
@@ -20,8 +22,7 @@
     "<all_urls>"
   ],
   "action": {
-    "default_popup": "popup/popup.html",
-    "default_title": "Apply-Flow Quality Gatekeeper",
+    "default_title": "Open ApplyFlow workspace",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
@@ -41,11 +42,16 @@
       "match_about_blank": true,
       "js": [
         "content/context-policy.js",
+        "content/sidebar-launch.js",
+        "content/portal-availability.js",
+        "content/live-progress.js",
         "content/screening-policy.js",
         "content/screening.js",
         "content/submit-intent.js",
+        "content/submission-delivery.js",
         "options/doc-parser.js",
         "content/resume-context.js",
+        "ai/form-state.js",
         "content/extractor.js",
         "content/validator.js",
         "content/hud.js",
@@ -72,6 +78,6 @@
   ],
   "minimum_chrome_version": "116",
   "side_panel": {
-    "default_path": "ai/app.html"
+    "default_path": "sidebar/sidebar.html"
   }
 }

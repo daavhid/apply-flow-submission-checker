@@ -17,7 +17,9 @@ window.SubmissionCheckerCore = (function () {
   let debounceTimer = null;
   let sessionScreenshots = [];
   let screenshotDebounceTimer = null;
+  let liveSnapshotTimer,lastLiveSignature='',lastLiveSentAt=0,liveSyncState=null;
   let lastCapturedSignature = '';
+  const capturedFormStates=new Set();
   let isCapturingScreenshot = false;
 
   function hasVerifiedContext() {
@@ -37,6 +39,17 @@ window.SubmissionCheckerCore = (function () {
       job_version: c?.jobVersion, resume_id: c?.resumeId, resume_version: c?.resumeVersion };
   }
 
+  function observePortalNavigation(event) {
+    if(window!==window.top||event.origin!=='https://jobs.ashbyhq.com'||typeof event.data!=='string')return;
+    const kind=event.data==='reset_jid'?'ATS_RESET_JOB_SELECTION':/^set_jid=.{1,200}$/.test(event.data)?'ATS_SET_JOB_SELECTION':null;
+    if(!kind)return;
+    const source=Array.from(document.querySelectorAll('iframe')).some(frame=>{
+      try{return frame.contentWindow===event.source&&new URL(frame.src).origin===event.origin;}catch(_){return false;}
+    });
+    if(!source)return;
+    try{Promise.resolve(chrome.runtime.sendMessage({type:'SQC_RECORD_PORTAL_NAVIGATION',kind,frameOrigin:event.origin})).catch(()=>{});}catch(_){}
+  }
+
   // Global initialization guard to prevent duplicate executions in the same frame
   if (window.__SQC_INITIALIZED) {
     return window.SubmissionCheckerCore || {};
@@ -47,7 +60,19 @@ window.SubmissionCheckerCore = (function () {
   let isRouteWatcherBound = false;
   let handleRouteTransition = null, observedRoute = window.location.href, configSequence = 0;
   let initializing = false, discoveryObserver = null, discoveryTimer = null;
+  let availabilityCheckKey='';
+  function portalBlocked(){
+    if(currentSettings?.portalAvailability?.blocking)return true;
+    const detector=window.SQCPortalAvailability;if(!detector)return false;
+    const result=detector.classify(detector.inspect(document));
+    if(result.blocking&&window===window.top&&hasVerifiedContext()){
+      const key=window.location.href+'|'+result.state+'|'+result.evidence;
+      if(availabilityCheckKey!==key){availabilityCheckKey=key;chrome.runtime.sendMessage({type:'SQC_CHECK_PORTAL_AVAILABILITY'}).catch(()=>{availabilityCheckKey='';});}
+    }else if(!result.blocking)availabilityCheckKey='';
+    return result.blocking;
+  }
   async function eligiblePortal() {
+    window.__SQC_PORTAL_ELIGIBLE_URL = null;
     if (window.JobFormExtractor?.isJobApplicationPortal()) return true;
     try {
       const url = window.location.href;
@@ -55,6 +80,19 @@ window.SubmissionCheckerCore = (function () {
       if (result?.eligible && window.location.href === url) { window.__SQC_PORTAL_ELIGIBLE_URL = url; return true; }
     } catch (_) {}
     return false;
+  }
+  function deactivateCore() {
+    isCoreActive = false;
+    configSequence++;
+    activeProfile = null;
+    currentSettings = { integrationMode: 'applyflow', verifiedContext: null };
+    window.__SQC_CONTEXT_SETTINGS = currentSettings;
+    window.__SQC_ACTIVE_PROFILE = null;
+    window.__SQC_PORTAL_ELIGIBLE_URL = null;
+    clearInterval(window.__SQC_CONTEXT_REFRESH_TIMER);
+    window.__SQC_CONTEXT_REFRESH_TIMER = null;
+    if (window.JobFormExtractor) window.JobFormExtractor.cleanupNonJobSession();
+    if (window.SubmissionHUD) window.SubmissionHUD.destroy();
   }
   function watchForPortal() {
     if (discoveryObserver || !document.documentElement) return;
@@ -83,9 +121,7 @@ window.SubmissionCheckerCore = (function () {
       const isEligible = await eligiblePortal();
       if(window.location.href!==route) return;
       if (!isEligible) {
-        if (window.JobFormExtractor) window.JobFormExtractor.cleanupNonJobSession();
-        if (window.SubmissionHUD) window.SubmissionHUD.destroy();
-        isCoreActive = false;
+        deactivateCore();
         return;
       }
 
@@ -143,12 +179,10 @@ window.SubmissionCheckerCore = (function () {
         return;
       }
 
-      // Strict Gate: Only activate on genuine ATS portals or pages with ApplyFlow tracking parameters
+      // Activate only for ApplyFlow launches or backend-approved continuations.
       const isEligible = await eligiblePortal();
       if (!isEligible) {
-        if (window.JobFormExtractor) window.JobFormExtractor.cleanupNonJobSession();
-        if (window.SubmissionHUD) window.SubmissionHUD.destroy();
-        isCoreActive = false;
+        deactivateCore();
         return;
       }
 
@@ -158,6 +192,7 @@ window.SubmissionCheckerCore = (function () {
       // Refresh authentication and assignment leases, including sign-out/reassignment in ApplyFlow.
       if (!window.__SQC_CONTEXT_REFRESH_TIMER) {
         window.__SQC_CONTEXT_REFRESH_TIMER = setInterval(async () => {
+          if (!isCoreActive) return;
           await fetchConfig();
           runExtractionAndValidation();
         }, 30000);
@@ -213,6 +248,7 @@ window.SubmissionCheckerCore = (function () {
 
       // Cross-frame message handling: coordinates top window and child iframes seamlessly
       window.addEventListener('message', (event) => {
+        observePortalNavigation(event);
         // Page postMessage is not an authentication channel. Each frame gets context from the worker.
         if (currentSettings?.integrationMode === 'applyflow') return;
         if (!event.data || typeof event.data !== 'object') return;
@@ -348,23 +384,26 @@ window.SubmissionCheckerCore = (function () {
       let domObserverTimeout = null;
       const spaObserver = new MutationObserver((mutations) => {
         const hasRelevantNodes = mutations.some(m => {
-          if (m.target && m.target.closest && m.target.closest('#sqc-hud-container, #sqc-modal-overlay')) return false;
+          const target=m.target?.nodeType===3?m.target.parentElement:m.target;
+          if (target?.closest?.('#sqc-hud-container, #sqc-modal-overlay, #sqc-job-status, .sqc-root')) return false;
+          if (m.type === 'characterData' || m.type === 'attributes') return /(?:application.{0,100}(?:submitted|received|sent)|thank\s*you\s+for\s+applying|successfully\s+applied)/i.test(target?.textContent||'');
           if (m.removedNodes.length > 0) return true;
           return Array.from(m.addedNodes).some(n => 
             n.nodeType === 1 && (
-              n.matches?.('input, select, textarea, form, [role="combobox"], [class*="success"], [class*="confirm"], [class*="applied"], h1, h2, h3') ||
-              n.querySelector?.('input, select, textarea, [class*="success"], [class*="confirm"], [class*="applied"]')
+              n.matches?.('input, select, textarea, form, [role="combobox"], [role="alert"], [role="status"], [class*="success"], [class*="confirm"], [class*="applied"], h1, h2, h3, p, div, section') ||
+              n.querySelector?.('input, select, textarea, [role="alert"], [role="status"], [class*="success"], [class*="confirm"], [class*="applied"]')
             )
           );
         });
         if (hasRelevantNodes) {
-          clearTimeout(domObserverTimeout);
+          if (domObserverTimeout) return;
           domObserverTimeout = setTimeout(() => {
+            domObserverTimeout = null;
             runExtractionAndValidation();
           }, 300);
         }
       });
-      spaObserver.observe(document.body, { childList: true, subtree: true });
+      spaObserver.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['hidden', 'aria-hidden', 'class', 'style'] });
 
       // Listen for all input/paste/change events across the entire page
       bindLiveFormTracking();
@@ -372,7 +411,7 @@ window.SubmissionCheckerCore = (function () {
       // Bind capture-phase submit interception & Quick Apply watcher
       bindSubmitInterception();
 
-      // Bind outbound link and redirect parameter preservation
+      // Observe navigation snapshots without changing employer URLs or fragments.
       bindOutboundRedirectTracking();
 
       // Listen for state changes from popup/options or background
@@ -559,6 +598,11 @@ window.SubmissionCheckerCore = (function () {
   }
 
   function isJobAlreadyApplied() {
+    if(currentSettings?.integrationMode==='applyflow'){
+      const c=currentSettings.verifiedContext;
+      return Boolean(c&&(c.duplicate?.confirmed===true||['APPLIED','SUBMITTED','ALREADY_APPLIED'].includes(c.status)||
+        currentDuplicateRecord?.deliveryAcknowledged&&currentDuplicateRecord.profile_id===c.profileId&&currentDuplicateRecord.job_id===c.jobId));
+    }
     let boundApplied = false;
     try {
       const bs = JSON.parse(sessionStorage.getItem('applyflow_bound_session') || '{}');
@@ -582,6 +626,7 @@ window.SubmissionCheckerCore = (function () {
   }
 
   function tryAutoRestore() {
+    if(portalBlocked())return;
     if (!hasVerifiedContext()) return;
     if (!activeProfile) return;
     if (hasContextMismatchCheck()) {
@@ -597,7 +642,7 @@ window.SubmissionCheckerCore = (function () {
     }
     try {
       const res = JobFormExtractor.restoreSavedForm(activeProfile, currentSettings);
-      if ((activeProfile.resumeBase64 || SubmissionHUD.hasVerifiedResumeFile?.()) && (!activeProfile.resumeTailoringRequired || activeProfile.resumeIsTailored) &&
+      if (currentSettings.autoAttachResume!==false && (activeProfile.resumeBase64 || SubmissionHUD.hasVerifiedResumeFile?.()) && (!activeProfile.resumeTailoringRequired || activeProfile.resumeIsTailored) &&
           (!currentExtractedData?.resume_uploaded || /^no file|^none|^not uploaded/i.test(currentExtractedData.resume_uploaded))) {
         SubmissionHUD.attachResumeToPortal(activeProfile.resumeText, activeProfile, null, {auto: true});
       }
@@ -610,6 +655,7 @@ window.SubmissionCheckerCore = (function () {
   }
 
   function restoreFormManually() {
+    if(portalBlocked())return {count:0};
     if (!requireVerifiedContext()) return { count: 0 };
     let res = { count: 0 };
     if (hasContextMismatchCheck() || (currentValidation?.errors || []).some(e => e.rule === 'CONTEXT_PROFILE_MISMATCH')) {
@@ -622,7 +668,7 @@ window.SubmissionCheckerCore = (function () {
       return res;
     }
     if (activeProfile) {
-      res = JobFormExtractor.restoreSavedForm(activeProfile, currentSettings);
+      res = JobFormExtractor.restoreSavedForm(activeProfile, {...currentSettings,userInitiatedFill:true});
     }
     // Also broadcast restore trigger to any child iframes
     try {
@@ -640,6 +686,7 @@ window.SubmissionCheckerCore = (function () {
   }
 
   function checkFastAppliedFromStorage(appliedJobs) {
+    if(currentSettings?.integrationMode==='applyflow')return;
     if (!appliedJobs || typeof appliedJobs !== 'object') return;
     const currentUrl = window.location.href.split('?')[0].split('#')[0].toLowerCase()
       .replace(/\/(confirmation|confirm|thank-you|thanks|submitted|success|step\d+|form|review|apply)\b.*$/i, '')
@@ -698,9 +745,10 @@ window.SubmissionCheckerCore = (function () {
         if (res && res.success) {
           const nextSession = res.settings?.verifiedContext?.applicationSessionId;
           const c = res.settings?.verifiedContext;
-          const nextKey = c ? [c.applicationSessionId, c.applierId, c.profileAssignmentId, c.profileAssignmentVersion, c.profileId, c.profileVersion, c.jobVersion, c.resumeVersion].join(':') : '';
+          const nextKey = c ? [c.applicationSessionId, c.applierId, c.profileAssignmentId, c.profileAssignmentVersion, c.profileId, c.profileVersion, c.jobId].join(':') : '';
           const changed = sessionStorage.getItem('sqc_verified_context_key') !== nextKey;
           if (changed || !nextSession) {
+            liveSyncState=null;lastLiveSignature='';clearTimeout(liveSnapshotTimer);
             sessionScreenshots = [];
             currentDuplicateRecord = null;
             lastIframeExtractedData = null;
@@ -800,12 +848,24 @@ window.SubmissionCheckerCore = (function () {
   let applyFlowContext = null;
   let contextFetchedKey = null;
 
+  let lastCapturedStep='';
+  function persistApplicationStep(force=false){
+    if(!hasVerifiedContext()||['APPLIED','SUBMITTED','ALREADY_APPLIED'].includes(currentDuplicateRecord?.status))return;
+    const entries=currentExtractedData?.all_entries||[];if(!entries.length)return;
+    const fields=entries.map((entry,index)=>({id:entry.element?.id||entry.element?.name||String(index),label:entry.label,type:entry.type,value:entry.value,required:entry.required||entry.is_required}));
+    const label=detectCurrentStepLabel(),fingerprint=JSON.stringify([window.location.href,label,fields]);
+    if(!force&&fingerprint===lastCapturedStep)return;lastCapturedStep=fingerprint;
+    chrome.runtime.sendMessage({type:'SQC_CAPTURE_STEP',context:currentSettings.verifiedContext,label,fields},result=>{if(chrome.runtime.lastError||result?.success!==true){lastCapturedStep='';console.warn('[SQC] Step answers could not be saved:',result?.error||'Extension unavailable');}});
+  }
+
   // Snapshot the current job context and cumulative form state before the page/DOM changes state or navigates
   function capturePreTransitionSnapshot() {
+    if (!isCoreActive) return;
     try {
       if (window.JobFormExtractor) {
         currentExtractedData = window.JobFormExtractor.extractAllFields();
       }
+      persistApplicationStep(true);
       const applyFlowParams = window.JobFormExtractor ? window.JobFormExtractor.extractApplyFlowParams() : {};
       const effectiveJobId = applyFlowParams.jobId || sessionStorage.getItem('applyflow_job_id') || window.__SQC_PERSISTED_AF_SESSION?.jobId || currentExtractedData?.portal_job_id || '';
       const effectiveProfileId = applyFlowParams.profileId || sessionStorage.getItem('applyflow_profile_id') || window.__SQC_PERSISTED_AF_SESSION?.profileId || activeProfile?.id || '';
@@ -1079,6 +1139,7 @@ window.SubmissionCheckerCore = (function () {
             scroll_y: scrollY,
             answered_count: answeredCount,
             total_fields_count: currentExtractedData?.total_fields_count || 0,
+            form_fingerprint:window.SQCLiveProgress?.fingerprint(currentExtractedData)||'',
             job_id: sessionStorage.getItem('applyflow_job_id') || currentExtractedData?.portal_job_id || '',
             profile_id: sessionStorage.getItem('applyflow_profile_id') || activeProfile?.id || '',
             job_title: currentExtractedData?.job_title || sessionStorage.getItem('applyflow_job_title') || '',
@@ -1105,6 +1166,7 @@ window.SubmissionCheckerCore = (function () {
         if (res.screenshot.data_url && res.screenshot.data_url.length > 180000) {
           res.screenshot.data_url = await downscaleScreenshotDataUrl(res.screenshot.data_url);
         }
+        if(Array.isArray(res.screenshots))sessionScreenshots=res.screenshots;
         const existingIdx = sessionScreenshots.findIndex(s => s.id === res.screenshot.id);
         if (existingIdx >= 0) {
           sessionScreenshots[existingIdx] = res.screenshot;
@@ -1136,10 +1198,11 @@ window.SubmissionCheckerCore = (function () {
       if (window.SubmissionHUD && window.SubmissionHUD.updateScreenshots) {
         window.SubmissionHUD.updateScreenshots(sessionScreenshots);
       }
+      streamLiveSnapshot(currentExtractedData,currentValidation);
       if (trigger === 'MANUAL' && window.SubmissionHUD) {
         window.SubmissionHUD.showToast(`📸 Page screenshot captured (${stepLabel})!`);
       }
-      return sessionScreenshots[sessionScreenshots.length - 1] || null;
+      return res?.success&&res.screenshot?res.screenshot:sessionScreenshots[sessionScreenshots.length - 1] || null;
     } catch (err) {
       if (hudEl) hudEl.style.opacity = prevOpacity || '1';
       console.warn('[Submission Checker] Screenshot capture notice:', err);
@@ -1173,12 +1236,11 @@ window.SubmissionCheckerCore = (function () {
         if (answeredEntries.length === 0) return;
 
         const stepLabel = detectCurrentStepLabel();
-        const scrollBucket = Math.floor((window.scrollY || 0) / 500);
-        const signature = `${window.location.pathname}::${stepLabel}::${scrollBucket}::${answeredEntries.length}`;
-        if (signature === lastCapturedSignature) return;
-        lastCapturedSignature = signature;
-
-        capturePageScreenshot('QUESTIONS_ANSWERED', stepLabel);
+        const signature=JSON.stringify([contextStamp(),window.location.href.split('#')[0],stepLabel,window.SQCLiveProgress?.fingerprint(currentExtractedData)||answeredEntries.length]);
+        if(capturedFormStates.has(signature))return;
+        capturedFormStates.add(signature);
+        if(capturedFormStates.size>100)capturedFormStates.delete(capturedFormStates.values().next().value);
+        capturePageScreenshot('QUESTIONS_ANSWERED', stepLabel).then(shot=>{if(!shot)capturedFormStates.delete(signature);});
       } catch (_) {}
     }, 1400);
   }
@@ -1343,26 +1405,32 @@ window.SubmissionCheckerCore = (function () {
 
   let loggedAlreadyAppliedJobKey = null;
   let loggedSuccessJobKey = null;
+  let submissionStore;try{submissionStore=window.sessionStorage;}catch(_){}
+  const submissionDelivery=window.SQCSubmissionDelivery.create({store:submissionStore});
+  function submissionKey(){const c=currentSettings?.verifiedContext;return c?JSON.stringify([c.applicationSessionId,c.applierId,c.profileAssignmentId,c.profileAssignmentVersion,c.profileId,c.jobId]):'';}
 
   async function handleSubmissionSuccessNotice(data, val) {
     if (!data || !data.is_submission_success) return;
 
-    // Guard: intermediate wizard steps or active form inputs are NEVER submission success
-    const intermediateCheck = JobFormExtractor.detectIntermediateWizardStep?.();
-    if (intermediateCheck?.isIntermediate) return;
-    if ((data?.total_fields_count || 0) > 2) return;
-
-    const applyFlowParams = JobFormExtractor.extractApplyFlowParams();
-    const effectiveJobId = sessionStorage.getItem('applyflow_job_id') || applyFlowParams.jobId || window.__SQC_PERSISTED_AF_SESSION?.jobId || data.portal_job_id || data.req_id || "";
-    const effectiveProfileId = sessionStorage.getItem('applyflow_profile_id') || applyFlowParams.profileId || window.__SQC_PERSISTED_AF_SESSION?.profileId || activeProfile?.id || "";
-    const jobKey = `${effectiveJobId}_${effectiveProfileId}_${window.location.hostname}`;
+    // The extractor checks live controls. total_fields_count deliberately retains
+    // previous steps' fields and must never veto a real confirmation page.
+    const jobKey=submissionKey(),observedUrl=window.location.href;
+    const proof=()=>hasVerifiedContext()&&submissionKey()===jobKey&&window.location.href===observedUrl&&JobFormExtractor.detectSubmissionSuccess().is_success===true;
+    if(!proof())return;
 
     if (loggedSuccessJobKey === jobKey) return;
-    loggedSuccessJobKey = jobKey;
+
 
     console.log("[Submission Checker] Verified submission confirmation on page! Logging to Apply-Flow...", data.submission_success_message);
-    const res = await logPayloadToBackend("PASSED", val, false);
+    const res = await submissionDelivery.check({key:jobKey,proof,send:async eventId=>{
+      // The lease is already valid; the worker performs final backend validation.
+      // A second forced session/context round trip only delays the same event.
+      if(!proof())return {success:false,reason:'PORTAL_CONFIRMATION_REQUIRED'};
+      return logPayloadToBackend('PASSED',val,false,eventId);
+    }});
     if (!res?.success) return;
+    if(submissionKey()!==jobKey)return;
+    loggedSuccessJobKey=jobKey;
     SubmissionHUD.updateState(allProfiles, activeProfile, currentSettings, { status: "SUBMITTED", message: data.submission_success_message });
     SubmissionHUD.showToast(`🎉 Application submitted & logged to Apply-Flow! (${data.submission_success_message || 'Confirmed'})`);
   }
@@ -1573,10 +1641,20 @@ window.SubmissionCheckerCore = (function () {
     }
   }
 
+  let confirmationRecovery=null,lastConfirmationRecovery=0;
+  function recoverConfirmationContext(){
+    if(confirmationRecovery||!currentSettings?.verifiedContext||Date.now()-lastConfirmationRecovery<5000||!JobFormExtractor.detectSubmissionSuccess().is_success)return;
+    lastConfirmationRecovery=Date.now();
+    confirmationRecovery=fetchConfig().then(()=>{if(hasVerifiedContext())runExtractionAndValidation();}).finally(()=>{confirmationRecovery=null;});
+  }
+
   // Synchronous extraction and validation
   function runExtractionAndValidation() {
+    if (!isCoreActive) return;
+    portalBlocked();
     try {
       if (!hasVerifiedContext()) {
+        recoverConfirmationContext();
         currentExtractedData = null;
         currentValidation = JobFormValidator.validate({}, null, currentSettings || { integrationMode: 'applyflow' });
         SubmissionHUD.updateDrawer({}, currentValidation);
@@ -1652,6 +1730,7 @@ window.SubmissionCheckerCore = (function () {
       handleAlreadyAppliedNotice(currentExtractedData, currentValidation);
 
       // Auto-detect and handle confirmed submission (Rippling, Ashby, Greenhouse, Lever, Workday, etc.)
+      persistApplicationStep();
       handleSubmissionSuccessNotice(currentExtractedData, currentValidation);
 
       // Update Floating HUD
@@ -1685,25 +1764,25 @@ window.SubmissionCheckerCore = (function () {
   }
 
   function streamLiveSnapshot(data, val) {
-    if (!data) return;
+    if(data?.is_submission_success){clearTimeout(liveSnapshotTimer);return;}
+    if (!data||!hasVerifiedContext()||isJobAlreadyApplied()||portalBlocked())return;
 
     // Stream snapshot if there are any detected form fields, candidate details, or already applied notice
-    const hasData = Boolean(
-      data.is_already_applied ||
-      data.candidate_name ||
-      data.candidate_first_name ||
-      data.email_entered ||
-      data.phone_entered ||
-      data.salary_expected ||
-      data.resume_uploaded ||
-      (data.all_entries && data.all_entries.length > 0)
-    );
+    const hasData = window.SQCLiveProgress?.hasData(data)===true;
 
-    if (!hasData && window === window.top) {
+    if (!hasData) {
+      clearTimeout(liveSnapshotTimer);
       return; // Skip empty outer wrapper frames
     }
-
+    const entries=window.SQCLiveProgress.entries(data),identity=JSON.stringify(contextStamp()),url=window.location.href;
+    const signature=JSON.stringify([identity,url,entries,data.resume_uploaded,sessionScreenshots.length,val?.errors?.length]);
+    if(signature===lastLiveSignature)return;
+    clearTimeout(liveSnapshotTimer);
+    liveSnapshotTimer=setTimeout(()=>{
+    if(!hasVerifiedContext()||isJobAlreadyApplied()||currentExtractedData?.is_submission_success||url!==window.location.href||identity!==JSON.stringify(contextStamp()))return;
+    lastLiveSignature=signature;lastLiveSentAt=Date.now();liveSyncState={status:'SYNCING',at:new Date().toISOString()};
     try {
+      const sentScreenshotIds=new Set(sessionScreenshots.map(shot=>shot.id));
       chrome.runtime.sendMessage({
         type: "DISPATCH_LIVE_FEEDBACK",
         payload: {
@@ -1715,7 +1794,7 @@ window.SubmissionCheckerCore = (function () {
           job_id: data.portal_job_id || data.req_id || "",
           // Explicitly flag telemetry as PENDING (not a final submission)
           is_final_submission: false,
-          job_status: data.is_already_applied ? "ALREADY_APPLIED" : "PENDING",
+          job_status: "PENDING",
           validation_status: "IN_PROGRESS",
           extracted_data: {
             candidate_name: data.candidate_name,
@@ -1737,15 +1816,19 @@ window.SubmissionCheckerCore = (function () {
             is_already_applied: data.is_already_applied,
             already_applied_message: data.already_applied_message,
             screenshots_count: sessionScreenshots.length,
-            all_entries: data.all_entries
+            all_entries: entries
           },
           screenshots: sessionScreenshots,
           is_valid: val?.isValid,
           error_count: val?.errors?.length || 0,
           timestamp: new Date().toISOString()
         }
-      }, () => { if (chrome.runtime.lastError) {} });
+      }, response => {
+        if(chrome.runtime.lastError||!response?.success){lastLiveSignature='';liveSyncState={status:'FAILED',message:response?.error||'Live sync failed'};}
+        else {liveSyncState={status:response.skipped?'PAUSED':'IN_PROGRESS',remoteStatus:response.applyFlowStatus||'IN_PROGRESS',at:new Date().toISOString()};if(!response.skipped)for(const shot of sessionScreenshots)if(sentScreenshotIds.has(shot.id))shot.synced_at=liveSyncState.at;}
+      });
     } catch (_) {}
+    },Math.max(500,1500-(Date.now()-lastLiveSentAt)));
   }
 
   function scheduleLiveExtraction() {
@@ -1787,6 +1870,7 @@ window.SubmissionCheckerCore = (function () {
 
     // Auto-helper: When applier clicks "UPLOAD A RESUME/CV" on TTC Portals, Taleo, etc.
     window.addEventListener('click', (e) => {
+      if(currentSettings?.integrationMode==='applyflow')return; // Native picker clicks must not start a second extension upload.
       const target = e.target;
       if (!target || (target.closest && target.closest('#sqc-hud-container, #sqc-modal-overlay'))) return;
       const trigger = e.target.closest('button, a, label, [role="button"], div, li, span') || e.target;
@@ -1820,14 +1904,15 @@ window.SubmissionCheckerCore = (function () {
     // Observe DOM mutations (for dynamically added multi-step form pages)
     const observer = new MutationObserver((mutations) => {
       for (const m of mutations) {
-        if (m.target && m.target.closest && m.target.closest('#sqc-hud-container, #sqc-modal-overlay')) continue;
-        if (m.addedNodes.length > 0) {
+        const target=m.target?.nodeType===3?m.target.parentElement:m.target;
+        if (target?.closest?.('#sqc-hud-container, #sqc-modal-overlay, .sqc-root, script, style')) continue;
+        if (m.addedNodes?.length > 0 || m.removedNodes?.length > 0 || m.type==='characterData') {
           scheduleLiveExtraction();
           break;
         }
       }
     });
-    observer.observe(document.body, { childList: true, subtree: true });
+    observer.observe(document.body, { childList: true, characterData:true,subtree: true });
   }
 
   // Quick Apply / Easy Apply Heuristic Detector
@@ -1876,6 +1961,12 @@ window.SubmissionCheckerCore = (function () {
   function bindSubmitInterception() {
     if (submitInterceptionBound) return;
     submitInterceptionBound = true;
+    let pendingStepForm=null,pendingStepUntil=0;
+    function captureIntermediateTransition(){
+      if(!hasVerifiedContext())return;
+      capturePreTransitionSnapshot();
+      capturePageScreenshot('STEP_TRANSITION', `${detectCurrentStepLabel()} (Completed)`);
+    }
     // Detect if current page is a login / account activation / password reset page
     // These pages have submit buttons but are NOT job application submissions
     function isLoginOrActivationPage() {
@@ -1909,14 +2000,24 @@ window.SubmissionCheckerCore = (function () {
 
       const target = event.target;
       if (!target) return;
-      const quickApply = isQuickApplyTrigger(target);
       const intent = submissionIntent(target);
       if (intent === 'ignore') return;
+      if(intent==='step'){
+        const action=target.closest?.('button, input, a, [role="button"]');
+        pendingStepForm=action?.form||action?.closest('form')||null;
+        pendingStepUntil=Date.now()+1000;
+        // Intermediate steps are portal navigation. Whole-application errors
+        // and a refreshing lease must not cancel the employer's native event.
+        captureIntermediateTransition();
+        return;
+      }
+      pendingStepForm=null;
+      const quickApply = isQuickApplyTrigger(target.closest?.('button, a, input[type="button"], input[type="submit"], [role="button"]'));
       // Entry links and form-opening controls must not run submission validation or watchers.
-      if (!quickApply && !['final', 'step'].includes(intent)) return;
+      if (!quickApply && intent !== 'final') return;
 
       if (!hasVerifiedContext()) {
-        if (quickApply || intent === 'final' || intent === 'step') {
+        if (quickApply || intent === 'final') {
           event.preventDefault(); event.stopImmediatePropagation();
           requireVerifiedContext();
         }
@@ -1950,32 +2051,6 @@ window.SubmissionCheckerCore = (function () {
 
         startQuickApplyVerificationWatcher();
         // Allow native event to proceed to open the dialog or trigger the platform's action
-        return;
-      }
-
-      // Only step controls trigger step validation, not arbitrary page clicks.
-      const clickedBtn = target.closest('button, input[type="submit"], input[type="button"], [role="button"]') || target;
-      if (intent === 'step') {
-        // Validate current step fields (Gatekeeper check)
-        runExtractionAndValidation();
-
-        const isAuditMode = currentSettings?.interceptionMode === 'audit';
-        if (!currentValidation.isValid && !isAuditMode) {
-          event.preventDefault();
-          event.stopPropagation();
-          event.stopImmediatePropagation();
-
-          console.warn("[Submission Checker] Step transition blocked due to validation errors:", currentValidation.errors);
-          SubmissionHUD.showBlockingModal(currentValidation, () => {
-            triggerNativeSubmit(clickedBtn);
-          });
-          return;
-        }
-
-        // Current step is valid: allow native click to proceed to the next step.
-        // DO NOT log to backend!
-        capturePreTransitionSnapshot();
-        capturePageScreenshot('STEP_TRANSITION', `${detectCurrentStepLabel()} (Completed)`);
         return;
       }
 
@@ -2022,15 +2097,20 @@ window.SubmissionCheckerCore = (function () {
 
       // NEVER log submission on login / account activation / password reset pages
       if (isLoginOrActivationPage()) return;
-      const intent = submissionIntent(event.submitter || event.target, event.target, true);
-      if (!['final', 'step'].includes(intent)) return;
+      const followsStep=!event.submitter&&event.target===pendingStepForm&&Date.now()<=pendingStepUntil;
+      const intent = followsStep?'step':submissionIntent(event.submitter || event.target, event.target, true);
+      if(intent==='step'){
+        if(event.target!==pendingStepForm||Date.now()>pendingStepUntil)captureIntermediateTransition();
+        pendingStepForm=null;
+        return;
+      }
+      pendingStepForm=null;
+      if (intent !== 'final') return;
       if (!hasVerifiedContext()) {
         event.preventDefault(); event.stopImmediatePropagation();
         requireVerifiedContext();
         return;
       }
-
-      const isIntermediate = intent === 'step';
 
       runExtractionAndValidation();
 
@@ -2046,21 +2126,12 @@ window.SubmissionCheckerCore = (function () {
         event.stopImmediatePropagation();
 
         SubmissionHUD.showBlockingModal(currentValidation, async () => {
-          if (!isIntermediate) {
-            await logPayloadToBackend("OVERRIDDEN_FAILED", currentValidation);
-          }
+          await logPayloadToBackend("OVERRIDDEN_FAILED", currentValidation);
           isSubmittingProgrammatically = true;
           event.target.submit();
           setTimeout(() => { isSubmittingProgrammatically = false; }, 500);
         });
 
-        return;
-      }
-
-      // If this is an intermediate step, allow submit to advance to next step without logging PASSED
-      if (isIntermediate) {
-        capturePreTransitionSnapshot();
-        capturePageScreenshot('STEP_TRANSITION', `${detectCurrentStepLabel()} (Completed)`);
         return;
       }
 
@@ -2173,30 +2244,10 @@ window.SubmissionCheckerCore = (function () {
         // 1. Persist full snapshot to Background Storage so new tabs / redirects have it
         capturePreTransitionSnapshot();
 
-        // 2. Append hash parameters directly to destination URL if Apply-Flow IDs exist
-        if (effectiveJobId || effectiveProfileId) {
-          try {
-            const u = new URL(link.href, window.location.href);
-            const rawHash = (u.hash || '').replace(/^#/, '');
-            const hashObj = new URLSearchParams(rawHash.includes('?') ? rawHash.slice(rawHash.indexOf('?') + 1) : rawHash);
-            
-            if (effectiveJobId) {
-              hashObj.set('job_id', effectiveJobId);
-              hashObj.set('sqc_job_id', effectiveJobId);
-              hashObj.set('portal_job_id', effectiveJobId);
-            }
-            if (effectiveProfileId) {
-              hashObj.set('profile_id', effectiveProfileId);
-              hashObj.set('candidate_id', effectiveProfileId);
-              hashObj.set('sqc_profile_id', effectiveProfileId);
-            }
-            if (effectiveProfileName) hashObj.set('profile_name', effectiveProfileName);
-            if (effectiveApplierId) hashObj.set('applier_id', effectiveApplierId);
+        // Employer links belong to the employer router. Tracking continuity is
+        // carried by the worker's per-tab launch claims and opener inheritance;
+        // rewriting fragments can replace an ATS route or dismiss its embed.
 
-            u.hash = hashObj.toString();
-            link.href = u.toString();
-          } catch (_) {}
-        }
       }
     }, true);
   }
@@ -2237,9 +2288,10 @@ window.SubmissionCheckerCore = (function () {
     });
   }
 
-  async function logPayloadToBackend(status, val, isManualConfirm = false) {
+  async function logPayloadToBackend(status, val, isManualConfirm = false, eventId) {
     if (!requireVerifiedContext()) return { success: false, reason: 'UNVERIFIED_CONTEXT' };
     const eventContext = contextStamp();
+    const deliveryJobKey=submissionKey();
     const serverUrl = await getApplyFlowServerUrl();
     const applyFlowParams = JobFormExtractor.extractApplyFlowParams();
     const effectiveJobId = sessionStorage.getItem('applyflow_job_id') || applyFlowParams.jobId || window.__SQC_PERSISTED_AF_SESSION?.jobId || currentExtractedData?.portal_job_id || currentExtractedData?.req_id || "";
@@ -2248,9 +2300,13 @@ window.SubmissionCheckerCore = (function () {
     const effectiveProfileName = sessionStorage.getItem('applyflow_profile_name') || applyFlowParams.profileName || window.__SQC_PERSISTED_AF_SESSION?.profileName || activeProfile?.fullName || "Candidate";
     const effectiveApplierName = sessionStorage.getItem('applyflow_applier_name') || applyFlowParams.applierName || window.__SQC_PERSISTED_AF_SESSION?.applierName || currentSettings?.applierName || "";
 
-    const isAlreadyApplied = status === 'ALREADY_APPLIED' || Boolean(currentExtractedData?.is_already_applied);
-    const isSubmissionSuccess = Boolean(currentExtractedData?.is_submission_success || val?.isSubmissionSuccess);
-    const jobStatus = isAlreadyApplied ? "ALREADY_APPLIED" : ((val?.isValid || isSubmissionSuccess) ? "SUBMITTED" : "REJECTED");
+    const isAlreadyApplied = Boolean(currentExtractedData?.is_already_applied && currentExtractedData?.already_applied_message);
+    const isSubmissionSuccess = Boolean(currentExtractedData?.is_submission_success && currentExtractedData?.submission_success_message);
+    if (isManualConfirm || (!isAlreadyApplied && !isSubmissionSuccess)) return {success:false,reason:'PORTAL_CONFIRMATION_REQUIRED'};
+    const observedUrl=window.location.href;
+    const proofStillVisible=()=>window.location.href===observedUrl && !JobFormExtractor.detectIntermediateWizardStep?.()?.isIntermediate && (isAlreadyApplied ? JobFormExtractor.detectAlreadyApplied?.().is_already_applied : JobFormExtractor.detectSubmissionSuccess?.().is_success);
+    if(!proofStillVisible())return {success:false,reason:'PORTAL_CONFIRMATION_REQUIRED'};
+    const jobStatus = isAlreadyApplied ? "ALREADY_APPLIED" : (isSubmissionSuccess ? "SUBMITTED" : "REJECTED");
     const validationStatus = isAlreadyApplied ? "ALREADY_APPLIED" : ((val?.isValid || isSubmissionSuccess) ? "PASSED" : (status.includes("OVERRIDDEN") ? "OVERRIDDEN_FAILED" : (status.includes("FLAGGED") ? "WARNING" : "FAILED")));
 
     // Safeguard 0: Intermediate wizard steps (e.g. Step 3 of 8) must NEVER be automatically logged as SUBMITTED / PASSED!
@@ -2272,8 +2328,9 @@ window.SubmissionCheckerCore = (function () {
     SubmissionHUD.setQuickApplyStatus('submitting', '⏳ Submitting application to Apply-Flow...');
 
     // Automatically capture a final submission screenshot right before dispatching payload
+    let finalCapture=null;
     try {
-      await capturePageScreenshot('FINAL_SUBMIT', `${detectCurrentStepLabel()} — Final Submission`);
+      finalCapture=await capturePageScreenshot('FINAL_SUBMIT', `${detectCurrentStepLabel()} — Final Submission`);
     } catch (_) {}
 
     // Ensure we have at least one valid visual screenshot proof
@@ -2322,12 +2379,13 @@ window.SubmissionCheckerCore = (function () {
       };
     }).filter(s => Boolean(s.data_url));
 
-    const finalShotImg = (formattedScreenshots[formattedScreenshots.length - 1] || formattedScreenshots[0])?.data_url || "";
+    const finalShotImg = (formattedScreenshots.find(shot=>shot.id===finalCapture?.id)||formattedScreenshots[formattedScreenshots.length - 1] || formattedScreenshots[0])?.data_url || "";
 
-    if (JSON.stringify(eventContext) !== JSON.stringify(contextStamp())) {
+    if (!proofStillVisible() || JSON.stringify(eventContext) !== JSON.stringify(contextStamp())) {
       return { success: false, reason: 'CONTEXT_CHANGED' };
     }
     const payload = {
+      ...(eventId?{event_id:eventId}:{}),
       ...eventContext,
       job_id: effectiveJobId,
       profile_id: effectiveProfileId,
@@ -2344,7 +2402,8 @@ window.SubmissionCheckerCore = (function () {
 
       // Explicit Final Submission Flag
       is_final_submission: true,
-      submission_confirmed_by: isManualConfirm ? "MANUAL_HUD_CONFIRM" : (isAlreadyApplied ? "AUTO_DETECTED_ALREADY_APPLIED_ON_PORTAL" : (isSubmissionSuccess ? "CONFIRMED_ON_PORTAL_SUCCESS_PAGE" : "VERIFIED_FORM_SUBMIT_EVENT")),
+      portal_evidence: {type:isAlreadyApplied ? "ALREADY_APPLIED_NOTICE" : "SUCCESS_NOTICE",message:isAlreadyApplied ? currentExtractedData.already_applied_message : currentExtractedData.submission_success_message,url:observedUrl,observedAt:new Date().toISOString(),intermediate:false},
+      submission_confirmed_by: isAlreadyApplied ? "AUTO_DETECTED_ALREADY_APPLIED_ON_PORTAL" : "CONFIRMED_ON_PORTAL_SUCCESS_PAGE",
 
       // Apply-Flow Status: "SUBMITTED" (marks APPLIED), "ALREADY_APPLIED", or "REJECTED"
       job_status: jobStatus,
@@ -2383,7 +2442,7 @@ window.SubmissionCheckerCore = (function () {
       screening_qa: currentExtractedData?.screening_qa || [],
       validation_errors: val?.errors || [],
       validation_warnings: val?.warnings || [],
-      submission_notes: isAlreadyApplied ? (currentExtractedData?.already_applied_message || "Portal indicates you have already applied to this position.") : (isSubmissionSuccess ? (currentExtractedData?.submission_success_message || "Verified submission confirmation on portal.") : (isManualConfirm ? "Confirmed via Apply-Flow Gatekeeper HUD" : "Auto-verified on Form Submit Event")),
+      submission_notes: isAlreadyApplied ? (currentExtractedData?.already_applied_message || "Portal indicates you have already applied to this position.") : (isSubmissionSuccess ? (currentExtractedData?.submission_success_message || "Verified submission confirmation on portal.") : "Confirmed on the employer portal"),
       timestamp: new Date().toISOString()
     };
 
@@ -2394,11 +2453,14 @@ window.SubmissionCheckerCore = (function () {
         serverUrl: serverUrl,
         payload
       }, (res) => {
-        const isOk = Boolean(res && (res.success || res.status === 200 || res.status === 201));
+        const isOk = res?.success===true&&typeof res.recordId==='string'&&Boolean(res.recordId);
+        if(submissionKey()!==deliveryJobKey){resolve(res);return;}
         if (isOk && ['SUBMITTED', 'ALREADY_APPLIED'].includes(jobStatus)) {
           currentDuplicateRecord = {
             appliedAt: new Date().toISOString(),
-            status: jobStatus === 'ALREADY_APPLIED' ? 'ALREADY_APPLIED' : 'APPLIED',
+            status: jobStatus === 'ALREADY_APPLIED' ? 'ALREADY_APPLIED' : 'SUBMITTED',
+            profile_id:currentSettings.verifiedContext?.profileId,job_id:currentSettings.verifiedContext?.jobId,
+            remoteStatus:res.applyFlowStatus||null,deliveryAcknowledged:true,recordId:res.recordId,
             profile_assigned: effectiveProfileName,
             applier_id: effectiveApplierId,
             message: `Application submitted & confirmed in Apply-Flow.`
@@ -2425,86 +2487,11 @@ window.SubmissionCheckerCore = (function () {
   }
 
   async function confirmAndLogSubmissionManually() {
-    if (!requireVerifiedContext()) return { success: false, reason: 'UNVERIFIED_CONTEXT' };
-    // ── GUARD 0: Context Profile Mismatch Guard ──
-    runExtractionAndValidation();
-    if (!currentValidation.isValid) {
-      SubmissionHUD.showToast('Resolve validation issues before confirming this application.');
-      return { success: false, reason: 'VALIDATION_FAILED' };
-    }
-    const hasMismatch = (currentValidation?.errors || []).some(e => e.rule === 'CONTEXT_PROFILE_MISMATCH') || hasContextMismatchCheck();
-    if (hasMismatch) {
-      SubmissionHUD.showToast("🚫 Submission blocked: Active profile does not match the candidate assigned to this job in Apply-Flow.");
-      SubmissionHUD.toggleDrawer(true);
-      return { success: false, reason: "CONTEXT_PROFILE_MISMATCH" };
-    }
-
-    // Visual feedback: immediately indicate submission in progress
-    SubmissionHUD.setQuickApplyStatus('submitting', '⏳ Submitting to Apply-Flow...');
-    SubmissionHUD.showToast('⏳ Submitting application to Apply-Flow...');
-
-    const currentUrl = window.location.href.split('#')[0];
-    loggedSubmissionUrl = currentUrl;
-    const res = await logPayloadToBackend("PASSED", currentValidation, true);
-    const isOk = Boolean(res && (res.success || res.status === 200 || res.status === 201));
-
-    if (!isOk) {
-      SubmissionHUD.setQuickApplyStatus('idle');
-      SubmissionHUD.showToast(`⚠️ Could not confirm with Apply-Flow: ${res?.error || 'Server error'}`);
-      return res;
-    }
-
-    currentDuplicateRecord = {
-      appliedAt: new Date().toISOString(),
-      status: 'APPLIED',
-      profile_assigned: activeProfile?.fullName || 'Candidate',
-      applier_id: currentSettings?.applierId || 'Applier',
-      message: `Confirmed and logged to Apply-Flow on ${new Date().toLocaleDateString()}`
-    };
-    currentValidation.isAlreadyApplied = true;
-    currentValidation.errors = (currentValidation.errors || []).filter(
-      e => {
-        const s = String(e.rule || '').toUpperCase();
-        return !s.includes('REQUIRED') && !s.includes('EMPTY') && !s.includes('MISSING') && !s.includes('RESUME') && !s.includes('UNANSWERED') && !s.includes('FILE');
-      }
-    );
-    currentValidation.isValid = currentValidation.errors.length === 0;
-
-    try {
-      const rawB = sessionStorage.getItem('applyflow_bound_session');
-      const b = rawB ? JSON.parse(rawB) : {};
-      b.status = 'APPLIED';
-      b.appliedAt = currentDuplicateRecord.appliedAt;
-      b.profileName = currentDuplicateRecord.profile_assigned;
-      sessionStorage.setItem('applyflow_bound_session', JSON.stringify(b));
-    } catch (_) {}
-
-    SubmissionHUD.setQuickApplyStatus('submitted', "🎉 Submission successfully logged to Apply-Flow!");
-    restrictPortalInteractions(true, currentDuplicateRecord);
-    SubmissionHUD.updateState(allProfiles, activeProfile, currentSettings, currentDuplicateRecord);
-    SubmissionHUD.updateDrawer(currentExtractedData, currentValidation);
-    SubmissionHUD.showToast("🎉 Application successfully submitted & logged to Apply-Flow!");
-    return res;
+    SubmissionHUD.showToast('Submit on the employer portal. Completion is recorded only after a portal success notice and ApplyFlow acknowledgement.');
+    return {success:false,reason:'PORTAL_CONFIRMATION_REQUIRED'};
   }
-
   async function markAsAlreadyAppliedManually() {
-    if (!requireVerifiedContext()) return { success: false };
-    runExtractionAndValidation();
-    const currentUrl = window.location.href.split('#')[0];
-    loggedSubmissionUrl = currentUrl;
-
-    // Protection check: If already submitted in ApplyFlow, prevent downgrade
-    const existingStatus = (applyFlowContext?.status || applyFlowContext?.job_status || '').toUpperCase();
-    if (existingStatus === 'SUBMITTED' || existingStatus === 'APPLIED') {
-      SubmissionHUD.showToast("🛡️ Job is already marked as SUBMITTED in Apply-Flow. Status protected.");
-      return { success: true, protected: true };
-    }
-
-    const res = await logPayloadToBackend("ALREADY_APPLIED", currentValidation);
-    if (!res?.success) return res;
-    SubmissionHUD.updateState(allProfiles, activeProfile, currentSettings, { status: "ALREADY_APPLIED" });
-    SubmissionHUD.showToast("📌 Status updated to 'Already Applied' in Apply-Flow!");
-    return res;
+    return {success:false,reason:'PORTAL_CONFIRMATION_REQUIRED'};
   }
 
   async function markAsPortalFailedManually(reasonKey = 'PORTAL_ACCESS_FAILED', failCount = 1) {
@@ -2670,6 +2657,48 @@ window.SubmissionCheckerCore = (function () {
       });
     });
   }
+
+  function sidebarState() {
+    const c=currentSettings?.verifiedContext;
+    const groups=window.SQCFormState?.attachments(document)||[],resumeGroups=groups.filter(group=>/resume|curriculum|\bcv\b/i.test(group.question)&&!/cover/i.test(group.question));
+    const portalResume=resumeGroups.find(group=>group.filename)||resumeGroups[0];
+    if(hasVerifiedContext()&&portalResume&&currentExtractedData&&currentExtractedData.resume_uploaded!==portalResume.filename){
+      currentExtractedData={...currentExtractedData,resume_uploaded:portalResume.filename,
+        all_entries:(currentExtractedData.all_entries||[]).map(entry=>entry.type==='file'&&/resume|curriculum|\bcv\b/i.test(entry.label)&&!/cover/i.test(entry.label)?{...entry,value:portalResume.filename||'No file chosen'}:entry)};
+      currentValidation=JobFormValidator.validate(currentExtractedData,activeProfile,currentSettings);
+    }
+    return {success:true,context:c ? {applicationSessionId:c.applicationSessionId,jobId:c.jobId,profileId:c.profileId}:null,
+      portalResume:portalResume?{detected:true,filename:portalResume.filename}:null,
+      lifecycle:currentDuplicateRecord?.status || 'IN_PROGRESS',deliveryAcknowledged:currentDuplicateRecord?.deliveryAcknowledged===true,remoteStatus:currentDuplicateRecord?.remoteStatus||null,
+      hasFormData:window.SQCLiveProgress?.hasData(currentExtractedData)===true,liveSync:liveSyncState,
+      submissionSync:submissionDelivery.read(submissionKey()),
+      validation:{isValid:currentValidation?.isValid===true,errors:(currentValidation?.errors||[]).map(e=>({rule:e.rule,message:e.message})),warnings:(currentValidation?.warnings||[]).map(e=>({rule:e.rule,message:e.message}))},
+      totalFields:currentExtractedData?.total_fields_count||0,screenshotCount:sessionScreenshots.length,
+      screenshots:sessionScreenshots.map(shot=>({id:shot.id,label:shot.step_label||'Application step',url:shot.page_url,capturedAt:shot.captured_at,syncedAt:shot.synced_at||null}))};
+  }
+  chrome.runtime.onMessage.addListener((message,sender,reply)=>{
+    if(sender.id!==chrome.runtime.id || !['SQC_SIDEBAR_READ','SQC_SIDEBAR_ACTION','SQC_SIDEBAR_PREPARE','SQC_SIDEBAR_RESUME_READY'].includes(message.type))return;
+    if(message.type==='SQC_SIDEBAR_RESUME_READY'){SubmissionHUD.closeResumeDialogs?.();scheduleLiveExtraction();reply({success:true});return;}
+    if(message.type==='SQC_SIDEBAR_PREPARE'){if(hasVerifiedContext()&&!isJobAlreadyApplied()&&currentSettings.autoAutofillOnPageLoad!==false)JobFormExtractor.restoreSavedForm(activeProfile,currentSettings);reply({success:true});return;}
+    if(message.type==='SQC_SIDEBAR_READ'){reply(sidebarState());return;}
+    const work=async()=>{
+      let filledCount,historyResult;
+      if(message.action==='retrySubmission'){await submissionDelivery.retry(submissionKey());return sidebarState();}
+      if(message.action==='previewScreenshot'){
+        if(!hasVerifiedContext())return {success:false,error:'Verify this application before viewing its evidence.'};
+        const shot=sessionScreenshots.find(item=>item.id===message.screenshotId);
+        if(!shot)return {success:false,error:'This screenshot is no longer in the application session.'};
+        return {success:true,screenshot:{id:shot.id,label:shot.step_label,dataUrl:shot.data_url||shot.dataUrl}};
+      }
+      if(message.action==='refresh')await fetchConfig();
+      else if(message.action==='autofill'){if(!requireVerifiedContext())return {success:false,error:'Verify this application first.'};filledCount=(await restoreFormManually())?.count||0;}
+      else if(message.action==='history'){if(!requireVerifiedContext()||isJobAlreadyApplied()||portalBlocked())return {success:false,error:'Verify an active application before filling resume history.'};historyResult=await JobFormExtractor.fillResumeHistory(activeProfile,currentSettings);filledCount=historyResult.count;}
+      else if(message.action==='screenshot')await capturePageScreenshot('SIDEBAR','Application step');
+      else return {success:false,error:'Unsupported sidebar action.'};
+      runExtractionAndValidation();return {...sidebarState(),...(filledCount!==undefined?{filledCount}:{}),...(historyResult?{historyResult}:{})};
+    };
+    work().then(reply).catch(error=>reply({success:false,error:error.message}));return true;
+  });
 
   return {
     init,

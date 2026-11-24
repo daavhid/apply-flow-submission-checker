@@ -1,3 +1,306 @@
+CURRENT BEHAVIOR (1.6.23)
+
+Rippling CV-chip correction: use the multi-ID ARIA-labelled Resume/CV upload area and read clickable filename chips even when the text is a direct child of role=button. Prefer full filename metadata, otherwise retain the visible truncated filename as attachment evidence. The hidden native file input remains a valid upload target when associated with a visible CV label; unrelated hidden controls remain excluded. The resume_uploaded value and file audit entry both reflect that visible evidence. Sidebar snapshots re-check attachments and recompute cached validation only when the filename changes, clearing a stale missing-resume warning without requiring another edit. Public form inspection was read-only; server-side file acceptance is still distinct from visible attachment state.
+
+Recovery lifetime correction: an expired server session invalidates authentication and leases while retaining origin/applier-bound tracking IDs and original resume documents. Same-account sign-in re-verifies before using them; explicit logout/disconnect still clears them. Browser startup detaches stored tab IDs, then restores claims only for an exact observed page with one unique candidate/application identity. Ambiguous restored pages require a tracked launch rather than guessing. Copy details includes verificationRequest with the actual applicationSessionId/jobId/profileId sent to ApplyFlow. A 409 with those IDs present is a backend rejection, not proof that the extension discarded tracking. Older updates may already have deleted IDs; open the original tracked link once if no recovery record exists.
+
+ApplyFlow audit display rule: DISPATCH_LIVE_FEEDBACK posts to /api/submissions/live-event with is_final_submission=false, job_status=PENDING and validation_status=IN_PROGRESS. Captured fields, screenshots and missing-required counts are progress evidence, never submission proof. The audit banner for those events must say Application in progress (with required-field warnings if applicable), not Submitted or Successful. A pending JobProfile with a Submitted banner is a display inconsistency. Only the correlated final webhook with current SUCCESS_NOTICE evidence and accepted=true should drive completed-submission presentation. Diagnose existing records from the stored event flags/evidence rather than the banner text alone.
+
+Rippling portal state: visible uploaded CV chips are recognized even after the native input disappears, including nested inline CV headings, removal icons and truncated filename display. Full filename metadata is preferred where available. Cover Letter chips and removed CVs do not count as an attached resume. Custom-select required status and committed answers come from the labelled widget, not its internal Search input. Optional or answered widgets no longer produce a phantom required Search question; genuinely required unanswered selections remain flagged.
+
+Education preview hotfix: the non-empty education renderer shares the resume facts copy helper, preventing copyButton ReferenceError from interrupting sidebar refresh. The populated-education Chrome regression covers rendering, copy action and refresh. Sidebar rendering errors must not be interpreted as ApplyFlow connection failures or proof of portal upload acceptance.
+
+Resume attachment and history: status-only jobVersion updates trigger re-detection of the same Resume/CV control before original-byte attachment; changes in candidate, job, assignment or selected resume remain rejected. No parsed text is converted into an attachment. Parsed education now has a separate preview and field mapping. The explicit Fill education & work history action uses the active job resume, adds supported missing rows, preserves manual edits and leaves unavailable facts empty. Employer and education locations do not fall back to candidate home location. Custom dropdowns require an exact unique offered value and selected-value readback; unsupported controls produce manual-review guidance. Asynchronous history filling rechecks the current assignment/resume and stops on changes. The Oracle-style regression verifies local original-file attachment and mapping, not the external portal's upload transaction.
+
+Per-tab continuity: applicationSessionId/jobId/profileId are retained for each open tab until a new tracked identity replaces them or the tab closes. Trusted local recovery survives page and extension reloads independently of expiring auth/context leases. Same-application partial URL hints merge into the complete saved IDs. Recovery stays bound to the saved API origin and applier, and every destination requires renewed ApplyFlow approval. Switching tabs never uses a global last-job/profile value. Sign-out/disconnect clears recovery; browser startup clears old tab-ID records to prevent IDs being reused for unrelated tabs. If ApplyFlow rejects a request even with all retained IDs, that rejection remains visible and actions stay paused.
+
+Multi-step navigation: recognized Next/Continue/Review actions are allowed through native employer click and submit handling, including immediate requestSubmit calls without a submitter. Missing future-step fields and expired SQC leases do not block intermediate navigation. Snapshot/screenshot capture remains available for verified assignments, without reporting an intermediate step as completion. Native portal validation and final-submit SQC checks remain in place.
+
+Fast confirmation sync: a valid content lease dispatches without another forced content-side session/context request. The worker performs fresh backend verification once, without requesting original file bytes. A correlated committed APPLIED/SUBMITTED/ALREADY_APPLIED acknowledgement updates the cached status immediately; no post-ack context request delays the response. Legacy acknowledgements without a terminal status retain the status-refetch fallback. Submission-change notifications wake the sidebar immediately. Expired confirmation-page leases recover once immediately, with a cooldown, rather than waiting for the thirty-second periodic refresh. Screenshots, evidence validation and accepted=true remain required as before.
+
+Embedded submission evidence: application events resolve their live URL using Chrome webNavigation.getFrame for the sending frame, preserving document identity across same-document ATS navigation. The backend verifies that live URL for the original candidate/job assignment. Final evidence must match that frame, contain a recent visible success notice, and remain on the same document immediately before dispatch. Replaced documents, unrelated URLs and manual completion remain rejected. SQC identifies the specific failed evidence checks; these local failures occur before the ApplyFlow webhook is called. The sidebar reads submission delivery and retry state from verified embedded documents belonging to the same application. Acknowledged completion still requires accepted=true and matching event/application/job/profile identifiers from ApplyFlow.
+
+Redirect continuity: successful verification no longer deletes the tab's recovery claims. Original applicationSessionId/jobId/profileId remain in session storage, bound to the saved API origin and applier, until the tab closes, the user signs out or a new tracked job replaces them. Canonical-host redirects, stripped fragments, iframe destinations, worker restarts and new about:blank child tabs retain discovery claims. Each actual destination still requires backend verification; retained claims do not grant an autofill lease. Employer job query parameters such as ashby_jid are preserved in the verification URL. URL-supplied API origins are never used to change the saved backend.
+
+409 handling: the extension preserves the actual backend code/message, HTTP path, version fields and bounded expected/current version metadata. An explicit version mismatch (including job/profile/resume variants) or an unclassified HTTP 409 on application-context renews the authenticated session and retries the same identifiers once. Known non-version conflicts, such as revoked launch sessions, are not retried as stale versions. Persistent conflicts pause filling, keep recovery claims and back off automatic context retries for 15 seconds; explicit retry bypasses that delay. Copy details includes the saved API origin, retained identifiers, sanitized navigation pages and recovery status. Non-version conflicts are not relabeled as version mismatches.
+
+Backend requirement: application-context must revalidate/renew the current candidate/job/application versions without returning a different identity or generating a resume. A persistent conflict in the backend's stored launch snapshot cannot be safely bypassed by the extension. Return error.code, error.message, fields and expectedVersions/currentVersions so the sidebar can identify the precise backend issue. Wrapper and iframe URL approval must be based on the same retained application identity rather than requiring the launch fragment on every URL.
+
+Candidate location source: explicit location facts in the matched candidate's base-context Candidate Information block override stale profile city/state/ZIP/address values. Structured contact identity and the verified profile ID remain intact. Instruction markers such as optimized are rejected as location values, including when they appear as the city portion of a Location line. Missing addresses or cities are not inferred from the employer, job or tailored resume. The matching session profile's parsed base facts survive a job-context response that omits the base text, and cached contexts are normalized too. The sidebar identifies whether its candidate city came from ApplyFlow base context or structured profile data. Without a usable city, it does not issue a false city mismatch.
+
+Resume upload deduplication: native file change and synthetic drop are no longer both dispatched for one original file. Integrated HUD and Q&A attachment paths share a per-document attempt guard keyed to application/candidate/job/resume/version. Replacing the upload input during processing does not trigger another automatic upload. Attach to page explicitly permits a manual retry. An input cleared by the portal reports handed to the uploader, not confirmed attachment. Visible Dropzone/file upload rejection messages appear as PORTAL_UPLOAD_ERROR in the sidebar; hidden stale errors are ignored.
+
+Refresh restoration: verified config returns savedFormAnswers from SQC's per-application answer journal. Supported empty text, native select and radio controls are matched by normalized question label and field ID when present. Local observations take priority over older server values. Conflicting duplicate labels remain manual. New edits and explicitly cleared controls are preserved. Restoring is limited to the same application, candidate/profile version, assignment, job, selected resume/version and page route. Tracking-only URL changes are ignored; employer job query parameters remain significant. Consent/signature, credentials and file-input values are never replayed. Original resumes still use the managed attachment flow.
+
+Direct ApplyFlow recovery is optional and requires application-context to return context.savedApplication. No new read endpoint is assumed. The supported envelope is:
+{
+  "applicationSessionId": "current_application_session",
+  "jobId": "current_job",
+  "profileId": "current_candidate",
+  "profileVersion": "current_profile_version",
+  "resumeId": "current_selected_resume",
+  "resumeVersion": "current_selected_resume_version",
+  "steps": [{
+    "url": "https://employer.example/apply?job=123",
+    "fields": [{"fieldId":"country","question":"Country","answer":"United States","type":"select"}]
+  }]
+}
+Return only this verified candidate/job/application's recorded values. Missing or mismatched server metadata is not used; the local journal remains available across page refreshes. SQC cannot promise server-only recovery after its local browser session is gone unless ApplyFlow implements this optional response.
+
+Required-field validation: Country, State, City and other location fields are no longer exempt from unanswered checks. Custom comboboxes use their committed selected value, not search text or stale hidden IDs. Native invalid/valueMissing states and aria-invalid portal errors are surfaced in the sidebar. Required field names are expanded automatically for small error lists. Existing form edits remain interactive.
+
+Submission confirmation: the retained total_fields_count is application history, not the number of editable controls on the confirmation page. The delivery handler rechecks visible portal success through detectSubmissionSuccess and never vetoes it using historical counts. Greenhouse's Thank you for applying / Your application has been received transition is covered with nine retained answers. URLs, review screens, hidden notices, SQC UI text, clicks and unfinished forms do not establish completion.
+
+Final delivery: portal receipt appears immediately as Submitted - ApplyFlow syncing; failed delivery remains Submitted - sync failed with its error and Retry submission sync. Each verified candidate/job/application has one final event ID, persisted for reload and reused across up to six automatic retries with backoff. Concurrent extraction passes coalesce into one send. Each retry rechecks the live confirmation and refreshes verified context. Completed and synced requires ApplyFlow acknowledgement, never a manual completion assertion. Switching jobs cannot apply an old acknowledgement to the new sidebar context. Captured original answers and screenshots stay in the final submission payload.
+
+Technical context belongs to the job resume, not a fixed candidate track. The validator no longer emits JOB_STACK_MISMATCH or RESUME_STACK_MISMATCH based on profile.targetStack, professional headline, activeStackKey or resume filename technology words. Backend/frontend/database preferences do not block an otherwise valid application. ApplyFlow-mode experience checks use the selected resume's parsed facts rather than a legacy profile track. Candidate assignment, identity, original resume ownership, current versions and portal submission evidence are still verified. This does not infer experience absent from the resume or guarantee qualification from a matching headline.
+
+Resume retention: saved original files are scoped to workspace, applier, application, candidate/profile version, assignment and job identity. A job status/version refresh or same-applier auth lease rotation does not discard the file. Previous binding format is recognized for tab-scoped originals. Verification read errors are errors, never a null resume; actual sign-out, reassignment and job switches still reset or pause the appropriate context. Generation checks retain current job/profile/resume versions.
+
+Q&A progress: pending count on the Q&A tab; Not sent, Processing and Failed totals; per-question status badges; existing Answered, To review and Applied counters. A detected question is not an answered question until an answer is returned. Generated drafts can count as answered while still requiring review. Passive state reads do not toggle the upload/generation busy state or disable Get answers.
+
+Screenshot evidence: Overview lists captured single-page and multi-step screenshots with preview actions and acknowledgement state. Images are loaded only when previewed. Captures join the next live event; final evidence remains in the submission payload. Status/resume version changes no longer clear a job's screenshot session. Existing per-session screenshot/storage limits still apply.
+
+Tracked job indicator: a compact, isolated status bar appears on tracked pages while the native sidebar is closed. It shows verification, candidate, resume readiness and availability/access errors with an Open sidebar button. A successful native opening removes it. A scoped runtime port tracks the open sidebar by browser window; closing it restores the status bar. It never blocks the employer form or marks a submission complete.
+
+Activation scope: a job board, known ATS domain, detected application form or embedded iframe alone does not activate SQC. The page must carry an ApplyFlow application session launch ID or be a backend-approved continuation of a tracked application. Untracked pages stay quiet without account polling or connection-error toasts. Leaving a tracked application for an unapproved route clears the active checker state and stops its account refresh timer.
+
+Resume selection: one visible Upload job resume / Replace resume control. The native file input and separate save control are hidden in the integrated sidebar. Selection reads and saves the original file automatically, with an application version captured before parsing. Passive state notifications cannot cancel parsing or overwrite the selected draft. Errors remain visible and selecting the same file again is supported.
+
+Quiet synchronization: scan errors preserve answers, drafts and expanded cards. Temporary account outages preserve the current workspace while pausing verified actions. Error polling backs off to 60 seconds; manual refresh bypasses the delay. Identical resume snapshots do not reset the editor.
+
+Native sidebar launch: trusted clicks on tracked job links open the persistent sidebar before navigation, including links that open a new tab. A directly pasted tracked URL verifies automatically; Chrome requires a user gesture to open a closed native sidebar, so the first real portal click or Enter/Space interaction opens it. Pages without launch parameters require a verified ApplyFlow job status for their current URL. Tab switches and context notifications do not grant launch permission; navigation or unsuccessful verification clears the prior permission. No automatic timer opening, floating HUD or page reload is used. https://developer.chrome.com/docs/extensions/reference/api/sidePanel
+
+Portal dropdown correction: sidebar mode keeps validation feedback in the sidebar and removes legacy field error/warning marks from the employer page. Validation CSS no longer changes field positioning. Dropdown controls and options bypass submission click interception, including options named Continue or Apply. Keyboard/form submission remains verified normally.
+
+1. Candidate reference facts are NOT job resumes. profile.baseContextText (or
+profile.baseContext) may hold a reference document with Candidate Information.
+SQC extracts explicitly labeled contact/location, official employer/title/date
+rows and education/graduation facts from that section. Structured profile fields
+win. Missing streets, authorization and technology experience are never inferred.
+Generator instructions, examples, keyword lists and fictional-project prompts are
+excluded. Raw reference text is not an attachment or AI resumeContext. If a base
+resume response accidentally contains a generator prompt, its reference facts are
+retained but resume becomes null; no original is downloaded from that object.
+Supply the actual generated job document separately as resume.kind:tailored with
+jobId, verified profileId, parsed document text and original file metadata/bytes.
+
+2. Multiple assigned profiles are verified per tab. assignedProfiles entries must
+include the validated assignment/profile pairs documented below. Launch profile
+IDs resolve against that roster; the matching assignment is used without changing
+the account's default profile or another tab. Candidate name is shown while
+verification is pending when it is known from the roster, and on every workspace
+tab after verification. When a launch omits profileId, the backend's returned
+profile must still belong to the verified roster and match the application ID.
+
+3. Resume flow has three distinct states: candidate facts, selected original job
+resume, and the file actually attached to the portal. A user upload takes priority
+over ApplyFlow's existing tailored file for that application. Hidden native file
+inputs behind visible Attach buttons are supported, scoped to Resume/CV rather
+than Cover letter or inactive forms. An existing portal attachment can be imported
+explicitly with Use attached resume as context. After parsing and candidate/job
+validation, SQC normalizes the portal filename only when its bytes equal the
+selected original. Different files are never silently replaced. Parsed text is
+for facts/answers only and is never rebuilt into a PDF or attachment.
+
+4. Availability is checked from visible main-page content and browser-observed
+main-document HTTP responses. A stable 404/410, soft-404 or explicit job-closed
+notice is confirmed twice at least 1.2 seconds apart before a terminal report.
+Hidden notices, footer text, login/CAPTCHA, HTTP 401/403/429, network/5xx failures,
+expired metadata alone, and conflicting active forms do not prove a closed job.
+Confirmed unavailable pages pause autofill, AI, resume prompts and attachments.
+SQC sends PORTAL_ACCESS_FAILED, is_final_submission:false,
+submission_confirmed_by:AUTO_DETECTED_JOB_UNAVAILABLE and portal_evidence with
+type:JOB_UNAVAILABLE_NOTICE, exact URL, visible evidence, observedAt and optional
+httpStatus. ApplyFlow maps this to LINK_NOT_FOUND, acknowledges the event, and must
+never downgrade an APPLIED record. SQC also protects known applied records locally.
+See Chrome's network observation API: https://developer.chrome.com/docs/extensions/reference/api/webRequest
+
+5. Live progress remains non-final. Empty controls, placeholders, default profile
+metadata and credentials do not start progress telemetry. Actual input or a
+resume attachment sends validation_status:IN_PROGRESS to live-event after a quiet
+500ms, no faster than once per 1.5 seconds. Duplicate snapshots are skipped. The
+correlated IN_PROGRESS acknowledgement is displayed as live progress, never as
+completion. Submission still requires portal evidence and its final acknowledgement.
+
+6. Background detection is passive while an applier edits. Unchanged native
+selects do not dispatch change/input events; unsupported custom labels are not
+rewritten. Autofill pauses for focused controls/open dropdowns. Failed AI fills
+remain for review rather than repeating until accepted. Manual Fill answer and
+Fill ready answers remain available after the applier finishes editing.
+
+AUTOMATIC ACTIVATION AND DIAGNOSTICS (1.5.1)
+Tracked tabs verify from browser committed navigation, URL/load completion and
+activation events, independently of DOM-based job-form detection. The active
+tracked tabs are also checked on worker startup and after sign-in. Apply-created
+children retain their parent binding. Opening the sidebar or clicking Connect
+is not required to start verification of a tracked URL.
+
+A verified candidate/job with missing resume text stays active with resume:null
+and an upload-needed message. Unverified/cross-candidate or wrong-job documents
+are still rejected. An assignment/session version mismatch triggers one session
+refresh and retry; other identity failures remain blocked. Failures report the
+exact missing/mismatched context fields and API path, never CSRF/cookie values.
+The sidebar displays those diagnostics on every tab with Retry and Copy details.
+After reloading an extension update, refresh an already-open job page once so
+Chrome loads the new content scripts; subsequent job loads activate automatically.
+
+CURRENT CONTRACT ADDITIONS (1.5.0; overrides older route-list requirements below)
+
+Application tracking is per browser tab and application session. allowedRoutes
+is optional and is no longer a gate in the main extension. A tracked launch must
+trigger verification immediately. Redirects, ATS login, steps and Apply-created
+tabs retain the job/profile/application IDs; every fresh page obtains the same
+authenticated assignment and versions before actions resume. SQC records observed
+verified URLs internally to prevent an old response authorizing a different page.
+Do not require employers to enumerate every possible redirect or wizard route.
+Conflicting explicit launch IDs still start a separate application; an unrelated
+job response cannot silently replace the existing tab's verified job binding.
+
+POST /api/sqc/application-context additionally sends:
+{
+  "trackingMode":"application-session",
+  "resumePolicy":"existing-only",
+  "allowResumeGeneration":false,
+  "duplicatePolicy":{
+    "scope":"profile","includeOtherAppliers":true,
+    "matchBy":["jobId","requisitionId","title","company","location"]
+  }
+}
+These accompany the existing contractVersion, url and retained application/job/
+profile IDs. They do not replace session/assignment ownership validation.
+
+Candidate-wide duplicate checking must query ApplyFlow's persisted submissions
+for this profile across ALL appliers. Match normalized job title and company,
+and consider stable posting/requisition IDs and location to distinguish jobs.
+Do not declare two different requisitions duplicates merely because they have the
+same role title and employer. Include reposted/alternate URLs for the same job.
+The extension has no access to the ApplyFlow database to perform this search.
+
+For a duplicate found under a different listing, return context.duplicateCheck:
+{
+  "status":"ALREADY_APPLIED","profileId":"prof_456",
+  "matchedJob":{
+    "id":"original_job_id","title":"Lead Software Engineer",
+    "company":"Acme Corp","requisitionId":"REQ-123","location":"Miami"
+  },
+  "submission":{
+    "id":"original_job_profile_record","status":"APPLIED",
+    "applierName":"Original applier","submittedAt":"2026-11-16T13:05:00.000Z"
+  }
+}
+When that search has completed with no match, return duplicateCheck.status:CLEAR
+and profileId. When unavailable, return UNKNOWN; absence is not proof that a
+candidate-wide search occurred. Existing context.status APPLIED/SUBMITTED/
+ALREADY_APPLIED remains sufficient to confirm the current candidate-job record.
+
+The Already applied sidebar button appears only for a backend-confirmed duplicate
+before a new delivery acknowledgement. It rechecks the backend and acknowledges
+the existing record locally. It does NOT create a submission, manufacture portal
+evidence, increment analytics or downgrade the existing record. Portal-detected
+ALREADY_APPLIED events continue through the existing evidence-validated webhook.
+If ApplyFlow needs to link duplicate listings or persist acknowledgement, supply
+a dedicated backend action; no such mutating endpoint is in the supplied contract.
+
+Main sidebar Q&A now uses /api/sqc/answer-questions through the existing versioned
+screening service, with local configured defaults handled before AI dispatch.
+It does not use the conversational /api/ai/chat schema for form answer batches.
+Preserve request and question IDs and the full job/profile/resume version envelope.
+Pending responses use the authenticated same-origin polling route. Accept the
+sqc_upload resumeContext envelope (text, skills, employment, original-byte SHA and
+base resume IDs); the local upload ID is not an ApplyFlow database resume ID.
+Checkbox answers can be arrays of literal supplied options for multiselect fields.
+
+Original file bytes are retained independently from parsed resume text. Both
+automatic content attachment and sidebar attachment use ONLY the supplied original
+PDF/DOCX/TXT, renamed to the locked candidate name with the SAME extension. SQC
+never reconstructs, converts or synthesizes a file from parsed text in main.
+Repeated status checks reuse a verified original until its version/hash changes.
+
+Submission mapping: SUBMITTED plus SUCCESS_NOTICE maps to ApplyFlow APPLIED;
+portal ALREADY_APPLIED maps to ALREADY_APPLIED without a new-submission count;
+PORTAL_ACCESS_FAILED maps to LINK_NOT_FOUND only after actual portal failure.
+APPLIED must never be downgraded by a stale/error event. A correlated accepted
+acknowledgement with nonempty recordId and status APPLIED is immediate committed
+completion. SQC validates optional returned jobId/profileId and refreshes context
+afterward; pending status cannot override that committed acknowledgement. Context
+may report APPLIED or SUBMITTED: both represent completion in the sidebar.
+
+AUTHENTICATION IS ACCOUNT SYNC ONLY (1.4.1)
+SQC login and password changes return only authenticated applier/assignment
+context; they do not resolve a job, fetch a file or generate a resume, even if a
+caller supplies tabId. POST /api/sqc/login includes allowResumeGeneration:false.
+GET /api/sqc/session and all authentication routes MUST be free of resume
+generation, tailoring, application creation and submission side effects.
+
+POST /api/sqc/application-context now includes resumePolicy:"existing-only" and
+allowResumeGeneration:false. Return an existing approved resume or resume:null.
+Never generate or regenerate a document while verifying status or reading context.
+GET resume.file.url must retrieve an existing file without triggering generation.
+When no suitable file exists, SQC requests an upload. Generating/tailoring a new
+resume is a separate explicit ApplyFlow workflow, never an authentication action.
+
+Only an authoritative /api/sqc/session rejection signs out the account. A job
+request returning 401 pauses that job; a resume download returning 401 reports a
+file-access error. Neither response alone proves the user is signed out. A
+temporary session network/5xx failure may display the last synced account in the
+sidebar, with actions paused and accountVerified:false; it never grants a lease.
+Confirmed session rejection clears identity and remains signed out until login.
+If login succeeds but /session immediately returns 401, verify that its HttpOnly
+session cookie is retained for extension credentialed fetches (including the
+existing SameSite/Secure, CORS and CSRF requirements). Do not return success before
+the authenticated session is available. Do not couple session refresh to document
+generation or return HTML/website-login redirects to the extension.
+
+GUIDED SIDEBAR WORKSPACE (1.4)
+The toolbar opens a sidebar with inline workspace URL, email/password and required
+password-change forms. After login, Overview shows the authenticated account and
+assigned candidate profiles even when no job is open or a portal route is denied.
+Resume and Q&A are separate tabs. Missing job resumes open the Resume tab once per
+application; successful file parsing and saving close the editor and return to
+the previous workspace tab. Both API-provided and uploaded resume text feed the
+same skills/employment parser. Password fields use autocomplete=username and
+current-password semantics and permit paste; password-manager availability still
+depends on the manager and extension origin.
+
+The existing session profileAssignment/profile pair remains the active lock.
+To list additional assigned profiles in Overview, GET /api/sqc/session may also
+return assignedProfiles:[{assignment,profile}], using the same assignment and
+verified profile shapes as the active pair. Every assignment must have id,
+version, status:ACTIVE, authenticated applierId, profileId and profileVersion
+matching profile.id/version. Overview exposes these names without allowing them
+to override the active lock. A plain list of candidate names is not assignment
+proof. The backend must still provide the active assignment for job verification.
+Missing assignment data is shown explicitly rather than as a missing job context.
+
+UNIFIED SIDEBAR AND COMPLETION EVIDENCE (1.2)
+The main release uses one Chrome sidebar for SQC status, resume handling and Q&A.
+It is bound to the active tab and authenticated assignment. The uploaded original
+passes through SQC_SET_LOCAL_RESUME, with candidate-header validation and per-job
+storage; it cannot change the assigned candidate. AI uses the configured ApplyFlow
+origin with the current session cookie and CSRF header. The standalone Q&A release
+remains separate and does not use this managed-assignment adapter.
+
+SQC retains sqcTabBindings (applicationSessionId, jobId, profileId, auth session and
+assignment versions) per tab in trusted session storage. Unapproved continuation
+URLs send these IDs and previousApplicationSessionId as lookup hints. They NEVER
+authorize identity: the backend must revalidate the application, assignment and
+versions. allowedRoutes is optional in 1.5. Backend-denied responses remove the usable lease
+but retain lookup hints. Sign-out/reassignment invalidates them; closing a tab
+removes its binding. Explicit launches for another job establish a new binding.
+
+A valid form, submit click, wizard Next button or generic Confirmation URL/title
+is not completion evidence. Completion requests include is_final_submission:true,
+submission_confirmed_by:CONFIRMED_ON_PORTAL_SUCCESS_PAGE (or the existing
+AUTO_DETECTED_ALREADY_APPLIED_ON_PORTAL), and portal_evidence with type
+SUCCESS_NOTICE or ALREADY_APPLIED_NOTICE, visible message, exact source URL,
+observedAt ISO timestamp and intermediate:false. SQC rejects missing, manual,
+intermediate, foreign-page and stale evidence. Content checks visible portal
+evidence again after screenshots. Backend ownership/version validation and an
+accepted acknowledgement with matching event/session IDs and nonempty recordId
+are still required before local completion is displayed. Enforce these checks on
+the server as well; browser evidence does not replace server authorization.
+
 ApplyFlow integration contract for SQC
 
 Implement this contract in the ApplyFlow backend to enable the SQC authentication,
@@ -365,13 +668,11 @@ SQC listens to browser tab URL updates as well as in-page history events.
 Approved steps retain the same applicationSessionId when launch parameters vanish.
 An approved continuation in another tab may reuse only one unambiguous matching
 session, including its reviewed local resume and audit screenshots.
-For a new route outside allowedRoutes, SQC sends previousApplicationSessionId
-as a discovery hint, not authorization. ApplyFlow must verify the actual ATS
-requisition/application association and return the correct context with that new
-step explicitly authorized. Reject unrelated or ambiguous routes. This hint must
-not cause arbitrary request URLs to be added to allowedRoutes.
+For a new page, SQC sends previousApplicationSessionId and retained job/profile
+IDs. ApplyFlow verifies the application association and returns the same context.
+Reject conflicting job identity or assignment claims; no route enumeration is required.
 
-Include every authorized application step and redirected portal in allowedRoutes.
+allowedRoutes may be omitted from context responses.
 SQC can rediscover a previously approved job route even if launch
 parameters disappear or the new page has no resume/email field yet. The HUD is
 repaired if a SPA replaces its DOM, and saved positions are kept inside the
@@ -388,11 +689,8 @@ Required validation:
   candidate for the same applier is rejected even if the URL requests that candidate.
 - Match the actual portal URL/requisition/platform identifier to the target job.
   Company/title alone are insufficient. Reject conflicting hints and ambiguity.
-- Build allowedRoutes from trusted job/ATS data. Do not echo arbitrary request
-  URLs into this list. Prefix routes match only path segments. Include identifying
-  query parameters when a platform uses them to distinguish jobs.
-- Authorize each redirect, login, confirmation, and embedded application frame
-  explicitly. Do not whitelist an entire shared ATS host or '/' for subpaths.
+- Keep application-session identity through redirects, login, confirmation and
+  embedded forms; do not substitute another candidate/job when URLs change.
   Every frame verifies its own URL with the worker; page postMessage cannot
   install identity or profile context. Cross-frame AI injection is not implemented.
 - Omit unknown optional profile facts; never supply invented defaults for
@@ -568,7 +866,67 @@ form URLs, and a logout during context retrieval. Verify that forged URL names,
 applier IDs, API origins, and candidate IDs do not change identity. Test duplicate
 event IDs, failed acknowledgements, and stale versions without marking jobs applied.
 
+Deployment policy and application continuity (main 1.3)
+
+config/settings.json is the packaged main-release policy. Appliers do not edit
+autofill, validation, default-answer or resume-mode selections. Administrators
+edit the source JSON, rebuild, and distribute/reload the extension. The runtime
+validates the policy and refuses unsafe submission settings. No credentials
+belong in this file. The saved API origin remains in chrome.storage.local.
+
+resume.mode is fixed or tailored. Fixed accepts an approved base resume without
+per-job uploads, with an optional candidate-scoped replacement. Tailored scopes
+uploads to the verified candidate/job/application. A backend job.tailoringRequired
+true always requires tailoring. Uploads retain actual file format, use the locked
+candidate's name as the attachment filename, and supply current document skills
+and employment entries ordered current/newest to oldest. Rows are kept together;
+ambiguous facts and unknown date precision are not invented.
+
+Launch links should include application_session_id and optionally sqc_job_id and
+sqc_profile_id. Ordinary ATS job_id query parameters are deliberately not treated
+as ApplyFlow IDs. Browser onBeforeNavigate captures IDs before an HTTP redirect;
+per-tab bindings and created-navigation-target events carry those discovery hints
+through wrapper pages, ATS login, steps, SPAs and Apply-created child tabs. This
+does not grant a lease. application-context must verify the original application
+and verify the retained job/profile/session identity on each actual URL, including
+login/wrapper steps. No predefined allowedRoutes list is required. Conflicting
+job/profile identity pauses actions but keeps
+the original tab association for later verification. Distinct launch sessions
+remain isolated even when several jobs share an ATS domain or login page.
+
+SQC_CAPTURE_STEP stores latest observed supported answers from each verified page
+in session storage, scoped by auth/application/profile assignment/job. Password,
+OTP, hidden and similar credential fields are excluded. At confirmed submission,
+the existing webhook adds application_steps (url, label, fields, timestamps) and
+screening_qa (question, answer, field_id, step, url, resume_id, resume_version).
+The backend should retain this evidence alongside its existing audit payload.
+An acknowledgement must echo accepted:true, eventId, applicationSessionId and a
+nonempty recordId. Delivery acknowledgement alone is not a completed job status.
+SQC refreshes application-context after delivery and while its sidebar is open;
+the backend should return status SUBMITTED/APPLIED after persisting the record.
+Until then the UI reports submission delivered with ApplyFlow status syncing.
+
 SQC local checks: npm.cmd test; npm.cmd run build on Windows (npm on other systems).
 Load dist/extension as an unpacked Chrome extension. Connect to the implemented
 API origin, sign in, refresh the popup, then open an assignment from ApplyFlow.
 Live end-to-end acceptance requires these backend routes and a Chrome session.
+LIVE PAGE COVERAGE (SQC 1.6.4)
+The extension now reads committed values separately from unanswered AI inputs.
+Filled fields from SQC autofill or manual entry contribute to Answered and Applied
+without an AI request. Clearing a live field removes its filled status. These are
+field-completion counts, not proof that the job application was submitted.
+Each frame inventory is filtered through the same verified job scope as Q&A.
+The Page field coverage list accounts for detected uploads and controls; details
+report manual, unsupported and unlabeled controls. Conditional fields are scanned
+when revealed; restricted frames/closed shadow roots may require manual handling.
+No new ApplyFlow endpoint is required for the sidebar counts or image deduplication.
+
+EXPLICIT FIELD ASSIGNMENT (SQC 1.6.5)
+Candidate details and returned answers expose Assign to field. The extension
+rescans the verified active job, lets the applier choose an unanswered field and
+edit the value, then uses QA_APPLY_ANSWER with manual:true and the existing
+document/context snapshot. It rejects changed assignments and edited fields.
+It does not call the AI or require a new backend route to map these values.
+Overview confirms the visible portal resume filename, including attachment rows
+whose native file input has been removed by the ATS. Resume presence is distinct
+from having a resume available in ApplyFlow or in the extension's context.

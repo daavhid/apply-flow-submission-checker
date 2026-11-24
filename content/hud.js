@@ -9,6 +9,7 @@
 window.SubmissionHUD = (function () {
   'use strict';
 
+  const sidebarMode = chrome.runtime.getManifest?.().side_panel?.default_path === 'sidebar/sidebar.html';
   let containerEl = null;
   let pillEl = null;
   let drawerEl = null;
@@ -62,11 +63,11 @@ window.SubmissionHUD = (function () {
   function managedResumeFile(profile = currentProfile) {
     const c = currentSettings?.verifiedContext;
     if (!c || profile?.id !== c.profileId || profile?.resumeId !== c.resumeId || profile?.resumeVersion !== c.resumeVersion) return null;
-    if (profile?.resumeBase64) return base64ToFile(profile.resumeBase64, profile.resumeFilename || getCandidateCleanFileName(profile));
+    if (profile?.resumeBase64) return base64ToFile(profile.resumeBase64, getCandidateCleanFileName(profile, profile.resumeFilename || '.pdf'));
     return localVerifiedResume?.binding === resumeBinding() ? localVerifiedResume.file : null;
   }
   function tailoredReady() { return currentSettings?.integrationMode === 'applyflow' ? currentProfile?.resumeIsTailored === true : Boolean(sessionStorage.getItem('sqc_tailored_resume')); }
-  function tailoringRequired() { return currentProfile?.resumeTailoringRequired === true || currentProfile?.tailoringMode === 'tailored'; }
+  function tailoringRequired() { return currentProfile?.resumeMode ? currentProfile.resumeMode==='tailored' : currentProfile?.resumeTailoringRequired === true || currentProfile?.tailoringMode === 'tailored'; }
   function clampHUD() {
     if (!containerEl || !pillEl || isDrawerOpen) return;
     const rect = containerEl.getBoundingClientRect();
@@ -75,6 +76,7 @@ window.SubmissionHUD = (function () {
     if (rect.top < 4 || rect.bottom > window.innerHeight - 4) containerEl.style.top = Math.max(4, Math.min(rect.top, window.innerHeight - rect.height - 4)) + 'px';
   }
   function watchHUD() {
+    if (sidebarMode) return;
     if (hudRepairObserver || !document.documentElement) return;
     hudRepairObserver = new MutationObserver(() => {
       if (!containerEl || document.body?.contains(containerEl) || hudRepairTimer) return;
@@ -145,6 +147,7 @@ window.SubmissionHUD = (function () {
   // Ensure HUD container is attached to DOM (resilient against SPA page re-renders)
   // CRITICAL: HUD overlay is ONLY rendered in the top-level window. Child iframes never render their own floating HUD.
   function ensureContainer() {
+    if (sidebarMode) return null;
     if (window !== window.top) {
       return null;
     }
@@ -360,6 +363,7 @@ window.SubmissionHUD = (function () {
   }
 
   function showVerificationBanner(opts = {}) {
+    if (sidebarMode) return;
     ensureContainer();
     if (!containerEl) return;
 
@@ -660,6 +664,9 @@ window.SubmissionHUD = (function () {
   // Floating pill
   // ---------------------------------------------------------------------------
   function renderPill(validationResult = null, extractedData = null) {
+    if (validationResult) lastValidation = validationResult;
+    if (extractedData) lastExtracted = extractedData;
+    if (sidebarMode) return;
     ensureContainer();
     if (!containerEl) return;
 
@@ -728,6 +735,7 @@ window.SubmissionHUD = (function () {
   }
 
   function toggleDrawer(forceOpen = null) {
+    if (sidebarMode) { if(forceOpen!==false) chrome.runtime.sendMessage({type:"OPEN_SQC_SIDEBAR"}).catch(()=>{}); return; }
     ensureContainer();
     isDrawerOpen = forceOpen !== null ? forceOpen : !isDrawerOpen;
     if (containerEl) containerEl.classList.toggle('sqc-is-open', isDrawerOpen);
@@ -1504,7 +1512,7 @@ window.SubmissionHUD = (function () {
               ${icon('checkCircle', 15)} Already Submitted · Re-sync
             </button>
           ` : `
-            <button class="sqc-btn sqc-btn-success" id="sqc-btn-confirm-apply" title="Confirm this submission completed and log it to Apply-Flow">${icon('send', 15)}Confirm submission</button>
+            <span class="sqc-section-meta">Submit on the employer portal</span>
           `}
         </div>
       </footer>
@@ -1754,32 +1762,6 @@ window.SubmissionHUD = (function () {
       });
     });
 
-    // Confirm & log submission
-    on($('#sqc-btn-confirm-apply'),'click', async (e) => {
-      if (!window.SubmissionCheckerCore) return;
-      setQuickApplyStatus('submitting', '⏳ Submitting application to Apply-Flow...');
-      const restore = setBtnBusy(e.currentTarget, 'Submitting…');
-      try {
-        const res = await window.SubmissionCheckerCore.confirmAndLogSubmission();
-        restore();
-        if (res && res.success) {
-          setQuickApplyStatus('submitted', '🎉 Submitted successfully to Apply-Flow!');
-          showToast("🎉 Application submitted & confirmed in Apply-Flow!");
-          setTimeout(() => toggleDrawer(false), 900);
-        } else if (res?.reason === 'ALREADY_SUBMITTED_PROTECTED' || res?.reason === 'USER_CANCELLED_INCOMPLETE') {
-          setQuickApplyStatus('idle');
-          // Toast already shown by the core
-        } else {
-          setQuickApplyStatus('submitted', '🎉 Application recorded locally.');
-          showToast("⚠️ Submission recorded locally.");
-        }
-      } catch (err) {
-        restore();
-        setQuickApplyStatus('idle');
-        showToast(`❌ Error: ${err.message || 'Submission failed'}`);
-      }
-    });
-
     // Portal failure dialog
     on($('#sqc-btn-portal-failed'),'click', () => openPortalFailedDialog());
 
@@ -1978,11 +1960,18 @@ window.SubmissionHUD = (function () {
   // In-page outlines and non-intrusive error indicators (no layout shifts)
   // ---------------------------------------------------------------------------
   function updateFieldHighlights(fieldMap) {
+    // Sidebar owns validation feedback. Never restyle framework-owned portal controls:
+    // Select2 and similar widgets keep clipped inputs over/inside their visible trigger.
+    if (sidebarMode) fieldMap = null;
     const currentElements = new Set();
 
     if (fieldMap) {
       fieldMap.forEach((errList, element) => {
         if (!element || !document.body || !document.body.contains(element)) return;
+        const style = window.getComputedStyle(element);
+        if (element.matches('[type="hidden"], [aria-hidden="true"], .select2-hidden-accessible') ||
+            !element.getClientRects().length || style.display === 'none' || style.visibility === 'hidden' ||
+            element.getBoundingClientRect().width <= 2 || element.getBoundingClientRect().height <= 2) return;
         currentElements.add(element);
 
         const hasFatal = errList.some(e => !e.isWarning);
@@ -2078,6 +2067,7 @@ window.SubmissionHUD = (function () {
 
   // Blocking modal shown when a submit is intercepted
   function showBlockingModal(validationResult, onOverride) {
+    if(sidebarMode){lastValidation=validationResult;updateFieldHighlights(validationResult?.fieldErrorMap||new Map());toggleDrawer(true);return;}
     removeBlockingModal();
 
     const p = currentProfile || { fullName: 'Candidate' };
@@ -2571,11 +2561,12 @@ window.SubmissionHUD = (function () {
 
   function getCandidateCleanFileName(profile, originalFilename = '') {
     const p = profile || currentProfile || {};
-    const candName = String(p.fullName || 'Candidate').trim();
+    const candName = String(p.fullName || 'Candidate').normalize('NFC').replace(/[<>:"/\\|?*\x00-\x1f]/g,' ').replace(/\s+/g,' ').replace(/[. ]+$/,'').trim().slice(0,120);
     const lowerOrig = String(originalFilename || '').toLowerCase();
     let ext = 'pdf';
     if (lowerOrig.endsWith('.docx')) ext = 'docx';
     else if (lowerOrig.endsWith('.doc')) ext = 'doc';
+    else if (lowerOrig.endsWith('.txt')) ext = 'txt';
     return `${candName}.${ext}`;
   }
 
@@ -2668,8 +2659,7 @@ window.SubmissionHUD = (function () {
     if ((!resumeText || !resumeText.trim()) && !customFile && !activeTailoredFile && !hasCachedFile && !p.resumeBase64) {
       return { success: false, error: "Empty resume content" };
     }
-    const canonicalName = currentSettings?.integrationMode === 'applyflow' && p.resumeFilename
-      ? p.resumeFilename : getCandidateCleanFileName(p, (customFile?.name || activeTailoredFile?.name || '.pdf'));
+    const canonicalName = getCandidateCleanFileName(p, (customFile?.name || activeTailoredFile?.name || '.pdf'));
 
     let effectiveFile = customFile || activeTailoredFile;
     if (!effectiveFile) {
@@ -2753,10 +2743,11 @@ window.SubmissionHUD = (function () {
 
         const targets = resumeInputs.length > 0 ? resumeInputs : (!options.auto && allFileInputs.length === 1 ? [allFileInputs[0]] : []);
 
-        targets.forEach(inp => {
+        targets.slice(0,1).forEach(inp => {
           const previous = injectedResumeFiles.get(inp);
           const staleAutomaticFile = previous && previous.binding !== resumeBinding() && previous.file === inp.files?.[0];
           if (inp.disabled || (inp.files?.length && !options.userInitiated && !staleAutomaticFile)) return;
+          if(window.SQCFormState?.claimUpload(resumeBinding(),document,options.userInitiated===true)===false)return;
           try {
             const dt = new DataTransfer();
             dt.items.add(effectiveFile);
@@ -2766,21 +2757,8 @@ window.SubmissionHUD = (function () {
             inp.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
             fileInputsCount++;
 
-            // Trigger drop simulation on dropzone containers and upload triggers
-            const dropzoneTargets = [
-              inp,
-              inp.parentElement,
-              inp.closest('.dropzone, [class*="dropzone"], [class*="drop-zone"], [class*="file-upload"], [class*="attach"], [class*="_dropzone_"], [class*="upload"]'),
-              ...uploadTriggers
-            ].filter(Boolean);
-
-            if (!options.auto) dropzoneTargets.forEach(dtTarget => {
-              try {
-                dtTarget.dispatchEvent(new DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer: dt }));
-                dtTarget.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt }));
-                dtTarget.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
-              } catch (_) {}
-            });
+            // A native change already hands the file to the portal uploader.
+            // Dispatching drop as well queues the same original multiple times.
           } catch (err) {
             console.warn("[SQC] File input injection notice:", err);
           }
@@ -2789,18 +2767,6 @@ window.SubmissionHUD = (function () {
         // 2. Fallback for TTC Portals, Taleo, Workday: If no direct file input yet, activate the upload trigger!
         if (targets.length === 0 && uploadTriggers.length > 0) {
           try {
-            const dt = new DataTransfer();
-            dt.items.add(effectiveFile);
-
-            // Simulate drag & drop first
-            uploadTriggers.forEach(trig => {
-              try {
-                trig.dispatchEvent(new DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer: dt }));
-                trig.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt }));
-                trig.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
-              } catch (_) {}
-            });
-
             // Find the best trigger element (preferring interactive element or innermost with upload text)
             const bestTrigger = uploadTriggers.find(el => ['A', 'BUTTON', 'LABEL'].includes(el.tagName) || el.getAttribute('role') === 'button') || uploadTriggers[uploadTriggers.length - 1];
 
@@ -2833,7 +2799,8 @@ window.SubmissionHUD = (function () {
                 const dynamicInputs = collectAllFileInputs();
                 if (dynamicInputs.length > 0) {
                   clearInterval(watchInterval);
-                  dynamicInputs.forEach(dynInp => {
+                  dynamicInputs.slice(0,1).forEach(dynInp => {
+                    if(window.SQCFormState?.claimUpload(resumeBinding(),document,options.userInitiated===true)===false)return;
                     try {
                       const dtDyn = new DataTransfer();
                       dtDyn.items.add(effectiveFile);
@@ -2949,6 +2916,7 @@ window.SubmissionHUD = (function () {
 
   // Resume manager dialog
   function openResumeModal() {
+    if(sidebarMode){closeManagedResumeDialog();toggleDrawer(true);return;}
     if (currentSettings?.integrationMode === 'applyflow') {
       if (!window.SQCContextPolicy?.ready(currentSettings, window.location.href)) { showToast('Verify the ApplyFlow assignment before managing its resume.'); return; }
       closeManagedResumeDialog();
@@ -3574,6 +3542,7 @@ window.SubmissionHUD = (function () {
   }
 
   function promptTailoredResumeIfNeeded() {
+    if (sidebarMode) return;
     if (currentSettings?.integrationMode === 'applyflow') {
       if (window !== window.top || !window.SQCContextPolicy?.ready(currentSettings, window.location.href)) return;
       if ((!tailoringRequired() || tailoredReady()) && managedResumeFile()) return;
@@ -3614,6 +3583,7 @@ window.SubmissionHUD = (function () {
 
   return {
     init,
+    closeResumeDialogs:closeManagedResumeDialog,
     destroy,
     getActiveProfile,
     hasVerifiedResumeFile: () => Boolean(managedResumeFile()),

@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "resume": {
+    "mode": "tailored",
+    "allowUpload": true,
+    "autoAttach": true,
+    "closeAfterAttach": true,
+    "experienceOrder": "newest-first"
+  },
+  "autofill": {
+    "enabled": true,
+    "experience": true,
+    "skills": true,
+    "demographics": true,
+    "compensation": true,
+    "customQuestions": true
+  },
+  "validation": {
+    "mode": "active",
+    "minScreeningLength": 15,
+    "detectCaptcha": true,
+    "streamLiveEvents": true
+  },
+  "questions": {
+    "autoDetect": true,
+    "applyChoices": true,
+    "applyText": true
+  },
+  "answers": {
+    "sponsorship": "No",
+    "gender": "Male",
+    "race": "Two or more races",
+    "raceFallback": "Prefer not to say",
+    "hispanicLatino": "No",
+    "veteranStatus": "I am not a protected veteran",
+    "smsUpdates": "No"
+  },
+  "tracking": {
+    "inheritNewTabs": true,
+    "captureAnswers": true,
+    "maxApplications": 30,
+    "maxStepsPerApplication": 40
+  },
+  "submission": {
+    "requirePortalConfirmation": true,
+    "requireAcknowledgement": true,
+    "refreshApplyFlowStatus": true
+  }
+}
