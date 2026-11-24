@@ -2,6 +2,12 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {parse,experienceValue,numericFact,numberMismatch}=require('../content/resume-context');
+
+test('education is parsed from the resume with its own school, degree, major and graduation year',()=>{
+ const facts=parse('EDUCATION\nTest University\nBachelor of Science in Computer Science | 2017\nOther College\nMaster of Science in Engineering | 2020\nSKILLS\nPython');
+ assert.equal(facts.education.length,2);assert.equal(facts.education[0].graduationYear,'2017');assert.equal(facts.education[1].graduationYear,'2020');
+ assert.equal(facts.education[0].major,'Computer Science');assert.equal(facts.education[0].city,undefined);assert.equal(facts.education[0].gpa,undefined);
+});
 const resume=`Candidate One
 8 years of professional experience. 5 years of experience with Python.
 PROFESSIONAL EXPERIENCE
@@ -45,4 +51,8 @@ test('unstructured or ambiguous employment stays empty rather than borrowing can
 test('a responsibility sentence above a role is not treated as its company',()=>{
   const facts=parse(`Candidate One\nEXPERIENCE\nFirst Corp\nSenior Engineer | 2022 - 2024\nMaintaining design records, Git pull-request reviews, and governance through the SDLC.\nSoftware Engineer | 2020 - 2022\nSecond Corp\nBuilt APIs.\nEDUCATION`);
   assert.equal(facts.workHistory[1].company,'Second Corp');
+});
+test('employment is ordered current-to-oldest even when the document lists older work first',()=>{
+  const facts=parse('Candidate One\nEXPERIENCE\nOld Corp\nSoftware Engineer | January 2010 - December 2015\nBuilt old systems.\nCurrent Corp\nSenior Engineer | January 2023 - Present\nBuilt current systems.\nMiddle Corp\nSoftware Developer | January 2016 - December 2022\nBuilt services.\nSKILLS\nLanguages: Python, TypeScript\nDatabases: PostgreSQL, SQL');
+  assert.deepEqual(facts.workHistory.map(row=>row.company),['Current Corp','Middle Corp','Old Corp']);assert.deepEqual(facts.skills,['Python','TypeScript','PostgreSQL','SQL']);assert.match(facts.workHistory[0].description,/current systems/);assert.equal(facts.workHistory[0].description.includes('old systems'),false);
 });

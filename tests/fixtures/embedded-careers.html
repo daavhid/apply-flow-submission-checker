@@ -1,0 +1,9 @@
+<!doctype html><html><head><title>Embedded career page routing fixture</title></head><body>
+<h1>Careers</h1><form role="search" id="career-filters"><label>City<input id="filter-city"></label><label>Search jobs<input type="search" id="job-search"></label></form>
+<footer><form id="newsletter"><label>Email<input id="newsletter-email" type="email"></label></form></footer>
+<a id="application-tab" href="#application">Application</a><div id="embed"><p>Loading selected posting...</p></div>
+<script>
+window.fixtureResets=0;
+document.getElementById('filter-city').addEventListener('change',()=>{fixtureResets++;const url=new URL(location.href);url.searchParams.delete('ashby_jid');history.replaceState(null,'',url);document.getElementById('embed').textContent='All careers';});
+document.getElementById('application-tab').addEventListener('click',event=>{event.preventDefault();if(event.currentTarget.getAttribute('href')!=='#application'){fixtureResets++;document.getElementById('embed').textContent='All careers';return;}setTimeout(()=>{const frame=document.createElement('iframe');frame.id='application-frame';frame.src='/tests/fixtures/embedded-application.html';document.getElementById('embed').replaceChildren(frame);},100);});
+</script><script src="/content/context-policy.js"></script><script src="/content/extractor.js"></script></body></html>

@@ -1,9 +1,14 @@
 /* Local tailored documents retain their source; they never replace candidate identity. */
 (function (root) {
   'use strict';
-  const binding = (auth, c) => JSON.stringify([auth.apiOrigin, auth.sessionId, auth.applier.id,
+  const binding = (auth, c) => JSON.stringify([auth.apiOrigin, auth.applier.id,
     c.applicationSessionId, c.assignment.profileAssignmentId, c.assignment.profileAssignmentVersion,
-    c.profile.id, c.profile.version, c.job.id, c.job.version]);
+    c.profile.id, c.profile.version, c.job.id]);
+  const fixedBinding=(auth,c)=>JSON.stringify([auth.apiOrigin,auth.applier.id,c.assignment.profileAssignmentId,c.assignment.profileAssignmentVersion,c.profile.id,c.profile.version]);
+  function sameBinding(saved,current){
+    if(saved===current)return true;
+    try{const old=JSON.parse(saved);if(old.length===10){old.splice(9,1);old.splice(1,1);}else if(old.length===7)old.splice(1,1);return JSON.stringify(old)===current;}catch(_){return false;}
+  }
   async function validate(input, profile) {
     if (input?.confirmed !== true) throw new Error('Confirm that this resume belongs to the assigned candidate and current job.');
     const filename = String(input.filename || '').replace(/[\\/]/g, '_');
@@ -16,6 +21,7 @@
     if (extension === 'pdf' && new TextDecoder().decode(bytes.slice(0, 5)) !== '%PDF-' ||
         extension === 'docx' && (bytes[0] !== 80 || bytes[1] !== 75 || bytes[2] !== 3 || bytes[3] !== 4)) throw new Error('The document contents do not match its file type.');
     const text = (extension === 'txt' ? new TextDecoder().decode(bytes) : String(input.text || '')).trim();
+    if(root.SQCCandidateReference?.isPromptDocument(text))throw new Error('This is candidate reference content with generation instructions, not an actual resume. Upload the original job resume instead.');
     if (text.length < 40 || text.length > 200000) throw new Error('Extract or paste the resume text (40–200,000 characters) before using this file.');
     const normalize = value => String(value).normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
     const header = new Set(normalize(text.slice(0, 1500)).split(' '));
@@ -26,15 +32,16 @@
       throw new Error('The resume header must identify the assigned candidate. Check the document or its extracted text.');
     }
     const sha256 = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), b => b.toString(16).padStart(2, '0')).join('');
-    const skills = Array.isArray(input.skills) ? [...new Set(input.skills.filter(s => typeof s === 'string' && s.trim() && s.length <= 100))].slice(0, 100) : [];
+    const facts=root.SQCResumeContext?.parse(text) || {workHistory:[],skills:[],skillYears:{},totalYears:null,needsReview:[]};
+    const skills = Array.isArray(input.skills)&&input.skills.length ? [...new Set(input.skills.filter(s => typeof s === 'string' && s.trim() && s.length <= 100))].slice(0, 100) : facts.skills||[];
     return {id:'sqc-upload:' + sha256, version:sha256, source:'sqc_upload', verified:false,
-      text, skills, facts:root.SQCResumeContext?.parse(text) || {workHistory:[],skillYears:{},totalYears:null,needsReview:[]},
+      text, skills, facts,
       kind:'tailored', profileId:profile.id,
       file:{filename, mimeType:types[extension], sha256, dataUrl:`data:${types[extension]};base64,${match[2].replace(/\s/g, '')}`}};
   }
   function memoryStore() {
     const records = new Map();
-    return { async get(id, key) { const r = records.get(id); return r?.binding === key ? r.resume : null; },
+    return { async get(id, key) { const r = records.get(id); return r&&sameBinding(r.binding,key) ? r.resume : null; },
       async put(id, key, resume) { records.set(id, {binding:key, resume}); },
       async remove(id) { records.delete(id); }, async clear() { records.clear(); } };
   }
@@ -64,15 +71,15 @@
     return {
       async get(id, key) { const e = await epoch, r = await transact('readonly', s => s.get(id));
         if (!r) return null; if (r.epoch !== e) { await this.remove(id); return null; }
-        return r.binding === key ? r.resume : null; },
+        return sameBinding(r.binding,key) ? r.resume : null; },
       async put(id, key, resume) { const e = await epoch;
         const all = await transact('readonly', s => s.getAll());
-        for (const r of all.sort((a,b) => a.savedAt-b.savedAt).slice(0, Math.max(0, all.length - 2))) if (r.tabId !== id) await this.remove(r.tabId);
+        if(all.length>=100&&!all.some(r=>r.tabId===id))throw new Error('Resume storage is full. Close finished job tabs before uploading another document.');
         await transact('readwrite', s => s.put({tabId:id,binding:key,resume,epoch:e,savedAt:Date.now()})); },
       async remove(id) { await epoch; await transact('readwrite', s => s.delete(id)); },
       async clear() { await epoch; await transact('readwrite', s => s.clear()); }
     };
   }
-  root.SQCLocalResume = {binding, validate, createStore, memoryStore};
+  root.SQCLocalResume = {binding, fixedBinding, validate, createStore, memoryStore};
   if (typeof module !== 'undefined') module.exports = root.SQCLocalResume;
 })(globalThis);

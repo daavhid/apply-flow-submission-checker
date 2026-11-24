@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 window.SQCWorkspace = (() => {
   const paths = {
     shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/>',
@@ -85,10 +85,11 @@ window.SQCWorkspace = (() => {
       return `<div class="identity-stack"><div class="identity-label">SIGNED IN AS</div>${person(i.applier.name, i.applier.email)}<div class="identity-connector"><span></span>${icon('lock')}Synced from ApplyFlow</div><div class="identity-label">YOUR ASSIGNED CANDIDATE</div>${person(config.activeProfile.fullName, config.activeProfile.primaryEmail || config.activeProfile.email || 'Verified candidate profile', 'candidate')}</div>`;
     }
     function shell(stage, content) {
-      view.innerHTML = `<div class="workspace-frame ${stage === 'ready' ? 'ready-frame' : ''}">${surface === 'setup' ? steps(stage) : ''}${content}${stage === 'ready' ? '<div class="workspace-actions"><button class="button secondary" id="open-qa">Open AI Q&amp;A sidebar</button></div>' : ''}</div>`;
+      view.innerHTML = `<div class="workspace-frame ${stage === 'ready' ? 'ready-frame' : ''}">${surface === 'setup' ? steps(stage) : ''}${content}${stage === 'ready' ? '<div class="workspace-actions"><button class="button secondary" id="open-qa">Open application sidebar</button></div>' : ''}</div>`;
       view.setAttribute('aria-busy', 'false');
       view.dataset.stage = stage;
       bind();
+      if(stage==='preferences'&&config.settings?.deploymentManaged){view.querySelectorAll('#preferences-form input,#preferences-form button').forEach(input=>{input.disabled=true;});notify('Managed by config/settings.json. Update the JSON and reload the extension to change these settings.','info');}
       if (currentStage && currentStage !== stage) {
         document.getElementById('screen-heading')?.focus({ preventScroll: true });
         window.scrollTo(0, 0);
@@ -107,7 +108,7 @@ window.SQCWorkspace = (() => {
         return;
       }
       if (screen === 'server') {
-        shell('server', `${heading('YOUR WORKSPACE', 'Let’s connect your workspace.', 'Start with your ApplyFlow server address. We’ll connect your account next.')}<form class="panel" id="server-form"><div class="field"><label for="api-origin">Backend API URL</label><input id="api-origin" type="url" placeholder="https://api.your-applyflow.com" value="${escape(i.apiOrigin || '')}" autocomplete="url" spellcheck="false" aria-describedby="server-help" required><p class="field-hint" id="server-help">Use the server address supplied by your team.</p></div>${feedback}${primary('Continue to sign in', 'connect', 'submit')}${i.applier ? '<button class="text-button back-button" id="back-workspace" type="button">Keep current connection</button>' : ''}<div class="trust-note">${icon('lock')}Your connection is checked before you sign in.</div></form>`);
+        shell('server', `${heading('YOUR WORKSPACE', 'Let’s connect your workspace.', 'Start with your ApplyFlow server address. We’ll connect your account next.')}<form class="panel" id="server-form"><div class="field"><label for="api-origin">Backend API URL</label><input id="api-origin" type="url" placeholder="https://applyflow-api.jhproit.com" value="${escape(i.apiOrigin || 'https://applyflow-api.jhproit.com')}" autocomplete="url" spellcheck="false" aria-describedby="server-help" required><p class="field-hint" id="server-help">Use the server address supplied by your team.</p></div>${feedback}${primary('Continue to sign in', 'connect', 'submit')}${i.applier ? '<button class="text-button back-button" id="back-workspace" type="button">Keep current connection</button>' : ''}<div class="trust-note">${icon('lock')}Your connection is checked before you sign in.</div></form>`);
       } else if (screen === 'signin') {
         shell('signin', `${heading('SIGN IN SECURELY', 'Your account. This browser.', 'Use your ApplyFlow email and password. Your ApplyFlow website can stay in another Chrome profile.', 'lock')}<form class="panel" id="login-form"><div class="server-chip"><span class="status-dot"></span><span>${escape(i.apiOrigin)}</span><button id="edit-server" class="text-button" type="button">Change</button></div>${field('login-email', 'ApplyFlow email', 'email', 'username')}${field('login-password', 'Password', 'password', 'current-password')}${feedback}${primary('Sign in & sync profile', 'sign-in', 'submit')}<div class="trust-note">${icon('shield')}Your password is sent to your ApplyFlow server and never saved by the extension.</div></form>`);
         if (!['SIGNED_OUT', 'DISCONNECTED'].includes(i.state)) notify(i.message || 'Sign in to continue.');

@@ -10,8 +10,6 @@ yarn-error.log*
 pnpm-debug.log*
 
 # Environment
-.env
-.env.local
 .env.*.local
 
 # OS
@@ -25,3 +23,4 @@ server/data/submissions.json
 dist/
 .test-artifacts/
 
+config.bat

@@ -29,6 +29,11 @@ window.JobFormValidator = (function () {
   function getCandidateStackCategory(profile) {
     if (!profile) return 'unknown';
     const target = (profile.targetStack || '').toLowerCase();
+    // The assigned track takes precedence over secondary resume keywords.
+    if(/python|\bai\b|machine learning|artificial intelligence|\bml\b|data science/.test(target))return 'python';
+    if(/c#|\.net|dotnet|csharp/.test(target))return 'dotnet';
+    if(/\bjava\b|spring/.test(target))return 'java';
+    if(/\bphp\b|laravel/.test(target))return 'php';
     const kws = (profile.primaryStackKeywords || []).map(k => String(k).toLowerCase());
     const all = `${target} ${kws.join(' ')}`;
 
@@ -101,7 +106,7 @@ window.JobFormValidator = (function () {
         !window.SQCContextPolicy?.ready(settings, window.location.href) ||
         activeProfile.id !== settings.verifiedContext?.profileId)) {
       errors.push({ rule: 'APPLYFLOW_CONTEXT_UNVERIFIED', severity: 'BLOCKING',
-        message: settings.integrationMessage || 'Connect to ApplyFlow and verify this application assignment.' });
+        message: settings.integrationState==='VERIFIED' ? 'Refreshing this application assignment with ApplyFlow. Submission sync will continue after verification.' : settings.integrationMessage || 'Connect to ApplyFlow and verify this application assignment.' });
       return { isValid: false, errors, warnings, fieldErrorMap, errorCount: 1, warningCount: 0 };
     }
 
@@ -161,7 +166,10 @@ window.JobFormValidator = (function () {
         message:'Upload a tailored resume or sync the approved job-tailored resume from ApplyFlow before continuing.'});
     }
 
-    const effectiveStack = getEffectiveStack(profile, settings.activeStackKey, data.job_title);
+    const effectiveStack = settings.integrationMode === 'applyflow'
+      ? {keywords:profile.resumeContext?.skills || profile.primaryStackKeywords || [],
+        skillYears:profile.resumeContext?.skillYears || {}}
+      : getEffectiveStack(profile, settings.activeStackKey, data.job_title);
     if (profile.resumeIsTailored && window.SQCResumeContext) {
       for (const entry of data.screening_qa || []) {
         const fact=window.SQCResumeContext.numberMismatch(entry.q,entry.a,profile.resumeContext);
@@ -218,6 +226,8 @@ window.JobFormValidator = (function () {
         fieldErrorMap.get(element).push({ message, isWarning, ...(meta ? { meta } : {}) });
       }
     }
+
+    if(data.portal_upload_error)addError(null,'Resume upload error from the employer portal: '+data.portal_upload_error,'PORTAL_UPLOAD_ERROR');
 
     // =========================================================================
     // 1. IDENTITY, LEGAL NAME & PREFERRED NAME (Category 10)
@@ -333,40 +343,8 @@ window.JobFormValidator = (function () {
       }
     }
 
-    // =========================================================================
-    // 0.2 TECH STACK & ASSIGNED CANDIDATE TRACK VERIFICATION RULE
-    // Ensures a candidate assigned to C# is not submitted to a Python job, and vice versa!
-    // =========================================================================
-    const detectedJobStack = data?.detected_job_stack || (window.JobFormExtractor && window.JobFormExtractor.detectJobTechStack ? window.JobFormExtractor.detectJobTechStack(data?.job_title, data?.jd_text, data?.apply_flow_params) : null);
-    const candStackKey = getCandidateStackCategory(profile);
-
-    if (detectedJobStack && detectedJobStack.key && detectedJobStack.key !== 'unknown' && candStackKey !== 'unknown') {
-      if (detectedJobStack.key !== candStackKey) {
-        const stackDisplay = {
-          dotnet: '.NET / C#',
-          python: 'Python / AI / Data',
-          java: 'Java / Spring',
-          php: 'PHP / Laravel'
-        };
-        const jobStackLabel = stackDisplay[detectedJobStack.key] || detectedJobStack.title;
-        const candStackLabel = stackDisplay[candStackKey] || profile.targetStack;
-        const evidence = detectedJobStack.matchedTokens?.length ? ` (${detectedJobStack.matchedTokens.slice(0, 4).join(', ')})` : '';
-
-        addError(
-          null,
-          `Tech Stack Mismatch: This job is a ${jobStackLabel} position${evidence}, but current workstation profile is locked to "${profile.fullName}" on the "${profile.targetStack || candStackLabel}" track. Submitting will send conflicting technical credentials!`,
-          "JOB_STACK_MISMATCH",
-          false,
-          {
-            detectedJobStack,
-            candStackKey,
-            jobStackLabel,
-            candStackLabel,
-            candidateName: profile.fullName
-          }
-        );
-      }
-    }
+    // Candidate identity is locked to the verified assignment, never to a
+    // headline or technology track. Job-specific resume facts ground answers.
 
     // =========================================================================
     // 0.5 LOGGED-IN PORTAL ACCOUNT MISMATCH RULE
@@ -499,7 +477,7 @@ window.JobFormValidator = (function () {
     // =========================================================================
     // 2. RESUME ATTACHMENT & STACK MATCH
     // =========================================================================
-    const isTailoringMethod = profile.resumeTailoringRequired === true || profile.tailoringMode === 'tailored';
+    const isTailoringMethod = profile.resumeMode ? profile.resumeMode==='tailored' : profile.resumeTailoringRequired === true || profile.tailoringMode === 'tailored';
     const hasTailoredResume = settings.integrationMode === 'applyflow' ? profile.resumeIsTailored === true : Boolean(tailoredData?.text || (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('sqc_tailored_resume')));
 
     // 2.1 Tailoring Profile Requirement Check
@@ -535,27 +513,7 @@ window.JobFormValidator = (function () {
         addError(data._elements?.resume, `Wrong Resume: "${data.resume_uploaded}" does not contain candidate name "${profile.fullName}" or "${profile.preferredName || ''}".`, "WRONG_RESUME_NAME");
       }
 
-      // Dynamic Stack Check: Verify resume matches candidate's stack
-      const candidateStackKeywords = (effectiveStack?.keywords || profile.primaryStackKeywords || []).map(k => k.toLowerCase());
-      const isResumeGeneric = filename.includes('resume') || filename.includes('cv');
-      
-      const stackCategories = {
-        dotnet: ['.net', 'c#', 'csharp', 'dotnet', 'asp.net'],
-        python: ['python', 'django', 'fastapi', 'flask'],
-        php: ['php', 'laravel', 'symfony', 'wordpress'],
-        java: ['java', 'spring', 'springboot'],
-        javascript: ['javascript', 'typescript', 'react', 'node', 'vue', 'angular']
-      };
 
-      // If candidate has declared stack, check for obvious mismatches in filename
-      for (const [stackName, keywords] of Object.entries(stackCategories)) {
-        const isCandidateStack = candidateStackKeywords.some(k => keywords.includes(k));
-        const isResumeThisStack = keywords.some(k => filename.includes(k));
-
-        if (!isCandidateStack && isResumeThisStack && !isResumeGeneric) {
-          addError(data._elements?.resume, `Tech Stack Mismatch: Uploaded ${stackName.toUpperCase()} resume "${data.resume_uploaded}" for candidate assigned to "${profile.targetStack || 'another stack'}".`, "RESUME_STACK_MISMATCH");
-        }
-      }
     }
 
     // =========================================================================
@@ -567,12 +525,19 @@ window.JobFormValidator = (function () {
       const qLower = qText.toLowerCase().trim();
       const aText = q.value || '';
       const aLower = aText.toLowerCase().trim();
+      const node=q.element,visible=Boolean(node?.getClientRects?.().length)&&!node.closest?.('[hidden],[inert],[aria-hidden="true"],.sqc-root');
+      const invalid=visible&&(node.getAttribute?.('aria-invalid')==='true'||node.validity?.valid===false);
+      if(invalid&&!node.validity?.valueMissing){
+        const refs=String(node.getAttribute?.('aria-errormessage')||'').split(/\s+/).filter(Boolean);
+        const message=refs.map(id=>node.ownerDocument?.getElementById(id)?.textContent||'').join(' ').trim()||node.validationMessage||'The employer portal reports this field as invalid.';
+        addError(node,`Portal validation error for "${qText}": ${message}`,'PORTAL_FIELD_ERROR');
+      }
 
       // Optional fields → skip ALL validation, no strictness whatsoever
-      const isRequired = q.required || q.is_required;
+      const isRequired = q.required || q.is_required || node?.validity?.valueMissing;
       if (!isRequired) return;
 
-      const isUnanswered = !aText ||
+      const isUnanswered = node?.validity?.valueMissing===true || !aText ||
         aLower === 'unanswered' ||
         aLower === 'no file chosen' ||
         aLower === 'no resume pasted' ||
@@ -582,18 +547,12 @@ window.JobFormValidator = (function () {
         aLower === 'please select' ||
         aLower === 'choose' ||
         aLower === 'choose an option' ||
-        aLower === 'select an option';
+        aLower === 'select an option' || /^(?:select|choose)(?: an?| your)? (?:country|state|city|province|item|option)(?:\.{3}|…)?$/i.test(aLower);
 
       // Flag required empty questions
       if (isUnanswered) {
-        if (q.required || q.is_required) {
-          // Skip location fields — Kendo comboboxes for state/city often return empty DOM values
-          // even when visually filled. These are validated by the location mismatch checks below.
-          const isLocationField = /(^|\s)(state|administrative\s*area|state\/province|city|locality|county|zip|postal|country|address(\s*line)?(\s*\d)?|apt|suite|province)([\s:*]|$)/i.test(qLower)
-            && !qLower.includes('statement') && !qLower.includes('status') && !qLower.includes('citizenship');
-          if (!isLocationField) {
-            addError(q.element, `Required field is unanswered: "${qText}". Please answer before submitting.`, "REQUIRED_FIELD_EMPTY");
-          }
+        if (isRequired) {
+          addError(q.element, `Required field is unanswered: "${qText}". Please answer before submitting.`, "REQUIRED_FIELD_EMPTY");
         }
         return;
       }
@@ -838,58 +797,17 @@ window.JobFormValidator = (function () {
         }
       }
 
-      // 13-15. DYNAMIC TECHNICAL ENGINEERING & STACK MATCHING (Categories 13-15)
-      // Dynamic Preferred Backend Language / Framework Check
-      if (/preferred backend|primary backend language|backend language.*professional/i.test(qLower)) {
-        // Skip open-text descriptive fields — answers are paragraphs, not tech names
-        if (q.type === 'textarea') return;
-        const prefBackend = effectiveStack?.preferredBackend || profile.languagesFrameworks?.preferredBackend || '';
-        if (prefBackend && aLower.length > 0) {
-          const backendKeywords = prefBackend.toLowerCase().split(/[\s,/]+/).filter(w => w.length > 1 && w !== 'with' && w !== 'and');
-          const matches = backendKeywords.some(kw => aLower.includes(kw));
-          if (!matches) {
-            addError(q.element, `Tech Stack Mismatch: Entered "${aText}", candidate preferred backend is "${prefBackend}".`, "EXPERIENCE_MISMATCH");
-          }
-        }
-      }
-
-      // Dynamic Preferred Frontend Framework Check
-      if (/preferred frontend|primary frontend|frontend framework.*professional/i.test(qLower)) {
-        // Skip open-text descriptive fields
-        if (q.type === 'textarea') return;
-        const prefFrontend = effectiveStack?.preferredFrontend || profile.languagesFrameworks?.preferredFrontend || '';
-        if (prefFrontend && aLower.length > 0) {
-          const frontendKeywords = prefFrontend.toLowerCase().split(/[\s,/]+/).filter(w => w.length > 1 && w !== 'with' && w !== 'and');
-          const matches = frontendKeywords.some(kw => aLower.includes(kw));
-          if (!matches) {
-            addError(q.element, `Tech Stack Mismatch: Entered "${aText}", candidate preferred frontend is "${prefFrontend}".`, "EXPERIENCE_MISMATCH");
-          }
-        }
-      }
-
-      // Dynamic Preferred Database Check
-      if (/preferred database|primary database|database.*professional/i.test(qLower)) {
-        // Skip open-text descriptive fields
-        if (q.type === 'textarea') return;
-        const prefDb = effectiveStack?.preferredDatabase || profile.languagesFrameworks?.preferredDatabase || '';
-        if (prefDb && aLower.length > 0) {
-          const dbKeywords = prefDb.toLowerCase().split(/[\s,/()]+/).filter(w => w.length > 2 && w !== 'including' && w !== 'and');
-          const matches = dbKeywords.some(kw => aLower.includes(kw));
-          if (!matches) {
-            addError(q.element, `Database Mismatch: Entered "${aText}", candidate preferred database is "${prefDb}".`, "EXPERIENCE_MISMATCH");
-          }
-        }
-      }
-
+      // Technical preferences do not constrain a candidate to a stack.
+      // Validate explicit experience facts from the selected resume instead.
       // Dynamic Years of Experience Check for languages / technologies
       const expMatch = qLower.match(/years of experience.*?(working with|in|using|with)?\s*([a-z#.+]+)/i);
       if (expMatch) {
         const queriedTech = expMatch[2]?.toLowerCase()?.trim();
-        const skillYears = effectiveStack?.skillYears || profile.technicalExperience?.skillYears || {};
+        const skillYears = effectiveStack?.skillYears || {};
         for (const [skill, exp] of Object.entries(skillYears)) {
           if (queriedTech && (queriedTech.includes(skill.toLowerCase()) || skill.toLowerCase().includes(queriedTech))) {
             if (aLower.includes('0') || aLower.includes('none') || aLower.includes('less than 1') || aLower === '0') {
-              addError(q.element, `Experience Mismatch on ${skill}: Entered "${aText}", candidate has ${exp} experience in active stack.`, "EXPERIENCE_MISMATCH");
+              addError(q.element, `Experience Mismatch on ${skill}: Entered "${aText}", candidate has ${exp} experience in the selected resume.`, "EXPERIENCE_MISMATCH");
             }
           }
         }
@@ -904,7 +822,7 @@ window.JobFormValidator = (function () {
 
       // Dynamic Testing Tools Check
       if (/tools have you used for (manual or )?automated testing|testing tools/i.test(qLower)) {
-        const expectedTesting = effectiveStack?.testingTools || profile.testingTools?.testingToolsList || '';
+        const expectedTesting = effectiveStack?.testingTools || (settings.integrationMode === 'applyflow' ? '' : profile.testingTools?.testingToolsList || '');
         if (expectedTesting && aLower.length > 0) {
           const expectedKws = expectedTesting.toLowerCase().split(/[\s,]+/).filter(w => w.length > 2);
           const hasAtLeastOne = expectedKws.some(kw => aLower.includes(kw));

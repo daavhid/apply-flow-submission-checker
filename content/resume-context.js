@@ -21,7 +21,7 @@
   function parse(text) {
     const lines = String(text || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
     const start = lines.findIndex(l => /^(professional experience|work experience|employment(?: history)?|experience|career history)$/i.test(l.replace(/:$/, '')));
-    const workHistory = [], needsReview = [];
+    const workHistory = [], education=[], needsReview = [];
     if (start >= 0) {
       let end = lines.findIndex((l,i) => i>start && /^(education|technical skills|skills|certifications|projects|references|target job description)$/i.test(l.replace(/:$/, '')));
       if (end < 0) end = lines.length;
@@ -52,6 +52,38 @@
           evidence:section.slice(h.first,stop).join('\n')});
       });
     }
+    const compareDate=(a,b)=>{if(a.slice(0,4)!==b.slice(0,4))return b.slice(0,4).localeCompare(a.slice(0,4));return a.length===7&&b.length===7?b.localeCompare(a):0;};
+    workHistory.forEach((entry,index)=>{entry.sourceOrder=index;});
+    workHistory.sort((a,b)=>Number(b.current)-Number(a.current)||compareDate(a.current?a.startDate:a.endDate,b.current?b.startDate:b.endDate)||compareDate(a.startDate,b.startDate));
+    const educationStart=lines.findIndex(line=>/^(?:education|education history|academic qualifications|academic background)$/i.test(line.replace(/:$/,'')));
+    if(educationStart>=0){
+      let end=lines.findIndex((line,index)=>index>educationStart&&/^(?:skills|technical skills|certifications|projects|references|professional experience|work experience|employment history)$/i.test(line.replace(/:$/,'')));
+      if(end<0)end=lines.length;
+      const section=lines.slice(educationStart+1,end),school=/\b(?:university|college|institute|school|academy|polytechnic)\b/i,degree=/\b(?:bachelor(?:'s)?|master(?:'s)?|doctor(?:ate)?|associate(?:'s)?|ph\.?d\.?|[bm]\.?[as]\.?c?\.?|mba)\b/i;
+      const schools=section.map((line,index)=>({line,index})).filter(({line})=>school.test(line));
+      const degreeFirst=schools[0]?.index>0&&degree.test(section[schools[0].index-1]);
+      schools.forEach(({line,index},ordinal)=>{
+        const from=ordinal?schools[ordinal-1].index+1:0,to=schools[ordinal+1]?.index??section.length;
+        const degreeLine=degree.test(line)?line:degreeFirst?(degree.test(section[index-1]||'')?section[index-1]:''):(degree.test(section[index+1]||'')?section[index+1]:'');
+        const dateLine=section[index+(degreeFirst?1:2)]||'';
+        const nearby=[line,degreeLine,...(/^(?:(?:graduated|graduation|completed)\s*:?\s*)?(?:[A-Za-z]+\s+)?(?:19|20)\d{2}(?:\s*[-–—]\s*(?:(?:[A-Za-z]+\s+)?(?:19|20)\d{2}|present))?$/i.test(dateLine)?[dateLine]:[])].filter(Boolean);
+        const parts=line.split(/\s*\|\s*/),schoolName=parts.find(value=>school.test(value))?.replace(/\s*[,|–—-]\s*(?:19|20)\d{2}.*$/,'').trim();
+        const years=nearby.join(' ').match(/\b(?:19|20)\d{2}\b/g)||[];
+        const degreeParts=degreeLine.split(/\s*\|\s*/);let degreeName=degreeParts.find(value=>degree.test(value))||'';
+        degreeName=degreeName.replace(/\s*[,|–—-]\s*(?:19|20)\d{2}.*$/,'').trim();
+        const majorMatch=/\b(?:in|of)\s+(?:science|arts|engineering|business administration)\s+in\s+(.+)|\bin\s+(.+)$/i.exec(degreeName);
+        const major=(majorMatch?.[1]||majorMatch?.[2]||'').trim();
+        if(schoolName)education.push({school:schoolName,degree:degreeName,major,graduationYear:years.at(-1)||'',endDate:years.at(-1)||'',evidence:nearby.join('\n')});
+      });
+    }
+    const skills=[];
+    const skillStart=lines.findIndex(line=>/^(?:technical |core |professional )?(?:skills|skills & technologies|technologies|technical proficiencies)(?:\s*:.*)?$/i.test(line));
+    if(skillStart>=0){
+      let skillEnd=lines.findIndex((line,index)=>index>skillStart&&/^(?:professional experience|work experience|experience|education|employment history|projects|certifications|references)$/i.test(line.replace(/:$/,'')));
+      if(skillEnd<0)skillEnd=lines.length;
+      const values=lines.slice(skillStart,skillEnd);values[0]=values[0].includes(':')?values[0].slice(values[0].indexOf(':')+1):'';
+      for(const line of values)for(const value of line.replace(/^(?:languages|frameworks|databases|cloud|tools|platforms|devops|technologies)\s*:\s*/i,'').split(/[,;|•]/)){const skill=value.replace(/^[*\-]\s*/,'').trim();if(skill&&skill.length<=80&&!skills.some(v=>v.toLowerCase()===skill.toLowerCase()))skills.push(skill);}
+    }
     const skillYears = {};
     const explicit = /\b(\d{1,2}(?:\.\d+)?)\s*(\+)?\s*(?:years?|yrs?)\s+(?:of\s+)?(?:professional\s+)?(?:experience\s+)?(?:with|in|using)\s+([a-z][a-z0-9#+.\/-]*(?:[ \t]+[a-z][a-z0-9#+.\/-]*){0,2})/gi;
     let m;
@@ -60,7 +92,7 @@
       if (tech) skillYears[tech.toLowerCase()]={value:Number(m[1]),minimum:Boolean(m[2]),evidence:m[0]};
     }
     const total = /\b(\d{1,2}(?:\.\d+)?)\s*(\+)?\s*(?:years?|yrs?)\s+of\s+(?:(?:professional|software|engineering|development)\s+){0,3}experience\b/i.exec(text);
-    return {workHistory,skillYears,totalYears:total ? {value:Number(total[1]),minimum:Boolean(total[2]),evidence:total[0]} : null,needsReview};
+    return {workHistory,education,skills,skillYears,totalYears:total ? {value:Number(total[1]),minimum:Boolean(total[2]),evidence:total[0]} : null,needsReview};
   }
   function experienceValue(history, label, index, type) {
     const entry=history[index]; if (!entry) return undefined;
@@ -75,8 +107,8 @@
       return part[2]==='year' ? value.slice(0,4) : /^\d{4}-\d{2}$/.test(value) ?
         ['January','February','March','April','May','June','July','August','September','October','November','December'][Number(value.slice(5))-1] : undefined;
     }
-    if (/^(start date|from|employment start date)$/.test(key)) return type==='date' ? undefined : entry.startDate;
-    if (/^(end date|to|employment end date)$/.test(key)) return entry.current || type==='date' ? undefined : entry.endDate;
+    if (/^(start date|from|employment start date)$/.test(key)) return type==='date'||type==='month'&&!/^\d{4}-\d{2}$/.test(entry.startDate) ? undefined : entry.startDate;
+    if (/^(end date|to|employment end date)$/.test(key)) return entry.current || type==='date'||type==='month'&&!/^\d{4}-\d{2}$/.test(entry.endDate) ? undefined : entry.endDate;
     return undefined;
   }
   function numericFact(question,facts) {
@@ -86,6 +118,16 @@
     if (skill) return skill[1];
     return /(?:total|overall|professional|software|engineering).*experience|experience.*(?:total|overall)/.test(q) ? facts?.totalYears : null;
   }
+  function educationValue(history,label,index,type){
+    const entry=history[index];if(!entry)return undefined;
+    const key=String(label).toLowerCase().replace(/[*:]/g,'').trim();
+    if(/^(?:school|school name|university|college|institution|institution name)$/.test(key))return entry.school;
+    if(/^(?:degree|degree earned|highest degree|qualification)$/.test(key))return entry.degree;
+    if(/^(?:major|field of study|area of study)$/.test(key))return entry.major;
+    if(/^(?:graduation year|year graduated|year of graduation|end year)$/.test(key))return entry.graduationYear;
+    if(/^(?:start|end) (?:date|month|year)$/.test(key))return experienceValue([entry],key,0,type);
+    return entry[key];
+  }
   function numberMismatch(question,answer,facts) {
     const fact=numericFact(question,facts); if(!fact) return null;
     const range=/^(\d+(?:\.\d+)?)\s*[-–]\s*(\d+(?:\.\d+)?)/.exec(String(answer).trim());
@@ -93,6 +135,6 @@
     const exact=/^(\d+(?:\.\d+)?)(\+)?(?:\s*(?:years?|yrs?))?$/.exec(String(answer).trim());
     return exact && !fact.minimum && (exact[2] ? Number(exact[1])>fact.value : Number(exact[1])!==fact.value) ? fact : null;
   }
-  root.SQCResumeContext={parse,experienceValue,numericFact,numberMismatch};
+  root.SQCResumeContext={parse,experienceValue,educationValue,numericFact,numberMismatch};
   if(typeof module!=='undefined') module.exports=root.SQCResumeContext;
 })(typeof window!=='undefined'?window:globalThis);

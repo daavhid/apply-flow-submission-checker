@@ -25,8 +25,18 @@ async function runAttachmentSmoke(){
   await wait(()=>fixture.querySelector('input').files.length===1&&!attachmentBusy);
   const file=fixture.querySelector('input').files[0];check(file.name==='Nicholas Ruiz.txt'&&await file.text()===original,'UI upload did not attach the renamed original');
   check(attachments===1,'The upload workflow duplicated attachments');
+  check(!document.getElementById('resume-section').open,'The resume editor stayed open after a successful attachment');
   const restored=SQCQAResume.create({store,files});const snapshot=await restored.snapshot();check(!JSON.stringify(snapshot).includes('base64'),'Original bytes leaked into resume context');
   check((await restored.attachment(snapshot.version)).filename==='Nicholas Ruiz.txt','Original attachment was lost across worker restart');
   const fileId=snapshot.file.id;await restored.clear();check(!await files.get(fileId),'Removing resume left its original file behind');
-  fixture.remove();return 'Passed: sidebar upload, parsed candidate name, normalized original-file attachment, IndexedDB restart and removal.';
+  fixture.remove();
+  const styled=document.createElement('section');styled.innerHTML='<div class="field"><label>Resume/CV</label><input id="styled-resume" name="resume" type="file" style="display:none" accept=".txt"><button type="button">Attach</button></div><div class="field"><label>Cover letter</label><input name="cover_letter" type="file" style="display:none"><button type="button">Attach</button></div><div hidden><input name="old_resume" type="file"><button>Attach</button></div>';document.body.append(styled);
+  const bridge=SQCQAFormBridge,scanned=bridge.scan(styled),resumeQuestion=scanned.questions.find(q=>q.question==='Resume / CV'||q.question==='Resume/CV');
+  check(Boolean(resumeQuestion),'A hidden Greenhouse-style resume input behind Attach was missed');
+  bridge.attach({id:resumeQuestion.id,question:resumeQuestion.question,url:location.href,snapshot:resumeQuestion.snapshot,file:{filename:'Nicholas Ruiz.txt',mimeType:'text/plain',dataUrl:'data:text/plain;base64,'+btoa(original)}});
+  const native=styled.querySelector('#styled-resume');check(native.files.length===1&&await native.files[0].text()===original,'Hidden upload did not receive original file bytes');check(styled.querySelector('[name=cover_letter]').files.length===0,'Resume was attached to Cover letter');
+  const attached=bridge.scan(styled).uploads.find(item=>item.filename),read=await bridge.readUpload({id:attached.id,question:attached.question,url:location.href,snapshot:attached.snapshot});check(atob(read.file.dataUrl.split(',')[1])===original,'Attached original could not be read back for context');
+  const same={id:attached.id,question:attached.question,url:location.href,snapshot:attached.snapshot,file:{filename:'Normalized Name.txt',dataUrl:read.file.dataUrl}};
+  await bridge.normalizeUpload(same);check(native.files[0].name==='Normalized Name.txt'&&await native.files[0].text()===original,'Filename normalization modified portal file contents');styled.remove();
+  return 'Passed: original-file attachment, hidden Attach controls, no Cover letter replacement, readback and filename-only normalization.';
 }

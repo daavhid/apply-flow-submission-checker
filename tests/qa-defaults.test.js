@@ -102,3 +102,10 @@ test('confirmed defaults reach the AI as data; unconfirmed drafts are omitted',a
     assert.match(sent.messages[0].content,/defaults contradict each other/);
   }
 });
+test('managed defaults come from JSON automatically and configured changes resolve exact choices locally',async()=>{
+  const policy=structuredClone(require('../config/runtime').defaults);policy.answers.sponsorship='Yes';policy.answers.gender='Female';
+  const f=fixture();const managed=create({session:f.session,local:f.local,deployment:{load:async()=>policy}}),defaults=await managed.snapshot('resume');
+  await assert.rejects(managed.save({text:'Other facts',resumeVersion:'resume'},'resume'),/settings.json/);
+  const answers=await client.answer({config:{endpoint:'https://internal.example/ai'},items:[{id:'sponsor',question:'Will you require sponsorship?',type:'select',options:['Yes','No']},{id:'gender',question:'Gender',type:'select',options:['Male','Female']}],defaults,fetch:()=>{throw new Error('Configured facts should not need a model guess');}});
+  assert.deepEqual(answers.map(answer=>answer.answer),['Yes','Female']);
+});

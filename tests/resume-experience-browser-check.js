@@ -1,0 +1,53 @@
+async function runExperienceSmoke(){
+  const check=(ok,message)=>{if(!ok)throw new Error(message);};
+  const iframe=document.createElement('iframe');iframe.src='/tests/fixtures/resume-experience.html';document.body.appendChild(iframe);await new Promise(resolve=>iframe.onload=resolve);
+  const w=iframe.contentWindow,d=w.document;
+  const text='Candidate One\nEXPERIENCE\nPast Corp\nSoftware Developer | January 2017 - December 2022\nBuilt older systems.\nCurrent Corp\nSenior Engineer | April 2023 - Present\nBuilt current services.\nSKILLS\nPython, SQL';
+  const settings={integrationMode:'applyflow',autoFillExperience:true,verifiedContext:{state:'VERIFIED',applicationSessionId:'app',applierId:'user',profileId:'profile',jobId:'job',profileAssignmentId:'assignment',profileAssignmentVersion:'1',expiresAt:Date.now()+60000,allowedRoutes:[{url:w.location.href}]}};
+  const profile={id:'profile',firstName:'Verified',phone:'+15551234567',resumeMode:'fixed',resumeReady:true,resumeTailoringRequired:false,resumeId:'doc1',resumeVersion:'1',resumeText:text,resumeContext:w.SQCResumeContext.parse(text)};profile.primaryStackKeywords=profile.resumeContext.skills;
+  w.JobFormExtractor.restoreSavedForm(profile,settings);
+  check(d.querySelector('#role0 .company').value==='Current Corp'&&d.querySelector('#role1 .company').value==='Past Corp','Work rows were not filled current-to-oldest');
+  check(d.querySelector('#role0 .title').value==='Senior Engineer'&&d.querySelector('#role1 .title').value==='Software Developer','Roles were mixed between employers');
+  check(d.querySelector('#role0 .start').value==='2023-04'&&d.querySelector('#role0 select').value==='April','Employment month precision was lost');
+  check(d.querySelector('#role0 [type=checkbox]').checked,'Current employment was not selected');
+  check(d.querySelector('#role0 textarea').value==='Built current services.'&&d.querySelector('#role1 textarea').value==='Built older systems.','Responsibility text was mixed between jobs');
+  check(d.getElementById('contact-name').value==='Verified'&&d.getElementById('contact-phone').value==='+15551234567'&&!d.querySelector('.employer-phone').value,'Candidate identity leaked into employer contact fields');
+  d.querySelector('#role0 textarea').value='My manual explanation';
+  const next='Candidate One\nEXPERIENCE\nReplacement Corp\nLead Engineer | January 2024 - Present\nNew responsibilities.\nSKILLS\nGo, PostgreSQL';
+  Object.assign(profile,{resumeId:'doc2',resumeVersion:'2',resumeText:next,resumeContext:w.SQCResumeContext.parse(next)});profile.primaryStackKeywords=profile.resumeContext.skills;
+  w.JobFormExtractor.restoreSavedForm(profile,settings);
+  check(d.querySelector('#role0 .company').value==='Replacement Corp'&&d.getElementById('skills').value==='Go, PostgreSQL','A replacement resume left old employer or skills context');
+  check(!d.querySelector('#role1 .company').value&&!d.querySelector('#role1 .title').value&&!d.querySelector('#role1 textarea').value,'Old SQC-filled experience rows survived a shorter resume');
+  check(d.querySelector('#role0 textarea').value==='My manual explanation','A manual edit was overwritten');
+  Object.assign(profile,{resumeId:'doc3',resumeVersion:'3',resumeText:text,resumeContext:w.SQCResumeContext.parse(text)});d.querySelector('#role0 .company').value='Past Corp';
+  w.JobFormExtractor.restoreSavedForm(profile,settings);
+  check(d.querySelector('#role0 .title').value==='Software Developer'&&d.querySelector('#role1 .company').value==='Current Corp','A prefilled employer caused duplicate or mismatched experience');
+  let changes=0,mutations=0;d.addEventListener('change',()=>changes++);const observer=new w.MutationObserver(records=>{mutations+=records.length;});observer.observe(d.body,{subtree:true,attributes:true,childList:true,characterData:true});
+  w.JobFormExtractor.restoreSavedForm(profile,settings);await new Promise(resolve=>setTimeout(resolve,30));changes=0;mutations=0;
+  for(let i=0;i<4;i++)w.JobFormExtractor.restoreSavedForm(profile,settings);await new Promise(resolve=>setTimeout(resolve,30));
+  check(changes===0&&mutations===0,'Idle autofill repeatedly rewrote selects or experience metadata');
+  const select=d.querySelector('#role0 select');select.focus();const before=select.value;const paused=w.JobFormExtractor.restoreSavedForm(profile,settings);
+  check(paused.paused===true&&select.value===before,'Autofill interfered with a focused dropdown');select.blur();observer.disconnect();
+  const clipped=d.getElementById('clipped-select'),trigger=d.getElementById('dropdown-trigger'),option=d.getElementById('dropdown-option');
+  clipped.classList.add('sqc-field-error');clipped.setAttribute('data-sqc-error','Missing answer');
+  const errors=new Map([[clipped,[{message:'Missing answer'}]],[trigger,[{message:'Required'}]]]);
+  let prevented=0;d.addEventListener('click',event=>{const intent=w.SQCSubmitIntent.inspect(event.target);if(intent==='final'||intent==='step'){prevented++;event.preventDefault();event.stopImmediatePropagation();}},true);
+  for(let pass=0;pass<4;pass++){
+    w.SubmissionHUD.updateFieldHighlights(errors);
+    check(!d.querySelector('.sqc-field-error, .sqc-field-warning'),'Sidebar validation left intrusive portal marks');
+    check(w.getComputedStyle(clipped).position==='absolute','Validation changed hidden dropdown input positioning');
+    trigger.click();w.SubmissionHUD.updateFieldHighlights(errors);
+    check(trigger.getAttribute('aria-expanded')==='true'&&!d.getElementById('dropdown-options').hidden,'Validation closed the editable dropdown');
+    check(w.SQCSubmitIntent.inspect(option)==='ignore','Dropdown option was mistaken for a wizard/submission action');
+    option.click();check(trigger.textContent==='Continue'&&prevented===0,'Dropdown selection was blocked');
+  }
+  const restoreFields=d.createElement('section');restoreFields.innerHTML='<label>Country<select id="country" required><option value="">Select a country</option><option value="US">United States</option><option value="CA">Canada</option></select></label><label>Why this role?<textarea id="motivation"></textarea></label><label><input id="sms-consent" type="checkbox">I consent to SMS updates</label>';d.body.append(restoreFields);
+  const country=d.getElementById('country'),motivation=d.getElementById('motivation');settings.savedFormAnswers=[{question:'Country',answer:'United States',type:'select',source:'applyflow'},{question:'Why this role?',answer:'I have relevant experience building reliable services.',type:'textarea',source:'local'},{question:'I consent to SMS updates',answer:'Checked (Yes)',type:'checkbox',source:'local'}];
+  w.JobFormExtractor.restoreSavedForm(profile,settings);check(country.value==='US'&&motivation.value.includes('reliable services'),'Saved native dropdown or screening text was not restored');check(!d.getElementById('sms-consent').checked,'Refresh automatically rechecked consent');
+  motivation.value='My new manual answer';w.JobFormExtractor.restoreSavedForm(profile,settings);check(motivation.value==='My new manual answer','Saved answer replaced a manual edit');
+  country.value='';country.dataset.sqcUserCleared='true';w.JobFormExtractor.restoreSavedForm(profile,settings);check(country.value==='','A cleared country dropdown was silently refilled');
+  let validation=w.JobFormValidator.validate({logged_in_account:{},_elements:{questions:[{label:'Country',value:country.value,required:true,element:country}]}},profile,settings);check(validation.errors.some(error=>error.rule==='REQUIRED_FIELD_EMPTY'&&error.message.includes('Country')),'Missing Country was absent from sidebar validation');
+  country.value='US';validation=w.JobFormValidator.validate({logged_in_account:{},_elements:{questions:[{label:'Country',value:'United States',required:true,element:country}]}},profile,settings);check(!validation.errors.some(error=>error.rule==='REQUIRED_FIELD_EMPTY'&&error.message.includes('Country')),'Country error did not clear after selection');
+  motivation.setAttribute('aria-invalid','true');validation=w.JobFormValidator.validate({logged_in_account:{},_elements:{questions:[{label:'Why this role?',value:motivation.value,element:motivation}]}},profile,settings);check(validation.errors.some(error=>error.rule==='PORTAL_FIELD_ERROR'),'Employer field errors were not exposed to the sidebar');
+  iframe.remove();return 'Passed: resume mapping, quiet dropdowns, answer restoration, required Country and employer validation errors.';
+}

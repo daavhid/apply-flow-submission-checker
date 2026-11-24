@@ -1,0 +1,9 @@
+<!doctype html><html><head><title>Application: Engineer</title></head><body><form id="candidate-application">
+<div id="cv-block" data-testid="field"><div><span id="cv-label">CV</span><span>*</span></div><div class="drop-area"><div id="file-count" hidden>Total 1 file selected</div><label data-testid="resume" aria-labelledby="file-count cv-label"><input type="File" accept=".doc,.docx,.pdf" style="display:none"><div role="button" class="chip" tabindex="0"><svg aria-hidden="true"><text>PDF</text></svg>Candidate O...pdf<div role="button" aria-label="Remove file">×</div></div></label></div><p>The CV will be parsed to fill in the application details</p></div>
+<div><strong>Cover Letter</strong><div><span>Cover Document.pdf</span></div></div>
+<label>First name<input value="Candidate"></label><label>Email<input type="email" value="candidate@example.com"></label>
+<div class="form-field"><strong>Pronouns</strong><div id="pronouns" role="combobox" aria-label="Search"><input aria-label="Search" placeholder="Search" aria-required="true"><span class="selected-value">They/them</span></div></div>
+<label for="country">Country *</label><div id="country" role="combobox" aria-required="true"><input aria-label="Search" placeholder="Search"><span class="selected-value">United States</span></div>
+<label for="required-choice">Work authorization *</label><div id="required-choice" role="combobox" aria-required="true"><input aria-label="Search" placeholder="Search"></div>
+</form><script>window.chrome={runtime:{getManifest:()=>({side_panel:{default_path:'sidebar/sidebar.html'}})}};</script>
+<script src="/content/context-policy.js"></script><script src="/ai/form-state.js"></script><script src="/content/extractor.js"></script><script src="/content/validator.js"></script></body></html>

@@ -38,6 +38,10 @@
       if (!question || ids.has(answer.id) || !['ANSWERED','NEEDS_INPUT'].includes(answer.status)) throw new Error('ApplyFlow returned unknown, duplicate, or invalid question answers.');
       ids.add(answer.id);
       if (answer.status === 'NEEDS_INPUT') return {id:answer.id,status:'NEEDS_INPUT',answer:'',reason:String(answer.reason || answer.reasoning || 'This answer needs your input.').slice(0,1000)};
+      if(question.type==='checkbox'&&Array.isArray(answer.answer)){
+        if(new Set(answer.answer).size!==answer.answer.length||answer.answer.some(value=>!question.options.includes(value)))return {id:answer.id,status:'NEEDS_INPUT',answer:'',reason:'The checkbox answers did not match available options.'};
+        return {id:answer.id,status:'ANSWERED',answer:answer.answer};
+      }
       if (typeof answer.answer !== 'string' || !answer.answer.trim()) throw new Error('An answered question must contain a nonempty answer.');
       if (question.options && (!question.options.includes(answer.answer) ||
           (answer.matchedOption != null && answer.matchedOption !== answer.answer))) return {id:answer.id,status:'NEEDS_INPUT',answer:'',reason:'The answer did not match an available portal option.'};

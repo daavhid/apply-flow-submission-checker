@@ -1,0 +1,20 @@
+<!doctype html><html><head><title>Candidate application</title></head><body>
+<form id="candidate-application" onsubmit="return false">
+<div id="education"><h2>Education History</h2><div class="education-entry">
+<label>Degree<select id="degree"><option value="">Select</option><option>Bachelor of Science in Computer Science</option></select></label>
+<label for="custom-degree">Degree</label><button type="button" role="combobox" id="custom-degree" aria-controls="degree-options" aria-expanded="false">Select</button><div role="listbox" id="degree-options" hidden><button type="button" role="option">Bachelor of Science</button><button type="button" role="option">Master of Science</button></div>
+<label>Major<input id="major"></label><label>School Name<textarea id="school"></textarea></label>
+<label>City<input id="school-city"></label><label>GPA<input id="gpa"></label><label>Graduation year<input id="graduation"></label>
+</div></div>
+<div id="employment"><h2>Employment History</h2><div id="rows"></div><button type="button" id="add-experience">ADD EXPERIENCE</button></div>
+<h2>Supporting Documents and URLs</h2><label>Upload Resume<input id="resume" type="file" accept=".pdf"></label><label>Upload Cover Letter<input id="cover" type="file"></label>
+</form>
+<script>
+window.chrome={runtime:{getManifest:()=>({side_panel:{default_path:'sidebar/sidebar.html'}})}};
+function addRow(){const row=document.createElement('div');row.className='oracle-row';row.innerHTML='<label>Employer Name<input class="company"></label><label>Job Title<input class="title"></label><div><span>Start Date</span><label>Month<select class="month"><option value="">Select</option><option>April</option><option>January</option></select></label><label>Year<input class="year"></label></div><label>Responsibilities<textarea></textarea></label><label>Employer City<input class="employer-city"></label>';document.getElementById('rows').append(row);}
+addRow();document.getElementById('add-experience').onclick=()=>setTimeout(addRow,50);
+document.getElementById('custom-degree').onclick=function(){this.setAttribute('aria-expanded','true');document.getElementById('degree-options').hidden=false;};
+document.querySelectorAll('#degree-options [role=option]').forEach(option=>option.onclick=()=>{document.getElementById('custom-degree').textContent=option.textContent;document.getElementById('custom-degree').setAttribute('aria-expanded','false');document.getElementById('degree-options').hidden=true;});
+</script>
+<script src="/content/context-policy.js"></script><script src="/content/resume-context.js"></script><script src="/ai/form-state.js"></script><script src="/content/extractor.js"></script>
+</body></html>

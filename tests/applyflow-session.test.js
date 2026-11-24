@@ -4,10 +4,13 @@ const assert = require('node:assert/strict');
 const policy = require('../content/context-policy');
 const screening = require('../content/screening-policy');
 require('../content/resume-context');
+require('../content/candidate-reference');
+require('../content/live-progress');
+require('../background/application-journal');
 const localResume = require('../background/local-resume');
 const { create } = require('../background/applyflow-session');
 
-function fixture() {
+function fixture(deployment) {
   let clock = Date.parse('2026-11-11T12:00:00Z');
   const future = () => new Date(clock + 3600000).toISOString();
   function area(seed = {}) {
@@ -99,11 +102,11 @@ function fixture() {
     return { status: 200, ok: true, async json() { return data; } };
   };
   const localResumes = localResume.memoryStore();
-  const service = create({ chrome, fetch, policy, screening, localResume, localResumes, sleep:async()=>{}, now: () => clock });
+  const service = create({ chrome, fetch, policy, screening, localResume, localResumes,deployment, sleep:async()=>{}, now: () => clock });
   const sender = id => ({ url: tabs[id].url, tab: structuredClone(tabs[id]) });
   const ui = { url: 'chrome-extension://sqc/popup/popup.html' };
   return { service, chrome, calls, tabs, sender, ui, localResumes, now: () => clock,
-    restart() { return create({ chrome, fetch, policy, screening, localResume, localResumes, sleep:async()=>{}, now: () => clock }); },
+    restart() { return create({ chrome, fetch, policy, screening, localResume, localResumes,deployment, sleep:async()=>{}, now: () => clock }); },
     intercept(fn) {interceptFetch=fn;},
     advance(ms) { clock += ms; }, signOut() { signedIn = false; }, changeApplier() { applier = 'applier-2'; },
     requirePasswordChange() { passwordChangeRequired = true; }, unassign() { assigned = false; },
@@ -177,20 +180,113 @@ test('a tailored resume for another job cannot establish a verified context', as
   assert.equal(result.settings.verifiedContext,null);assert.equal(result.integration.state,'CONTEXT_MISMATCH');
 });
 
-test('expired authentication during resume download clears the verified identity', async () => {
+test('a rejected resume download does not sign out the authenticated account or hide the assigned profile', async () => {
   const f=fixture();f.mutate(c=>({...c,resume:{...c.resume,file:{url:'/files/expired.pdf'}}}));
   const result=await f.service.handle({type:'GET_CONFIG'},f.sender(1));
-  assert.equal(result.integration.state,'SIGNED_OUT');assert.equal(result.settings.verifiedContext,null);
-  assert.equal(result.activeProfile,null);assert.equal(f.chrome.storage.session.data.sqcAuth,undefined);
+  assert.equal(result.integration.state,'VERIFIED');assert.equal(result.activeProfile.fullName,'Candidate 1');
+  assert.equal(result.activeProfile.resumeBase64,'');assert.match(result.activeProfile.resumeFileError,/HTTP 401/);
+  assert.equal(f.chrome.storage.session.data.sqcAuth.applier.id,'applier-1');
 });
 
+test('sign-in establishes only account context even when a job tab ID is supplied',async()=>{
+  const f=fixture();
+  const result=await f.service.handle({type:'SQC_LOGIN',email:'applier@example.com',password:'temporary-test-password',tabId:1},f.ui);
+  assert.equal(result.integration.state,'AUTHENTICATED');assert.equal(result.activeProfile.id,'profile-1');assert.equal(result.settings.verifiedContext,null);
+  assert.deepEqual(f.calls.map(c=>new URL(c.url).pathname),['/api/sqc/auth','/api/sqc/login','/api/sqc/session']);
+  assert.equal(JSON.parse(f.calls.find(c=>c.url.endsWith('/login')).options.body).allowResumeGeneration,false);
+});
+test('ApplyFlow workspace and login pages do not request job context or resume files',async()=>{
+  const f=fixture();f.tabs[1].url='https://applyflow.example/login#application_session_id=application-1';
+  const result=await f.service.handle({type:'GET_CONFIG'},f.sender(1));assert.equal(result.integration.state,'AUTHENTICATED');
+  assert.equal(result.settings.verifiedContext,null);assert.equal(f.calls.length,1);assert.ok(f.calls[0].url.endsWith('/session'));
+});
+test('job verification explicitly requests an existing resume without generation',async()=>{
+  const f=fixture();f.mutate(c=>({...c,resume:null}));const result=await f.service.handle({type:'GET_CONFIG'},f.sender(1));
+  assert.equal(result.integration.state,'VERIFIED');assert.equal(result.activeProfile.resumeReady,false);
+  const body=JSON.parse(f.calls.find(c=>c.url.endsWith('/application-context')).options.body);assert.equal(body.resumePolicy,'existing-only');assert.equal(body.allowResumeGeneration,false);
+  assert.equal(f.calls.length,2);
+});
+test('an absent parsed resume does not prevent automatic job activation or original-file upload',async()=>{
+  const f=fixture();f.mutate(c=>({...c,resume:{...c.resume,text:undefined,file:{filename:'existing.pdf',url:'/files/resume.pdf'}}}));
+  const result=await f.service.handle({type:'GET_CONFIG'},f.sender(1));assert.equal(result.integration.state,'VERIFIED');assert.equal(result.activeProfile.resumeReady,false);
+  assert.match(result.activeProfile.resumeFileError,/no parsed resume text/);assert.equal(f.calls.some(call=>call.url.endsWith('/files/resume.pdf')),false);
+  const upload=await f.service.handle({type:'SQC_SET_LOCAL_RESUME',context:result.settings.verifiedContext,resume:{filename:'draft.txt',dataUrl:'data:text/plain;base64,'+btoa(localText),text:localText,confirmed:true}},f.sender(1));
+  assert.equal(upload.success,true);assert.equal(upload.activeProfile.resumeReady,true);
+});
+test('context failures identify the exact mismatched tracking or assignment field without exposing credentials',async()=>{
+  const f=fixture();f.mutate(c=>({...c,applicationSessionId:'wrong-launch',profile:{...c.profile,version:'wrong-version'}}));
+  const result=await f.service.handle({type:'GET_CONFIG'},f.sender(1));assert.equal(result.integration.state,'CONTEXT_MISMATCH');
+  assert.ok(result.integration.validationFields.includes('context.profile.version'));assert.match(result.integration.message,/applicationSessionId/);
+  assert.equal(result.integration.path,'/api/sqc/application-context');assert.equal(JSON.stringify(result).includes('server-csrf'),false);
+});
+test('a profile version updated after sign-in refreshes the assignment and retries verification once automatically',async()=>{
+  const f=fixture();let version='v1';
+  f.mutateSession(data=>({...data,profile:{...data.profile,version},profileAssignment:{...data.profileAssignment,profileVersion:version}}));
+  f.mutate(c=>{version='v2';return {...c,profile:{...c.profile,version}};});
+  const result=await f.service.handle({type:'GET_CONFIG'},f.sender(1));assert.equal(result.integration.state,'VERIFIED');assert.equal(result.settings.verifiedContext.profileVersion,'v2');
+  assert.equal(f.calls.filter(c=>c.url.endsWith('/session')).length,2);assert.equal(f.calls.filter(c=>c.url.endsWith('/application-context')).length,2);
+});
+test('a generator base prompt yields only candidate reference facts, never resume bytes or job skills',async()=>{
+  const f=fixture(),prompt='# RESUME JSON GENERATOR\nAct as a resume writer. Generate a fictional resume.\n## 2. Candidate Information\nName: Candidate 1\nLocation: Miami, FL 33196\nEducation:\nExample University — Bachelor of Science in Computer Science | May 1, 2015\n## 3. Tailoring rules\nInvent Python and Rust projects.';
+  f.mutate(c=>({...c,resume:{...c.resume,kind:'base',text:prompt,file:{url:'/files/resume.pdf'}}}));
+  const cfg=await f.service.handle({type:'GET_CONFIG'},f.sender(1));assert.equal(cfg.integration.state,'VERIFIED');assert.equal(cfg.activeProfile.city,'Miami');assert.equal(cfg.activeProfile.graduationYear,'2015');assert.equal(cfg.activeProfile.address,undefined);
+  assert.equal(cfg.activeProfile.resumeReady,false);assert.equal(cfg.activeProfile.resumeText,'');assert.equal(cfg.activeProfile.resumeBase64,'');assert.deepEqual(cfg.activeProfile.primaryStackKeywords,[]);assert.equal(f.calls.some(call=>call.url.endsWith('/files/resume.pdf')),false);
+});
+test('two assigned candidates retain distinct per-tab assignments, including child tabs',async()=>{
+  const f=fixture(),assignment={id:'assignment-2',version:'2',status:'ACTIVE',applierId:'applier-1',profileId:'profile-2',profileVersion:'v2'},profile={id:'profile-2',version:'v2',verified:true,fullName:'Candidate 2'};
+  f.mutateSession(data=>({...data,assignedProfiles:[{assignment,profile}]}));
+  f.mutate(c=>c.job.id==='job-1'?{...c,profile,resume:{...c.resume,profileId:profile.id},assignment:{...c.assignment,profileId:profile.id,profileAssignmentId:assignment.id,profileAssignmentVersion:assignment.version}}:c);
+  f.tabs[1].url+='&sqc_profile_id=profile-2';const first=await f.service.handle({type:'GET_CONFIG'},f.sender(1));
+  assert.equal(first.settings.verifiedContext.profileId,'profile-2');assert.equal(first.integration.profileAssignment.id,'assignment-2');
+  const second=await f.service.handle({type:'GET_CONFIG'},f.sender(2));assert.equal(second.settings.verifiedContext.profileId,'profile-1');assert.equal(f.chrome.storage.session.data.sqcAuth.profile.id,'profile-1');
+  f.tabs[3]={id:3,url:'https://ats.example/step-two'};await f.service.inheritTab(1,3,f.tabs[3].url);
+  const child=await f.service.handle({type:'GET_CONFIG'},f.sender(3));assert.equal(child.settings.verifiedContext.profileId,'profile-2');assert.equal(child.settings.verifiedContext.profileAssignmentId,'assignment-2');
+});
+test('empty live snapshots are skipped; actual input receives the backend IN_PROGRESS acknowledgement',async()=>{
+  const f=fixture(),cfg=await f.service.handle({type:'GET_CONFIG'},f.sender(1)),c=cfg.settings.verifiedContext;
+  const stamp={application_session_id:c.applicationSessionId,profile_assignment_id:c.profileAssignmentId,profile_assignment_version:c.profileAssignmentVersion,profile_version:c.profileVersion,job_version:c.jobVersion,resume_id:c.resumeId,resume_version:c.resumeVersion};
+  let result=await f.service.handle({type:'DISPATCH_LIVE_FEEDBACK',payload:{...stamp,is_final_submission:false,job_status:'PENDING',validation_status:'IN_PROGRESS',extracted_data:{all_entries:[{label:'Email',value:''}]}}},f.sender(1));assert.equal(result.skipped,true);
+  f.intercept((url,options)=>{if(url.endsWith('/live-event')){const p=JSON.parse(options.body);return jsonResponse({success:true,accepted:true,eventId:p.event_id,applicationSessionId:c.applicationSessionId,recordId:'record',status:'IN_PROGRESS'});}});
+  result=await f.service.handle({type:'DISPATCH_LIVE_FEEDBACK',payload:{...stamp,is_final_submission:false,job_status:'PENDING',validation_status:'IN_PROGRESS',extracted_data:{all_entries:[{label:'Email',value:'candidate@example.com'}]}}},f.sender(1));
+  assert.equal(result.applyFlowStatus,'IN_PROGRESS');assert.equal(f.chrome.storage.local.data.submissionsHistory,undefined);
+});
+test('job-unavailable events require stable worker evidence and never downgrade an applied candidate-job record',async()=>{
+  const f=fixture(),cfg=await f.service.handle({type:'GET_CONFIG'},f.sender(1)),c=cfg.settings.verifiedContext;
+  const payload={application_session_id:c.applicationSessionId,profile_assignment_id:c.profileAssignmentId,profile_assignment_version:c.profileAssignmentVersion,profile_version:c.profileVersion,job_version:c.jobVersion,resume_id:c.resumeId,resume_version:c.resumeVersion,job_status:'PORTAL_ACCESS_FAILED',is_final_submission:false,submission_confirmed_by:'AUTO_DETECTED_JOB_UNAVAILABLE',portal_evidence:{type:'JOB_UNAVAILABLE_NOTICE',url:f.tabs[1].url,message:'404 (Not found)',observedAt:new Date(f.now()).toISOString(),intermediate:false}};
+  assert.equal((await f.service.handle({type:'LOG_SUBMISSION',payload},f.sender(1))).success,false);assert.equal(f.calls.some(call=>call.url.endsWith('/webhook')),false);
+  f.chrome.storage.session.data.sqcPortalAvailability={1:{confirmed:true,unavailable:true,url:f.tabs[1].url,applicationSessionId:c.applicationSessionId,jobId:c.jobId,profileId:c.profileId,evidence:payload.portal_evidence.message,checkedAt:f.now()}};
+  f.intercept((url,options)=>url.endsWith('/webhook')?jsonResponse({success:true,accepted:true,eventId:JSON.parse(options.body).event_id,applicationSessionId:c.applicationSessionId,recordId:'record',status:'LINK_NOT_FOUND'}):undefined);
+  const report=await f.service.handle({type:'LOG_SUBMISSION',payload},f.sender(1));assert.equal(report.applyFlowStatus,'LINK_NOT_FOUND');
+  const count=f.calls.filter(call=>call.url.endsWith('/webhook')).length;f.mutate(context=>({...context,status:'APPLIED'}));
+  const protectedResult=await f.service.handle({type:'LOG_SUBMISSION',payload},f.sender(1));assert.equal(protectedResult.skipped,true);assert.equal(protectedResult.applyFlowStatus,'APPLIED');assert.equal(f.calls.filter(call=>call.url.endsWith('/webhook')).length,count);
+});
+test('transient account outages retain display context without permitting application actions',async()=>{
+  const f=fixture();await f.service.handle({type:'GET_CONFIG'},f.ui);f.advance(31000);
+  f.intercept(url=>{if(url.endsWith('/session'))throw new Error('Network unavailable');});
+  const ui=await f.service.handle({type:'GET_CONFIG',force:true},f.ui);assert.equal(ui.integration.accountVerified,false);assert.equal(ui.integration.applier.id,'applier-1');assert.equal(ui.activeProfile.id,'profile-1');assert.equal(ui.settings.verifiedContext,null);
+  const content=await f.service.handle({type:'GET_CONFIG'},f.sender(1));assert.equal(content.activeProfile,null);assert.equal(content.settings.verifiedContext,null);
+  f.intercept(null);assert.equal((await f.service.handle({type:'GET_CONFIG',force:true},f.ui)).integration.state,'AUTHENTICATED');
+});
+test('job request authorization failures do not revoke a valid account session',async()=>{
+  const f=fixture();f.intercept(url=>url.endsWith('/application-context')?{status:401,ok:false}:undefined);
+  const result=await f.service.handle({type:'GET_CONFIG'},f.sender(1));assert.equal(result.integration.state,'REQUEST_UNAUTHORIZED');assert.equal(result.settings.verifiedContext,null);
+  assert.equal(f.chrome.storage.session.data.sqcAuth.applier.id,'applier-1');assert.equal(f.chrome.storage.local.data.sqcConnection.signedOut,undefined);
+});
+test('a confirmed rejected session stays signed out instead of retrying ambient website authentication',async()=>{
+  const f=fixture();await f.service.handle({type:'GET_CONFIG'},f.ui);f.signOut();
+  assert.equal((await f.service.handle({type:'GET_CONFIG',force:true},f.ui)).integration.state,'SIGNED_OUT');
+  const count=f.calls.length;
+  assert.equal((await f.service.handle({type:'GET_CONFIG'},f.ui)).integration.state,'SIGNED_OUT');assert.equal(f.calls.length,count);
+});
 test('a later approved portal step can discover the existing job without URL launch parameters', async () => {
   const f=fixture();await f.service.handle({type:'GET_CONFIG'},f.sender(1));
   f.tabs[1].url='https://jobs.example/roles/1/step2';
   const allowed=await f.service.handle({type:'SQC_PORTAL_ELIGIBILITY'},f.sender(1));
   assert.equal(allowed.eligible,true);
   f.tabs[1].url='https://unrelated.example/';
+  f.intercept((url,options)=>url.endsWith('/application-context')&&JSON.parse(options.body).url.includes('unrelated.example')?{status:403,ok:false}:undefined);
   assert.equal((await f.service.handle({type:'SQC_PORTAL_ELIGIBILITY'},f.sender(1))).eligible,false);
+  f.intercept(null);
   f.advance(61000);f.tabs[1].url='https://jobs.example/roles/1/step2';
   assert.equal((await f.service.handle({type:'SQC_PORTAL_ELIGIBILITY'},f.sender(1))).eligible,true);
   const renewed=await f.service.handle({type:'GET_CONFIG'},f.sender(1));
@@ -221,21 +317,24 @@ test('an approved continuation in a new tab retains the unambiguous session and 
   assert.equal(cfg.settings.verifiedContext.applicationSessionId,'application-1');
   assert.equal(cfg.activeProfile.resumeText,'Same job resume');
   assert.equal(f.chrome.storage.session.data.sqcContexts[3].job.id,'job-1');
-  f.tabs[3].url='https://jobs.example/roles/2';
+  f.tabs[3].url='https://jobs.example/roles/2#application_session_id=application-2';
   const other=await f.service.handle({type:'GET_CONFIG'},f.sender(3));
   assert.equal(other.settings.verifiedContext.jobId,'job-2');
   assert.notEqual(other.activeProfile.resumeText,'Same job resume');
 });
 
-test('a new unapproved step sends continuity only as a hint and requires backend route authorization', async () => {
+test('a backend-rejected step keeps continuity hints but pauses application actions', async () => {
   const f=fixture();await f.service.handle({type:'GET_CONFIG'},f.sender(1));
   f.tabs[1].url='https://jobs.example/applications/experience';
+  f.intercept(url=>url.endsWith('/application-context')?{status:403,ok:false}:undefined);
   const denied=await f.service.handle({type:'GET_CONFIG'},f.sender(1));
   assert.equal(denied.settings.verifiedContext,null);
   const call=f.calls.filter(c=>c.url.endsWith('/application-context')).at(-1);
   const body=JSON.parse(call.options.body);
   assert.equal(body.previousApplicationSessionId,'application-1');
-  assert.equal(body.applicationSessionId,undefined);
+  assert.equal(body.applicationSessionId,'application-1');
+  assert.equal(body.jobId,'job-1');
+  f.intercept(null);
   // Reinstall the initial route, then simulate trusted backend approval of the new step.
   f.tabs[1].url='https://jobs.example/roles/1#application_session_id=application-1';
   await f.service.handle({type:'GET_CONFIG'},f.sender(1));
@@ -284,7 +383,7 @@ for (const [name, mutation] of [
   ['missing profile version', c => ({ ...c, profile: { ...c.profile, version: null } })],
   ['unverified resume', c => ({ ...c, resume: { ...c.resume, verified: false } })],
   ['resume owned by another candidate', c => ({ ...c, resume: { ...c.resume, profileId: 'other' } })],
-  ['unapproved portal', c => ({ ...c, allowedRoutes: [{ url: 'https://other.example' }] })],
+  ['mismatched job assignment', c => ({ ...c, assignment:{...c.assignment,jobId:'wrong-job'} })],
   ['revoked assignment', c => ({ ...c, assignment: { ...c.assignment, status: 'REVOKED' } })],
   ['expired context', c => ({ ...c, expiresAt: '2020-01-01T00:00:00Z' })]
 ]) test('rejects ' + name, async () => {
@@ -343,9 +442,9 @@ test('events use verified identities and configured origin; server acknowledgeme
   const msg = { type: 'LOG_SUBMISSION', action: 'APPLYFLOW_WEBHOOK', serverUrl: 'https://evil.example',
     payload: { application_session_id: 'application-1', profile_version: 'v1', job_version: 'v1',
       profile_assignment_id: 'assignment-1', profile_assignment_version: '1',
-      resume_id: 'resume-1', resume_version: 'v1', applier_id: 'forged', profile_id: 'forged', serverUrl: 'https://evil.example', job_status: 'SUBMITTED' } };
+      resume_id: 'resume-1', resume_version: 'v1', applier_id: 'forged', profile_id: 'forged', serverUrl: 'https://evil.example', job_status: 'SUBMITTED',is_final_submission:true,submission_confirmed_by:'CONFIRMED_ON_PORTAL_SUCCESS_PAGE',portal_evidence:{type:'SUCCESS_NOTICE',message:'Your application has been submitted',url:f.tabs[1].url,observedAt:new Date(f.now()).toISOString(),intermediate:false} } };
   const r = await f.service.handle(msg, f.sender(1)); assert.equal(r.success, true);
-  const call = f.calls.at(-1), payload = JSON.parse(call.options.body);
+  const call = f.calls.find(value=>value.url.endsWith('/api/submissions/webhook')), payload = JSON.parse(call.options.body);
   assert.equal(call.url, 'https://applyflow.example/api/submissions/webhook');
   assert.equal(payload.applier_id, 'applier-1'); assert.equal(payload.profile_id, 'profile-1');
   assert.equal(payload.applier_email, 'applier@example.com');
@@ -476,11 +575,13 @@ test('temporary password must be changed before a job context can be used', asyn
   assert.equal(f.calls.filter(call => call.url.endsWith('application-context')).length, 0);
   const message = { type: 'SQC_CHANGE_PASSWORD', currentPassword: 'temporary-test-password', newPassword: 'new-test-password', tabId: 1 };
   const changed = await f.service.handle(message, f.ui);
-  assert.equal(changed.integration.state, 'VERIFIED');
+  assert.equal(changed.integration.state, 'AUTHENTICATED');
   assert.equal(changed.activeProfile.id, 'profile-1');
   assert.equal(changed.integration.passwordChangeRequired, false);
   assert.equal(message.currentPassword, ''); assert.equal(message.newPassword, '');
   assert.ok(!JSON.stringify(f.chrome.storage).includes('new-test-password'));
+  assert.equal(f.calls.some(call=>call.url.endsWith('/application-context')),false);
+  assert.equal((await f.service.handle({type:'GET_CONFIG'},f.sender(1))).integration.state,'VERIFIED');
 });
 
 test('changing the password invalidates the old credentials', async () => {
@@ -599,6 +700,69 @@ const answerResponse = (payload, extra={}) => ({success:true,contractVersion:2,.
   answers:[{id:'why',status:'ANSWERED',answer:'My verified experience fits this role.'}],...extra});
 const jsonResponse = (data,status=200) => ({status,ok:status>=200&&status<300,async json(){return data;}});
 
+test('context version conflicts refresh the session once and retry the same tracked job',async()=>{
+ const f=fixture();let version='v1',contexts=0;
+ f.tabs[1].url='https://www.mimica.ai/careers?ashby_jid=ashby-posting&src=jobright#application_session_id=application-1&sqc_job_id=job-1&sqc_profile_id=profile-1';
+ await f.service.rememberLaunch(1,f.tabs[1].url);
+ f.mutateSession(data=>({...data,profile:{...data.profile,version},profileAssignment:{...data.profileAssignment,profileVersion:version}}));
+ f.mutate(c=>({...c,profile:{...c.profile,version}}));
+ f.intercept(url=>{if(url.endsWith('/application-context')&&++contexts===1){version='v2';return jsonResponse({success:false,error:{code:'VERSION_MISMATCH',message:'Candidate profile version is stale',fields:['profileVersion'],expectedVersions:{profileVersion:'v2'}}},409);}});
+ const cfg=await f.service.handle({type:'GET_CONFIG'},f.sender(1));assert.equal(cfg.settings.verifiedContext.profileVersion,'v2');assert.equal(contexts,2);
+ const sent=f.calls.filter(call=>call.url.endsWith('/application-context')).map(call=>JSON.parse(call.options.body));
+ for(const body of sent){assert.equal(body.applicationSessionId,'application-1');assert.equal(body.jobId,'job-1');assert.equal(body.profileId,'profile-1');assert.ok(body.url.includes('ashby_jid=ashby-posting'));}
+ assert.equal(f.calls.filter(call=>call.url.endsWith('/session')).length,2);
+});
+
+test('persistent 409 diagnostics retain the real backend error and tracking, with bounded automatic retries',async()=>{
+ const f=fixture();await f.service.rememberLaunch(1,f.tabs[1].url);
+ f.intercept(url=>url.endsWith('/application-context')?jsonResponse({success:false,error:{code:'VERSION_MISMATCH',message:'Stored application profile version is v1; current is v2',fields:[{field:'profileVersion'}],expectedVersions:{profileVersion:'v2'},currentVersions:{profileVersion:'v1'}}},409):undefined);
+ const cfg=await f.service.handle({type:'GET_CONFIG'},f.sender(1));assert.equal(cfg.settings.verifiedContext,null);assert.equal(cfg.integration.httpStatus,409);assert.equal(cfg.integration.path,'/api/sqc/application-context');assert.equal(cfg.integration.recoveryAttempted,true);
+ assert.match(cfg.integration.message,/Stored application profile version/);assert.deepEqual(cfg.integration.validationFields,['profileVersion']);assert.equal(cfg.integration.expectedVersions.profileVersion,'v2');assert.equal(cfg.integration.tracking.applicationSessionId,'application-1');
+ const before=f.calls.length;await f.service.handle({type:'GET_CONFIG'},f.sender(1));assert.equal(f.calls.length,before);
+ assert.equal(f.calls.filter(call=>call.url.endsWith('/application-context')).length,2);
+});
+
+test('non-version conflicts are not mislabeled or retried as stale versions',async()=>{
+ const f=fixture();f.intercept(url=>url.endsWith('/application-context')?jsonResponse({success:false,error:{code:'APPLICATION_SESSION_REVOKED',message:'The launch session was revoked'}},409):undefined);
+ const cfg=await f.service.handle({type:'GET_CONFIG'},f.sender(1));assert.equal(cfg.integration.state,'BACKEND_CONFLICT');assert.equal(cfg.integration.backendCode,'APPLICATION_SESSION_REVOKED');assert.match(cfg.integration.message,/revoked/);assert.equal(f.calls.filter(call=>call.url.endsWith('/application-context')).length,1);
+});
+
+test('unclassified 409 responses get one safe revalidation without inventing a backend error code',async()=>{
+ const f=fixture();f.intercept(url=>url.endsWith('/application-context')?jsonResponse({success:false,error:'Stored launch snapshot is stale'},409):undefined);
+ const cfg=await f.service.handle({type:'GET_CONFIG'},f.sender(1));assert.equal(cfg.settings.verifiedContext,null);assert.equal(cfg.integration.backendCode,'CONFLICT');assert.match(cfg.integration.message,/Stored launch snapshot is stale/);assert.equal(cfg.integration.recoveryAttempted,true);assert.equal(f.calls.filter(call=>call.url.endsWith('/application-context')).length,2);
+});
+
+test('automatic conflict recovery cannot replace the original candidate or job with another backend identity',async()=>{
+ const f=fixture();f.tabs[1].url+='&sqc_job_id=job-1&sqc_profile_id=profile-1';let calls=0;f.intercept(url=>{if(url.endsWith('/application-context')&&++calls===1)return jsonResponse({success:false,error:{code:'VERSION_MISMATCH',message:'Refresh versions'}},409);});
+ f.mutate(c=>({...c,job:{...c.job,id:'another-job'},assignment:{...c.assignment,jobId:'another-job'}}));
+ const cfg=await f.service.handle({type:'GET_CONFIG'},f.sender(1));assert.equal(cfg.settings.verifiedContext,null);assert.equal(cfg.integration.state,'CONTEXT_MISMATCH');assert.equal(cfg.integration.recoveryAttempted,true);assert.ok(cfg.integration.validationFields.includes('jobId (launch tracking ID)')||cfg.integration.message.includes('different application'));
+});
+
+test('Mimica redirects and embedded Ashby pages retain original IDs independently of another open job',async()=>{
+ const f=fixture();f.tabs[1].url='https://www.mimica.ai/careers?ashby_jid=ashby-posting&src=jobright#application_session_id=application-1&sqc_job_id=job-1&sqc_profile_id=profile-1';await f.service.rememberLaunch(1,f.tabs[1].url);
+ await f.service.handle({type:'GET_CONFIG'},f.sender(1));await f.service.handle({type:'GET_CONFIG'},f.sender(2));
+ f.tabs[1].url='https://mimica.ai/careers?ashby_jid=ashby-posting&src=jobright';await f.service.rememberLaunch(1,f.tabs[1].url);
+ await f.service.handle({type:'GET_CONFIG'},f.sender(1));
+ const iframe={...f.sender(1),frameId:3,url:'https://jobs.ashbyhq.com/embed/Mimica/ashby-posting/application'};
+ const cfg=await f.service.handle({type:'GET_CONFIG'},iframe);assert.equal(cfg.settings.verifiedContext.jobId,'job-1');assert.equal(cfg.settings.verifiedContext.profileId,'profile-1');
+ const body=JSON.parse(f.calls.filter(call=>call.url.endsWith('/application-context')).at(-1).options.body);assert.equal(body.applicationSessionId,'application-1');assert.equal(body.jobId,'job-1');assert.equal(body.url,iframe.url);
+ assert.equal(f.chrome.storage.session.data.sqcLaunchHints[1].hints.profileId,'profile-1');assert.ok(f.chrome.storage.session.data.sqcLaunchHints[1].pages.some(page=>page.includes('ashby_jid=ashby-posting')));
+ assert.equal(f.chrome.storage.session.data.sqcTabBindings[2].jobId,'job-2');
+});
+
+test('same-applier session rotation does not erase a tracked redirect identity',async()=>{
+ const f=fixture();await f.service.handle({type:'GET_CONFIG'},f.sender(1));
+ f.mutateSession(data=>({...data,session:{...data.session,id:'rotated-session'}}));f.mutate(c=>({...c,authSessionId:'rotated-session'}));
+ f.tabs[1].url='https://another-ats.example/login/then-apply';
+ const cfg=await f.restart().handle({type:'GET_CONFIG',force:true},f.sender(1));assert.equal(cfg.settings.verifiedContext.applicationSessionId,'application-1');assert.equal(cfg.settings.verifiedContext.jobId,'job-1');
+});
+
+test('about:blank child tabs retain recovery claims before their opener closes',async()=>{
+ const f=fixture();await f.service.rememberLaunch(1,f.tabs[1].url);f.tabs[3]={id:3,url:'about:blank'};await f.service.inheritTab(1,3,'about:blank');await f.service.forgetTab(1);
+ f.tabs[3].url='https://ats.example/application/step-1';
+ const cfg=await f.restart().handle({type:'GET_CONFIG'},f.sender(3));assert.equal(cfg.settings.verifiedContext.applicationSessionId,'application-1');
+});
+
 test('stale client assignments fail before the screening provider is called',async()=>{
   const f=fixture(),message=await screeningMessage(f);f.reassign();
   await assert.rejects(f.service.handle(message,f.sender(1)),/changed before generation/);
@@ -649,6 +813,18 @@ test('backend version mismatches are reported as refreshable errors',async()=>{
 });
 
 const localText = 'Candidate 1\nSoftware engineer building Python APIs and SQL data systems.\nSkills\nPython, SQL';
+test('verified job context retains base-context city from sign-in instead of a bad job profile city',async()=>{
+ const f=fixture();f.mutateSession(data=>({...data,profile:{...data.profile,city:'optimized',baseContextText:'Name: Candidate 1\nLocation: Miami, FL 33196'}}));
+ f.mutate(c=>({...c,profile:{...c.profile,city:'optimized'}}));
+ const cfg=await f.service.handle({type:'GET_CONFIG'},f.sender(1));assert.equal(cfg.activeProfile.city,'Miami');assert.equal(cfg.activeProfile.candidateFieldSources.city,'applyflow_base_context');
+ const again=await f.service.handle({type:'GET_CONFIG'},f.sender(1));assert.equal(again.activeProfile.city,'Miami');
+});
+test('verified config returns saved page answers for refresh restoration',async()=>{
+ const f=fixture(),cfg=await f.service.handle({type:'GET_CONFIG'},f.sender(1));
+ const captured=await f.service.handle({type:'SQC_CAPTURE_STEP',context:cfg.settings.verifiedContext,label:'Details',fields:[{id:'country',label:'Country',value:'United States',type:'select',required:true}]},f.sender(1));assert.equal(captured.success,true);
+ const next=await f.service.handle({type:'GET_CONFIG'},f.sender(1));assert.equal(next.settings.savedFormAnswers.find(field=>field.question==='Country').answer,'United States');
+ const other=await f.service.handle({type:'GET_CONFIG'},f.sender(2));assert.equal(other.settings.savedFormAnswers.length,0);
+});
 async function uploadLocal(f) {
   const cfg = await f.service.handle({type:'GET_CONFIG'},f.sender(1));
   return f.service.handle({type:'SQC_SET_LOCAL_RESUME',context:cfg.settings.verifiedContext,
@@ -667,6 +843,15 @@ test('a local upload works without a server resume and survives worker restart',
   const otherJob=await f.service.handle({type:'GET_CONFIG'},f.sender(2));
   assert.equal(otherJob.activeProfile.resumeSource,'missing');
 });
+test('job status version updates retain the original uploaded resume across verification and worker restart',async()=>{
+  const f=fixture(),uploaded=await uploadLocal(f);f.advance(31000);
+  f.mutate(c=>({...c,status:'IN_PROGRESS',job:{...c.job,version:'status-update-v2'}}));
+  const refreshed=await f.service.handle({type:'GET_CONFIG',force:true},f.sender(1));
+  assert.equal(refreshed.activeProfile.resumeId,uploaded.activeProfile.resumeId);assert.equal(refreshed.activeProfile.resumeBase64,uploaded.activeProfile.resumeBase64);
+  assert.equal(refreshed.settings.verifiedContext.jobVersion,'status-update-v2');
+  const restored=await f.restart().handle({type:'GET_CONFIG'},f.sender(1));assert.equal(restored.activeProfile.resumeSource,'sqc_upload');
+});
+
 test('screening receives the selected local resume text and base-version provenance, not the binary file',async()=>{
   const f=fixture();await uploadLocal(f);
   const message=await screeningMessage(f);
@@ -750,4 +935,259 @@ test('AI discovery reports an unconfigured backend provider without claiming gen
   const f=fixture();f.intercept(url=>url.endsWith('/api/ai/status')?jsonResponse({provider:'CODEX',configured:false}):undefined);
   const status=await f.service.handle({type:'SQC_AI_STATUS'},f.sender(1));
   assert.equal(status.ready,false);assert.match(status.message,/administrator/);
+});
+test('browser launch capture survives an immediate redirect before content loads and a worker restart',async()=>{
+  const f=fixture();await f.service.rememberLaunch(1,'https://applyflow.example/launch?sqc_job_id=job-1&application_session_id=application-1');
+  f.tabs[1].url='https://jobs.example/company/apply';
+  f.intercept(url=>url.endsWith('/application-context')?{status:403,ok:false}:undefined);
+  let r=await f.restart().handle({type:'GET_CONFIG'},f.sender(1));
+  assert.equal(r.settings.verifiedContext,null);
+  assert.equal(f.chrome.storage.session.data.sqcLaunchHints[1].hints.jobId,'job-1');
+  f.intercept(null);
+  f.mutate(c=>({...c,allowedRoutes:[...c.allowedRoutes,{url:f.tabs[1].url}]}));
+  assert.equal((await f.restart().handle({type:'SQC_PORTAL_ELIGIBILITY'},f.sender(1))).eligible,true);
+  r=await f.restart().handle({type:'GET_CONFIG'},f.sender(1));
+  assert.equal(r.settings.verifiedContext.jobId,'job-1');
+  const body=JSON.parse(f.calls.filter(c=>c.url.endsWith('/application-context')).at(-1).options.body);
+  assert.equal(body.jobId,'job-1');assert.equal(body.applicationSessionId,'application-1');
+  assert.equal(f.chrome.storage.session.data.sqcLaunchHints[1].hints.jobId,'job-1');
+});
+
+test('per-tab recovery survives lost session storage and refills verification IDs across reloads and tab switches',async()=>{
+  const f=fixture();
+  for(const id of [1,2])await f.service.handle({type:'GET_CONFIG'},f.sender(id));
+  await f.chrome.storage.session.remove(Object.keys(f.chrome.storage.session.data));
+  f.tabs[1].url='https://jobs.example/roles/1/step2';f.tabs[2].url='https://jobs.example/roles/2/step2';
+  const restarted=f.restart();
+  for(const id of [2,1,2]){
+    const result=await restarted.handle({type:'GET_CONFIG',force:true},f.sender(id));
+    assert.equal(result.integration.state,'VERIFIED',result.integration.message);assert.equal(result.settings.verifiedContext.jobId,'job-'+id);
+    const body=JSON.parse(f.calls.filter(call=>call.url.endsWith('/application-context')).at(-1).options.body);
+    assert.equal(body.applicationSessionId,'application-'+id);assert.equal(body.jobId,'job-'+id);assert.equal(body.profileId,'profile-1');
+  }
+  assert.equal(f.chrome.storage.local.data.sqcApplicationRecovery[1].hints.jobId,'job-1');
+  assert.equal(f.chrome.storage.local.data.sqcApplicationRecovery[2].hints.jobId,'job-2');
+});
+
+test('expired authorization retains per-tab IDs through a fresh sign-in, but explicit logout clears them',async()=>{
+  const f=fixture();for(const id of [1,2])await f.service.handle({type:'GET_CONFIG'},f.sender(id));
+  const uploaded=await uploadLocal(f);
+  f.signOut();f.advance(31000);
+  const expired=await f.service.handle({type:'GET_CONFIG'},f.sender(1));assert.equal(expired.integration.state,'SIGNED_OUT');assert.equal(expired.settings.verifiedContext,null);
+  assert.equal(f.chrome.storage.local.data.sqcApplicationRecovery[1].hints.jobId,'job-1');assert.equal(f.chrome.storage.local.data.sqcApplicationRecovery[2].hints.jobId,'job-2');assert.equal(f.chrome.storage.session.data.sqcAuth,undefined);
+  await f.service.handle({type:'SQC_LOGIN',email:'applier@example.com',password:'temporary-test-password'},f.ui);
+  f.tabs[1].url='https://jobs.example/roles/1/step2';const resumed=await f.service.handle({type:'GET_CONFIG'},f.sender(1));assert.equal(resumed.settings.verifiedContext.jobId,'job-1');assert.equal(resumed.activeProfile.resumeBase64,uploaded.activeProfile.resumeBase64);assert.equal(resumed.activeProfile.resumeSource,'sqc_upload');
+  await f.service.handle({type:'SQC_LOGOUT'},f.ui);assert.equal(f.chrome.storage.local.data.sqcApplicationRecovery,undefined);
+});
+
+test('browser-restored tabs recover by exact saved pages after tab IDs change',async()=>{
+  const f=fixture();for(const id of [1,2])await f.service.handle({type:'GET_CONFIG'},f.sender(id));
+  const uploaded=await uploadLocal(f);
+  for(const record of Object.values(f.chrome.storage.local.data.sqcApplicationRecovery))record.browserDetached=true;
+  await f.chrome.storage.session.remove(Object.keys(f.chrome.storage.session.data));
+  f.tabs[3]={id:3,url:'https://jobs.example/roles/2'};f.tabs[4]={id:4,url:'https://jobs.example/roles/1'};
+  const restarted=f.restart();for(const [id,job] of [[3,'2'],[4,'1']]){
+    const result=await restarted.handle({type:'GET_CONFIG'},f.sender(id));assert.equal(result.settings.verifiedContext.jobId,'job-'+job);
+    const body=JSON.parse(f.calls.filter(call=>call.url.endsWith('/application-context')).at(-1).options.body);assert.equal(body.applicationSessionId,'application-'+job);
+    if(job==='1')assert.equal(result.activeProfile.resumeBase64,uploaded.activeProfile.resumeBase64);
+  }
+});
+
+test('a reused browser tab ID cannot select an ambiguous saved candidate and rejection diagnostics show actual request IDs',async()=>{
+  const f=fixture();await f.service.handle({type:'GET_CONFIG'},f.sender(1));
+  const recovery=f.chrome.storage.local.data.sqcApplicationRecovery;recovery[1].browserDetached=true;recovery[2]={...structuredClone(recovery[1]),hints:{applicationSessionId:'another-app',jobId:'job-1',profileId:'profile-2'}};
+  await f.chrome.storage.session.remove(Object.keys(f.chrome.storage.session.data));
+  f.tabs[1].url='https://jobs.example/roles/1';
+  f.intercept(url=>url.endsWith('/application-context')?jsonResponse({success:false,code:'CONTEXT_MISMATCH',message:'No verified assignment'},409):null);
+  let result=await f.restart().handle({type:'GET_CONFIG'},f.sender(1));assert.equal(result.settings.verifiedContext,null);assert.equal(result.integration.verificationRequest.applicationSessionId,null);
+  delete recovery[2];result=await f.restart().handle({type:'GET_CONFIG'},f.sender(1));
+  assert.equal(result.integration.verificationRequest.applicationSessionId,'application-1');assert.equal(result.integration.verificationRequest.jobId,'job-1');assert.equal(result.integration.verificationRequest.profileId,'profile-1');assert.ok(f.chrome.storage.local.data.sqcApplicationRecovery[1]);
+});
+
+test('switching restored tabs keeps different assigned candidates attached to their own jobs',async()=>{
+  const f=fixture(),profile={id:'profile-2',version:'v2',verified:true,fullName:'Candidate Two'},assignment={id:'assignment-2',version:'1',status:'ACTIVE',applierId:'applier-1',profileId:profile.id,profileVersion:profile.version};
+  f.mutateSession(data=>({...data,assignedProfiles:[{assignment,profile}]}));
+  f.mutate(c=>c.job.id!=='job-2'?c:{...c,profile,assignment:{...c.assignment,profileId:profile.id,profileAssignmentId:assignment.id},resume:{...c.resume,id:'resume-2',profileId:profile.id}});
+  f.tabs[2].url+='&sqc_profile_id=profile-2';
+  for(const id of [1,2]){const result=await f.service.handle({type:'GET_CONFIG'},f.sender(id));assert.equal(result.settings.verifiedContext.profileId,'profile-'+id);}
+  await f.chrome.storage.session.remove(Object.keys(f.chrome.storage.session.data));
+  f.tabs[1].url='https://jobs.example/roles/1/review';f.tabs[2].url='https://jobs.example/roles/2/review';
+  const restarted=f.restart();
+  for(const id of [2,1,2]){const result=await restarted.handle({type:'GET_CONFIG',force:true},f.sender(id));assert.equal(result.settings.verifiedContext.profileId,'profile-'+id);assert.equal(result.settings.verifiedContext.jobId,'job-'+id);}
+});
+
+test('partial tracking retains all IDs but a new tracked ID replaces that tab without changing other tabs',async()=>{
+  const f=fixture();for(const id of [1,2])await f.service.handle({type:'GET_CONFIG'},f.sender(id));
+  f.tabs[1].url='https://jobs.example/roles/1/step2#sqc_profile_id=profile-1';await f.service.rememberLaunch(1,f.tabs[1].url);
+  await f.chrome.storage.session.remove(['sqcContexts','sqcTabBindings']);
+  let result=await f.service.handle({type:'GET_CONFIG'},f.sender(1));assert.equal(result.integration.state,'VERIFIED');
+  let body=JSON.parse(f.calls.filter(call=>call.url.endsWith('/application-context')).at(-1).options.body);assert.equal(body.jobId,'job-1');assert.equal(body.applicationSessionId,'application-1');
+  f.tabs[1].url='https://jobs.example/roles/2#application_session_id=application-2&sqc_job_id=job-2&sqc_profile_id=profile-1';
+  await f.service.rememberLaunch(1,f.tabs[1].url);result=await f.service.handle({type:'GET_CONFIG',force:true},f.sender(1));assert.equal(result.settings.verifiedContext.jobId,'job-2');
+  assert.equal(f.chrome.storage.local.data.sqcApplicationRecovery[1].hints.jobId,'job-2');assert.equal(f.chrome.storage.local.data.sqcApplicationRecovery[2].hints.jobId,'job-2');
+  await f.service.forgetTab(1);assert.equal(f.chrome.storage.local.data.sqcApplicationRecovery[1],undefined);assert.ok(f.chrome.storage.local.data.sqcApplicationRecovery[2]);
+});
+
+test('persistent recovery IDs cannot authorize a backend-denied page or leak to another applier',async()=>{
+  const f=fixture();await f.service.handle({type:'GET_CONFIG'},f.sender(1));
+  await f.chrome.storage.session.remove(Object.keys(f.chrome.storage.session.data));f.tabs[1].url='https://jobs.example/roles/1/step2';
+  f.intercept(url=>url.endsWith('/application-context')?jsonResponse({success:false,code:'CONTEXT_MISMATCH',message:'No verified assignment'},409):null);
+  let result=await f.restart().handle({type:'GET_CONFIG'},f.sender(1));assert.equal(result.settings.verifiedContext,null);assert.ok(f.chrome.storage.local.data.sqcApplicationRecovery[1]);
+  await f.chrome.storage.session.remove(Object.keys(f.chrome.storage.session.data));f.changeApplier();f.intercept(null);
+  result=await f.restart().handle({type:'GET_CONFIG'},f.sender(1));
+  const body=JSON.parse(f.calls.filter(call=>call.url.endsWith('/application-context')).at(-1).options.body);assert.equal(body.applicationSessionId,undefined);assert.equal(body.jobId,undefined);
+});
+test('unverified launch claims can follow a child tab without granting a lease or mixing another launch',async()=>{
+  const f=fixture();await f.service.rememberLaunch(1,f.tabs[1].url);
+  f.tabs[3]={id:3,url:'https://jobs.example/company/application'};
+  await f.service.inheritTab(1,3,f.tabs[3].url);await f.service.forgetTab(1);
+  assert.equal(f.chrome.storage.session.data.sqcTabBindings?.[3],undefined);
+  f.mutate(c=>({...c,allowedRoutes:[...c.allowedRoutes,{url:f.tabs[3].url}]}));
+  assert.equal((await f.restart().handle({type:'GET_CONFIG'},f.sender(3))).settings.verifiedContext.jobId,'job-1');
+  await f.service.rememberLaunch(3,'https://jobs.example/roles/2#application_session_id=application-2');
+  f.tabs[3].url='https://jobs.example/roles/2';
+  assert.equal((await f.restart().handle({type:'GET_CONFIG'},f.sender(3))).settings.verifiedContext.jobId,'job-2');
+  await f.service.handle({type:'SQC_LOGOUT'},f.ui);
+  assert.equal(f.chrome.storage.session.data.sqcLaunchHints,undefined);
+});
+test('session overview can list assigned profiles before a job is open without changing the locked candidate',async()=>{
+  const f=fixture();f.mutateSession(data=>({...data,assignedProfiles:[{assignment:{id:'assignment-2',version:'1',status:'ACTIVE',applierId:'applier-1',profileId:'profile-2',profileVersion:'v2'},profile:{id:'profile-2',version:'v2',verified:true,fullName:'Candidate Two'}}]}));
+  const cfg=await f.service.handle({type:'GET_CONFIG'},f.ui);
+  assert.equal(cfg.profiles.length,2);assert.equal(cfg.profiles[1].fullName,'Candidate Two');assert.equal(cfg.activeProfile.id,'profile-1');assert.equal(cfg.settings.verifiedContext,null);
+  const job=await f.service.handle({type:'GET_CONFIG'},f.sender(1));assert.equal(job.settings.verifiedContext.profileId,'profile-1');
+});
+test('an assigned-profile roster cannot expose another applier profile or replace the verified assignment',async()=>{
+  const f=fixture();f.mutateSession(data=>({...data,assignedProfiles:[{assignment:{id:'foreign',version:'1',status:'ACTIVE',applierId:'another-applier',profileId:'profile-2',profileVersion:'v2'},profile:{id:'profile-2',version:'v2',verified:true,fullName:'Wrong Candidate'}}]}));
+  const cfg=await f.service.handle({type:'GET_CONFIG'},f.ui);assert.equal(cfg.integration.state,'INVALID_CONTEXT');assert.deepEqual(cfg.profiles,[]);
+});
+test('tab job hints survive a denied continuation and worker restart without granting route access',async()=>{
+  const f=fixture();await f.service.handle({type:'GET_CONFIG'},f.sender(1));
+  f.tabs[1].url='https://jobs.example/application/step-two';
+  f.intercept(url=>url.endsWith('/application-context')?{status:403,ok:false}:undefined);
+  let r=await f.service.handle({type:'GET_CONFIG'},f.sender(1));assert.equal(r.settings.verifiedContext,null);
+  assert.equal(f.chrome.storage.session.data.sqcTabBindings[1].jobId,'job-1');assert.equal(f.chrome.storage.session.data.sqcContexts[1],undefined);
+  r=await f.restart().handle({type:'GET_CONFIG'},f.sender(1));assert.equal(r.settings.verifiedContext,null);
+  const request=JSON.parse(f.calls.filter(call=>call.url.endsWith('/application-context')).at(-1).options.body);
+  assert.equal(request.jobId,'job-1');assert.equal(request.applicationSessionId,'application-1');
+  f.intercept(null);
+  f.mutate(c=>({...c,allowedRoutes:[...c.allowedRoutes,{url:'https://jobs.example/application/step-two'}]}));
+  r=await f.restart().handle({type:'GET_CONFIG'},f.sender(1));assert.equal(r.settings.verifiedContext.jobId,'job-1');
+  await f.service.forgetTab(1);assert.equal(f.chrome.storage.session.data.sqcTabBindings[1],undefined);
+});
+test('new continuation tabs use opener job hints but cannot change the assigned job silently',async()=>{
+  const f=fixture();await f.service.handle({type:'GET_CONFIG'},f.sender(1));
+  f.tabs[3]={id:3,openerTabId:1,url:'https://jobs.example/apply/step-three'};
+  f.mutate(c=>({...c,allowedRoutes:[...c.allowedRoutes,{url:'https://jobs.example/apply/step-three'}]}));
+  const r=await f.service.handle({type:'GET_CONFIG'},f.sender(3));assert.equal(r.settings.verifiedContext.jobId,'job-1');
+  assert.equal(JSON.parse(f.calls.filter(call=>call.url.endsWith('/application-context')).at(-1).options.body).jobId,'job-1');
+  f.tabs[3].url='https://jobs.example/roles/2';
+  assert.equal((await f.service.handle({type:'GET_CONFIG'},f.sender(3))).settings.verifiedContext,null);
+});
+test('manual confirmations, valid forms and intermediate steps cannot produce a completion record',async()=>{
+  const f=fixture();await f.service.handle({type:'GET_CONFIG'},f.sender(1));
+  const stamp={application_session_id:'application-1',profile_version:'v1',job_version:'v1',resume_id:'resume-1',resume_version:'v1',profile_assignment_id:'assignment-1',profile_assignment_version:'1'};
+  const evidence={type:'SUCCESS_NOTICE',message:'Your application has been submitted',url:f.tabs[1].url,observedAt:new Date(f.now()).toISOString(),intermediate:false};
+  for(const extra of [
+    {job_status:'SUBMITTED',validation_status:'PASSED'},
+    {job_status:'SUBMITTED',is_final_submission:true,submission_confirmed_by:'MANUAL_HUD_CONFIRM',portal_evidence:evidence},
+    {job_status:'SUBMITTED',is_final_submission:true,submission_confirmed_by:'CONFIRMED_ON_PORTAL_SUCCESS_PAGE',portal_evidence:{...evidence,intermediate:true}},
+    {job_status:'SUBMITTED',is_final_submission:true,submission_confirmed_by:'CONFIRMED_ON_PORTAL_SUCCESS_PAGE',portal_evidence:{...evidence,url:'https://different.example/success'}}
+  ])assert.equal((await f.service.handle({type:'LOG_SUBMISSION',payload:{...stamp,...extra}},f.sender(1))).success,false);
+  assert.equal(f.calls.some(call=>call.url.endsWith('/api/submissions/webhook')),false);assert.equal(f.chrome.storage.local.data.submissionsHistory,undefined);
+});
+
+test('submission uses the live Ashby iframe route when MessageSender retains its pre-SPA URL',async()=>{
+  const f=fixture();await f.service.handle({type:'GET_CONFIG'},f.sender(1));
+  const oldUrl='https://jobs.ashbyhq.com/mimica/job-uuid/application',url='https://jobs.ashbyhq.com/mimica/job-uuid/application?submitted=true';
+  f.chrome.webNavigation={getFrame:async details=>{assert.equal(details.tabId,1);assert.equal(details.frameId,4);return {url,documentId:'same-document'};}};
+  const sender={...f.sender(1),url:oldUrl,frameId:4,documentId:'same-document'};
+  const payload={application_session_id:'application-1',profile_version:'v1',job_version:'v1',resume_id:'resume-1',resume_version:'v1',profile_assignment_id:'assignment-1',profile_assignment_version:'1',
+    job_status:'SUBMITTED',is_final_submission:true,submission_confirmed_by:'CONFIRMED_ON_PORTAL_SUCCESS_PAGE',portal_evidence:{type:'SUCCESS_NOTICE',message:'Your application was successfully submitted.',url,observedAt:new Date(f.now()).toISOString(),intermediate:false},
+    screening_qa:[{question:'Why this role?',answer:'Relevant experience'}]};
+  const result=await f.service.handle({type:'LOG_SUBMISSION',payload},sender);assert.equal(result.success,true,result.error);
+  const delivered=JSON.parse(f.calls.find(call=>call.url.endsWith('/api/submissions/webhook')).options.body);
+  assert.equal(delivered.portal_evidence.url,url);assert.equal(delivered.extracted_data.job_url,url);
+  assert.equal(delivered.screening_qa[0].answer,'Relevant experience');
+  assert.ok(f.calls.some(call=>call.url.endsWith('/api/sqc/application-context')&&JSON.parse(call.options.body).url===url));
+});
+
+test('replaced iframe documents and evidence from another URL cannot report completion',async()=>{
+  const f=fixture();await f.service.handle({type:'GET_CONFIG'},f.sender(1));
+  const sender={...f.sender(1),frameId:4,documentId:'original-document'},url='https://jobs.ashbyhq.com/mimica/job-uuid/application';
+  let documentId='replacement-document';f.chrome.webNavigation={getFrame:async()=>({url,documentId})};
+  const payload={application_session_id:'application-1',profile_version:'v1',job_version:'v1',resume_id:'resume-1',resume_version:'v1',profile_assignment_id:'assignment-1',profile_assignment_version:'1',job_status:'SUBMITTED',is_final_submission:true,submission_confirmed_by:'CONFIRMED_ON_PORTAL_SUCCESS_PAGE',portal_evidence:{type:'SUCCESS_NOTICE',message:'Application received!',url:sender.url,observedAt:new Date(f.now()).toISOString(),intermediate:false}};
+  let result=await f.service.handle({type:'LOG_SUBMISSION',payload},sender);assert.equal(result.success,false);assert.match(result.error,/document changed/);
+  documentId=sender.documentId;result=await f.service.handle({type:'LOG_SUBMISSION',payload},sender);
+  assert.equal(result.success,false);assert.equal(result.code,'PORTAL_EVIDENCE_MISMATCH');assert.deepEqual(result.fields,['current frame URL']);
+  let reads=0;payload.portal_evidence.url=url;
+  f.chrome.webNavigation.getFrame=async()=>({url,documentId:++reads===1?sender.documentId:'replacement-during-verification'});
+  result=await f.service.handle({type:'LOG_SUBMISSION',payload},sender);assert.equal(result.success,false);assert.match(result.error,/changed during verification/);
+  assert.equal(f.calls.some(call=>call.url.endsWith('/api/submissions/webhook')),false);
+});
+test('a continuation route denial retains tab identity and authentication but never retains an autofill lease',async()=>{
+  const f=fixture();await f.service.handle({type:'GET_CONFIG'},f.sender(1));f.tabs[1].url='https://jobs.example/apply/review';
+  f.intercept(url=>url.endsWith('/api/sqc/application-context')?{status:403,ok:false}:null);
+  const denied=await f.service.handle({type:'GET_CONFIG'},f.sender(1));assert.equal(denied.integration.state,'FORBIDDEN');assert.equal(denied.settings.verifiedContext,null);
+  assert.equal(f.chrome.storage.session.data.sqcTabBindings[1].jobId,'job-1');assert.equal(f.chrome.storage.session.data.sqcAuth.applier.id,'applier-1');
+  f.intercept(null);f.mutate(c=>({...c,allowedRoutes:[...c.allowedRoutes,{url:'https://jobs.example/apply/review'}]}));
+  assert.equal((await f.restart().handle({type:'GET_CONFIG'},f.sender(1))).settings.verifiedContext.jobId,'job-1');
+});
+test('fixed mode uses the approved base document without demanding an upload, and policy overrides browser selections',async()=>{
+  const policy=structuredClone(require('../config/runtime').defaults);policy.resume.mode='fixed';policy.autofill.enabled=false;
+  const f=fixture({load:async()=>policy});f.chrome.storage.local.data.settings.autoAutofillOnPageLoad=true;
+  const cfg=await f.service.handle({type:'GET_CONFIG'},f.sender(1));assert.equal(cfg.settings.resumeMode,'fixed');assert.equal(cfg.activeProfile.resumeReady,true);assert.equal(cfg.activeProfile.resumeTailoringRequired,false);assert.equal(cfg.settings.autoAutofillOnPageLoad,false);
+  assert.equal((await f.service.handle({type:'SAVE_SETTINGS',settings:{autoAutofillOnPageLoad:true}},f.ui)).success,false);
+});
+test('an optional fixed resume upload is reused for the assigned candidate across jobs, but a tailored upload stays job-bound',async()=>{
+  const policy=structuredClone(require('../config/runtime').defaults);policy.resume.mode='fixed';const f=fixture({load:async()=>policy});
+  const uploaded=await uploadLocal(f);assert.equal(uploaded.activeProfile.resumeReady,true);assert.equal(uploaded.activeProfile.resumeIsTailored,false);
+  const other=await f.restart().handle({type:'GET_CONFIG'},f.sender(2));assert.equal(other.activeProfile.resumeText,localText);assert.equal(other.settings.verifiedContext.jobId,'job-2');
+  f.reassign();const changed=await f.service.handle({type:'GET_CONFIG',force:true},f.sender(2));assert.notEqual(changed.activeProfile.resumeText,localText);
+});
+test('a backend job that explicitly requires tailoring cannot be downgraded by fixed-mode configuration',async()=>{
+  const policy=structuredClone(require('../config/runtime').defaults);policy.resume.mode='fixed';const f=fixture({load:async()=>policy});f.mutate(c=>({...c,job:{...c.job,tailoringRequired:true}}));
+  const cfg=await f.service.handle({type:'GET_CONFIG'},f.sender(1));assert.equal(cfg.settings.resumeMode,'tailored');assert.equal(cfg.activeProfile.resumeReady,false);
+});
+test('browser-created child tabs retain the parent application even with no opener metadata',async()=>{
+  const f=fixture();await uploadLocal(f);f.tabs[3]={id:3,url:'https://jobs.example/roles/1/experience'};
+  await f.service.inheritTab(1,3,f.tabs[3].url);await f.service.forgetTab(1);
+  const cfg=await f.restart().handle({type:'GET_CONFIG'},f.sender(3));assert.equal(cfg.settings.verifiedContext.jobId,'job-1');assert.equal(cfg.activeProfile.resumeText,localText);
+});
+test('submission includes earlier-step answers only from its application and refreshes ApplyFlow status after acknowledgement',async()=>{
+  const f=fixture();const first=await f.service.handle({type:'GET_CONFIG'},f.sender(1));
+  await f.service.handle({type:'SQC_CAPTURE_STEP',context:first.settings.verifiedContext,label:'Personal information',fields:[{label:'First name',value:'Candidate'},{label:'Password',type:'password',value:'never send this'}]},f.sender(1));
+  f.tabs[1].url='https://jobs.example/roles/1/experience';const second=await f.restart().handle({type:'GET_CONFIG'},f.sender(1));
+  await f.service.handle({type:'SQC_CAPTURE_STEP',context:second.settings.verifiedContext,label:'Experience',fields:[{label:'Employer',value:'Correct Company'}]},f.sender(1));
+  const other=await f.service.handle({type:'GET_CONFIG'},f.sender(2));await f.service.handle({type:'SQC_CAPTURE_STEP',context:other.settings.verifiedContext,label:'Other job',fields:[{label:'Employer',value:'Other Job Company'}]},f.sender(2));
+  f.tabs[1].url='https://jobs.example/roles/1/success';f.intercept(url=>{if(url.endsWith('/webhook'))f.mutate(c=>({...c,status:'SUBMITTED'}));});
+  const cfg=await f.service.handle({type:'GET_CONFIG'},f.sender(1)),c=cfg.settings.verifiedContext;
+  const result=await f.service.handle({type:'LOG_SUBMISSION',payload:{application_session_id:c.applicationSessionId,profile_assignment_id:c.profileAssignmentId,profile_assignment_version:c.profileAssignmentVersion,profile_version:c.profileVersion,job_version:c.jobVersion,resume_id:c.resumeId,resume_version:c.resumeVersion,job_status:'SUBMITTED',is_final_submission:true,submission_confirmed_by:'CONFIRMED_ON_PORTAL_SUCCESS_PAGE',portal_evidence:{type:'SUCCESS_NOTICE',message:'Your application has been submitted',url:f.tabs[1].url,observedAt:new Date(f.now()).toISOString(),intermediate:false}}},f.sender(1));
+  assert.equal(result.success,true);assert.equal(result.applyFlowStatus,'SUBMITTED');const body=JSON.parse(f.calls.find(call=>call.url.endsWith('/webhook')).options.body);
+  assert.equal(body.application_steps.length,2);assert.ok(body.screening_qa.some(q=>q.answer==='Correct Company'));assert.ok(body.screening_qa.some(q=>q.answer==='Candidate'));assert.equal(JSON.stringify(body).includes('never send this'),false);assert.equal(JSON.stringify(body).includes('Other Job Company'),false);
+});
+
+test('tracked redirects and child tabs retain their job without any predefined allowedRoutes',async()=>{
+  const f=fixture();f.mutate(c=>{const {allowedRoutes,...context}=c;return context;});await uploadLocal(f);
+  for(const url of ['https://company.example/careers/lead','https://login.ats.example/signin','https://ats.example/forms/page-two']){
+    f.tabs[1].url=url;const cfg=await f.restart().handle({type:'GET_CONFIG'},f.sender(1));
+    assert.equal(cfg.settings.verifiedContext.jobId,'job-1');assert.equal(cfg.activeProfile.resumeText,localText);assert.equal(policy.ready(cfg.settings,url,f.now()),true);
+  }
+  f.tabs[3]={id:3,url:'https://another-ats.example/experience'};await f.service.inheritTab(1,3,f.tabs[3].url);
+  const child=await f.restart().handle({type:'GET_CONFIG'},f.sender(3));assert.equal(child.settings.verifiedContext.applicationSessionId,'application-1');assert.equal(child.activeProfile.resumeText,localText);
+  const call=JSON.parse(f.calls.filter(c=>c.url.endsWith('/application-context')).at(-1).options.body);assert.equal(call.trackingMode,'application-session');assert.equal(call.duplicatePolicy.includeOtherAppliers,true);
+});
+test('refreshing status reuses original file bytes until its verified resume version changes',async()=>{
+  const f=fixture();f.mutate(c=>({...c,resume:{...c.resume,file:{url:'/files/resume.pdf',filename:'anything.pdf'}}}));
+  await f.service.handle({type:'GET_CONFIG'},f.sender(1));await f.service.handle({type:'GET_CONFIG',force:true},f.sender(1));
+  assert.equal(f.calls.filter(c=>c.url.endsWith('/files/resume.pdf')).length,1);
+  f.mutate(c=>({...c,resume:{...c.resume,version:'v2',file:{url:'/files/resume.pdf',filename:'different.pdf'}}}));await f.service.handle({type:'GET_CONFIG',force:true},f.sender(1));
+  assert.equal(f.calls.filter(c=>c.url.endsWith('/files/resume.pdf')).length,2);
+});
+test('a correlated committed APPLIED acknowledgement completes immediately even while context remains pending',async()=>{
+  const f=fixture();const cfg=await f.service.handle({type:'GET_CONFIG'},f.sender(1)),c=cfg.settings.verifiedContext;
+  f.intercept((url,options)=>{if(url.endsWith('/webhook')){const payload=JSON.parse(options.body);return jsonResponse({success:true,accepted:true,eventId:payload.event_id,applicationSessionId:c.applicationSessionId,jobId:c.jobId,profileId:c.profileId,recordId:'existing-record',status:'APPLIED'});}});
+  const payload={application_session_id:c.applicationSessionId,profile_assignment_id:c.profileAssignmentId,profile_assignment_version:c.profileAssignmentVersion,profile_version:c.profileVersion,job_version:c.jobVersion,resume_id:c.resumeId,resume_version:c.resumeVersion,job_status:'SUBMITTED',is_final_submission:true,submission_confirmed_by:'CONFIRMED_ON_PORTAL_SUCCESS_PAGE',portal_evidence:{type:'SUCCESS_NOTICE',message:'Your application has been submitted',url:f.tabs[1].url,observedAt:new Date(f.now()).toISOString(),intermediate:false}};
+  const result=await f.service.handle({type:'LOG_SUBMISSION',payload},f.sender(1));assert.equal(result.success,true);assert.equal(result.applyFlowStatus,'APPLIED');
+  assert.equal(f.calls.filter(call=>call.url.endsWith('/api/sqc/application-context')).length,2,'Only initial and final verification should run, without a post-ack refresh');
+  assert.equal(f.chrome.storage.session.data.sqcContexts[1].status,'APPLIED');
 });

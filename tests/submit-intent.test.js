@@ -5,6 +5,13 @@ const fs = require('node:fs');
 const path = require('node:path');
 const {classify} = require('../content/submit-intent');
 
+test('decorated intermediate labels remain steps even on native submit controls',()=>{
+  for(const label of ['Next →','› Continue','Next: Experience','Continue to review','Save & Continue →']){
+    assert.equal(classify({label,nativeSubmit:true,submitEvent:true,hasApplicantFields:true,finalId:true}),'step',label);
+  }
+  assert.equal(classify({label:'Review and submit',nativeSubmit:true,hasApplicantFields:true}),'final');
+});
+
 test('an Apply link to another page or a form anchor remains navigation even with candidate data on the page', () => {
   for (const label of ['Apply','Apply now','Apply for this job','Submit application']) {
     assert.equal(classify({label,navigation:true,hasApplicantFields:true,nativeSubmit:true,afterFields:true}),'navigation');

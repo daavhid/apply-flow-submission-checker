@@ -3,6 +3,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const el = id => document.getElementById(id);
   const send = message => chrome.runtime.sendMessage(message);
   const model = SQCSettings;
+  const deployedOrigin='https://applyflow-api.jhproit.com';
   const icons = {
     shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/>',
     sliders: '<path d="M4 7h16M4 17h16M8 4v6M16 14v6"/>',
@@ -107,7 +108,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     } else if (section()==='history'&&!historyLoaded) {
       target.innerHTML=`${pageHeading('AUDIT HISTORY','Your application history.','Review the records saved in this browser.')}${historyError ? `<div class="settings-panel load-error"><h2>History could not be loaded.</h2><p>${escape(historyError)}</p><button class="button secondary" type="button" data-action="refresh-history">Try again</button></div>` : '<div class="loading"><span class="loader"></span>Loading audit history…</div>'}`;
     } else target.innerHTML=section()==='history'?renderHistory():section()==='account'?renderAccount():renderPreferences();
+    const server=target.querySelector('.server-panel');
+    if(server){
+      const preset=document.createElement('div');preset.className='connection-note';
+      const label=document.createElement('strong'),url=document.createElement('code'),actions=document.createElement('div'),copy=document.createElement('button'),use=document.createElement('button'),hint=document.createElement('p');
+      label.textContent='ApplyFlow deployed backend';url.textContent=deployedOrigin;url.style.overflowWrap='anywhere';url.style.display='block';actions.className='session-actions';copy.type=use.type='button';copy.className='text-button';use.className='button secondary';copy.dataset.action='copy-deployed-url';copy.textContent='Copy deployed URL';use.dataset.action='use-deployed-backend';use.disabled=config.integration?.apiOrigin===deployedOrigin;use.textContent=use.disabled?'Deployed backend selected':'Use deployed backend';hint.textContent='Select this server to connect to the deployed system. Switching servers requires signing in again.';actions.append(use,copy);preset.append(label,url,hint,actions);server.append(preset);
+    }
     updateSaveBar(); updateDependentFields();
+    if(config?.settings?.deploymentManaged&&section()==='preferences'){
+      target.querySelectorAll('input,select,button').forEach(input=>{input.disabled=true;});
+      el('save-preferences').disabled=true;
+      const info=document.createElement('p');info.className='feedback';info.textContent='Managed by config/settings.json. Resume mode: '+config.settings.resumeMode+'. Update the JSON and reload the extension to change these settings.';target.prepend(info);
+    }
     if (focus) {el('section-heading')?.focus({preventScroll:true}); window.scrollTo(0,0);}
   }
   function updateDependentFields() {
@@ -167,6 +179,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       if(action==='account')location.hash='account';
       if(action==='retry'){await loadConfig();render();}
       if(action==='copy-url'){await navigator.clipboard.writeText(config.integration.apiOrigin);button.textContent='Copied';notice('Backend URL copied.');}
+      if(action==='copy-deployed-url'){await navigator.clipboard.writeText(deployedOrigin);notice('Deployed backend URL copied.');}
+      if(action==='use-deployed-backend'){button.disabled=true;try{await request({type:'SQC_CONNECT',apiOrigin:deployedOrigin,requireLogin:true});await loadConfig();render();notice('Deployed backend selected. Sign in to continue.');await openWorkspace();}finally{if(button.isConnected)button.disabled=false;}}
       if(action==='sync'){
         if(syncing)return;syncing=true;button.disabled=true;button.innerHTML='<span class="loader"></span>Checking…';
         try{await loadConfig(true);render();const state=accountState();notice(config.integration?.state==='UNASSIGNED'?'Account checked. ApplyFlow has not returned an active candidate assignment.':state.tone==='success'?'Account and assignment checked with ApplyFlow.':config.integration?.message||'Continue setup to connect your account.',state.tone==='success'?'success':'warning');}finally{syncing=false;render();}
