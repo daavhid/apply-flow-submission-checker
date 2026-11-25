@@ -2,5 +2,5 @@
 globalThis.SQC_AI_CONFIG = Object.freeze({
   endpoint: 'https://applyflow-api.jhproit.com/api/ai/chat',
   localEndpoint: 'http://localhost:5000/api/ai/chat',
-  timeoutMs: 120000
+  timeoutMs: 600000
 });
