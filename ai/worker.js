@@ -61,7 +61,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
     const request={id:message.requestId,environment,controller:new AbortController()};
     requests.set(key,request);
     let timedOut=false;
-    const timer=setTimeout(()=>{timedOut=true;request.controller.abort();},SQC_AI_CONFIG.timeoutMs*Math.max(1,Math.ceil(questions.length/20)));
+    const timer=setTimeout(()=>{timedOut=true;request.controller.abort();},SQC_AI_CONFIG.timeoutMs*Math.max(1,Math.ceil(questions.length/(scope?10:20))));
     try {
       await migration;
       const requestConfig=scope?null:{endpoint:message.environment==='local'?SQC_AI_CONFIG.localEndpoint:SQC_AI_CONFIG.endpoint};
@@ -77,7 +77,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
         const generated=pending.length?await scope.answer(pending,{requestId:message.requestId+'_'+(++batchIndex),signal:request.controller.signal}):[];
         return SQCQuestionClient.normalize({answers:[...local.values(),...generated]},items);
       };
-      const answers=await SQCQABatch.run({questions,signal:request.controller.signal,answer:answerBatch,onProgress:progress=>{
+      const answers=await SQCQABatch.run({questions,concurrency:scope?1:2,signal:request.controller.signal,answer:answerBatch,onProgress:progress=>{
         if(!request.controller.signal.aborted)chrome.runtime.sendMessage?.({type:'QA_BATCH_PROGRESS',requestId:message.requestId,...progress})?.catch(()=>{});
       }});
       await resumeService.assertCurrent(snapshot);
