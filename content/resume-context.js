@@ -18,6 +18,19 @@
     if (m && monthNames.includes(m[1].slice(0,3).toLowerCase())) return {value:m[2]+'-'+String(monthNames.indexOf(m[1].slice(0,3).toLowerCase())+1).padStart(2,'0')};
     return /^\d{4}$/.test(raw) ? {value:raw} : null;
   }
+  function skillNames(input){
+    const result=[],seen=new Set();
+    const add=value=>{for(const name of String(value).split(/[,;\n]/)){const text=name.trim();if(!text||text.length>100||/^\[object\s+object\]$/i.test(text)||seen.has(text.toLowerCase()))continue;seen.add(text.toLowerCase());result.push(text);}};
+    const visit=(value,depth=0)=>{
+      if(depth>6||value==null)return;
+      if(typeof value==='string'){add(value);return;}
+      if(Array.isArray(value)){value.forEach(item=>visit(item,depth+1));return;}
+      if(typeof value!=='object')return;
+      let collection=false;for(const key of ['skills','primaryStackKeywords','items','technologies','values'])if(Array.isArray(value[key])){collection=true;visit(value[key],depth+1);}if(collection)return;
+      for(const key of ['name','skillName','skill','label','technology','title','value'])if(typeof value[key]==='string'&&value[key].trim()){add(value[key]);return;}
+      if(value.skill&&typeof value.skill==='object')visit(value.skill,depth+1);
+    };visit(input);return result;
+  }
   function parse(text) {
     const lines = String(text || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
     const start = lines.findIndex(l => /^(professional experience|work experience|employment(?: history)?|experience|career history)$/i.test(l.replace(/:$/, '')));
@@ -135,6 +148,6 @@
     const exact=/^(\d+(?:\.\d+)?)(\+)?(?:\s*(?:years?|yrs?))?$/.exec(String(answer).trim());
     return exact && !fact.minimum && (exact[2] ? Number(exact[1])>fact.value : Number(exact[1])!==fact.value) ? fact : null;
   }
-  root.SQCResumeContext={parse,experienceValue,educationValue,numericFact,numberMismatch};
+  root.SQCResumeContext={parse,skillNames,experienceValue,educationValue,numericFact,numberMismatch};
   if(typeof module!=='undefined') module.exports=root.SQCResumeContext;
 })(typeof window!=='undefined'?window:globalThis);

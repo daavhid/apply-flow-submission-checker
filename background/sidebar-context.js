@@ -2,6 +2,8 @@
 (function(root){
   'use strict';
   const key=c=>JSON.stringify([c.applicationSessionId,c.applierId,c.profileId,c.profileVersion,c.jobId,c.jobVersion,c.resumeId,c.resumeVersion,c.profileAssignmentId,c.profileAssignmentVersion]);
+  const documentKey=c=>key({...c,jobVersion:undefined});
+  const jobSignature=cfg=>JSON.stringify([cfg.applyFlowContext?.jobTitle||cfg.applyFlowContext?.title||'',cfg.applyFlowContext?.company||'']);
   function create({chrome,session,policy=root.SQCContextPolicy,availability}){
     const ui={url:chrome.runtime.getURL('sidebar/sidebar.html')};
     const announced=new Map();
@@ -24,7 +26,7 @@
             expectedVersions:cfg?.integration?.expectedVersions,currentVersions:cfg?.integration?.currentVersions,tracking:cfg?.integration?.tracking,verificationRequest:cfg?.integration?.verificationRequest,
             jobQuery:Object.fromEntries(['ashby_jid','gh_jid','jobId','job_id','reqId'].filter(name=>new URL(tab.url).searchParams.has(name)).map(name=>[name,new URL(tab.url).searchParams.get(name)])),
             fields:cfg?.integration?.validationFields||[],profile:targetProfile?{id:targetProfile.id,fullName:targetProfile.fullName}:targetId?{id:targetId}:null,page:new URL(tab.url).origin+new URL(tab.url).pathname,checkedAt:new Date().toISOString()}});
-        const announcement=tab.url+':'+key(c);
+        const announcement=tab.url+':'+documentKey(c)+':'+jobSignature(cfg);
         if(announced.get(tab.id)!==announcement){announced.set(tab.id,announcement);chrome.tabs.sendMessage(tab.id,{type:'SQC_CONTEXT_AVAILABLE'},{frameId:0}).catch(()=>{});}
         return {tab,c,cfg,profile:cfg.activeProfile};
       }
@@ -34,7 +36,7 @@
         return {source:p.resumeSource||'applyflow',text:ready?p.resumeText||'':'',filename:ready?p.resumeFilename||'Assigned resume':'No job resume selected',candidateName:p.fullName,
           profileFacts:Object.fromEntries(['fullName','firstName','lastName','email','phone','location','address','linkedin','workAuth','education','compensation'].filter(name=>p[name]!==undefined).map(name=>[name,p[name]])),
           workHistory:p.resumeContext?.workHistory||[],education:p.resumeContext?.education||[],skills:p.primaryStackKeywords||[],
-          version:'sqc:'+key({...c,jobVersion:undefined}),contextRevision:'sqc:'+key(c),ready,
+          version:'sqc:'+documentKey(c),contextRevision:'sqc:'+documentKey(c),jobSignature:jobSignature(value.cfg),ready,
           ...(ready&&p.resumeBase64?{file:{managed:true}}:{})};
       }
       const snapshot=async()=>resume(await context());
@@ -56,7 +58,7 @@
         return {resume:await snapshot()};
       }
       async function clear(){const current=await context(true);const result=await session.handle({type:'SQC_CLEAR_LOCAL_RESUME',context:current.c},{url:current.tab.url,tab:current.tab});if(!result?.success)throw new Error(result?.error||'The local resume could not be removed.');return {resume:await snapshot()};}
-      async function assertCurrent(previous){const next=resume(await context(true));if(next.version!==previous.version||previous.contextRevision&&next.contextRevision!==previous.contextRevision)throw new Error('The job, assignment or resume changed. Request fresh answers.');}
+      async function assertCurrent(previous){const next=resume(await context(true));if(next.version!==previous.version||previous.contextRevision&&next.contextRevision!==previous.contextRevision||previous.jobSignature&&next.jobSignature!==previous.jobSignature)throw new Error('The job, assignment or resume changed. Request fresh answers.');}
       async function attachment(version){
         const current=await context(true),value=resume(current);
         if(value.version!==version)throw new Error('The application context changed. Refresh before attaching.');
@@ -70,19 +72,19 @@
         if(policy?.matchesContext(url,current.c))return true;
         if(!Array.isArray(current.c.verifiedUrls)||!/^https?:\/\//i.test(url||''))return false;
         const cfg=await session.handle({type:'GET_CONFIG'},{url,tab:current.tab});
-        return Boolean(cfg.settings?.verifiedContext&&key(cfg.settings.verifiedContext)===key(current.c));
+        return Boolean(cfg.settings?.verifiedContext&&documentKey(cfg.settings.verifiedContext)===documentKey(current.c)&&jobSignature(cfg)===jobSignature(current.cfg));
       }
       async function scan(forms){
-        const before=await context(),prepareKey=before.tab.id+':'+before.tab.url+':'+key(before.c);
+        const before=await context(),prepareKey=before.tab.id+':'+before.tab.url+':'+documentKey(before.c)+':'+jobSignature(before.cfg);
         if(!preparedPages.has(prepareKey)){preparedPages.add(prepareKey);while(preparedPages.size>100)preparedPages.delete(preparedPages.values().next().value);try{await chrome.tabs.sendMessage(before.tab.id,{type:'SQC_SIDEBAR_PREPARE'});}catch(_){}}
         if(before.cfg.applyFlowContext?.duplicate?.confirmed)return {questions:[],pageKey:before.tab.id+':'+before.tab.url};
         const result=await forms.scan(windowId),after=await context();
-        if(before.tab.id!==after.tab.id||key(before.c)!==key(after.c))throw new Error('The application changed during detection. Refresh.');
+        if(before.tab.id!==after.tab.id||documentKey(before.c)!==documentKey(after.c)||jobSignature(before.cfg)!==jobSignature(after.cfg))throw new Error('The application changed during detection. Refresh.');
         const pages=new Map();for(const question of [...result.questions,...(result.uploads||[]),...(result.fields||[])]){const url=question.source?.url;if(!pages.has(url))pages.set(url,await verifyPage(url,after));}
-        const scoped=items=>items.filter(q=>pages.get(q.source?.url)).map(q=>({...q,source:{...q.source,contextKey:key(after.c)}}));
+        const scoped=items=>items.filter(q=>pages.get(q.source?.url)).map(q=>({...q,source:{...q.source,contextKey:documentKey(after.c),jobSignature:jobSignature(after.cfg)}}));
         result.questions=scoped(result.questions);result.uploads=scoped(result.uploads||[]);result.fields=scoped(result.fields||[]);return result;
       }
-      async function verifyItem(item){const current=await context();if((await availability?.check(current.tab.id,current.cfg))?.blocking)throw new Error('This portal is unavailable or needs an access check. Filling and attachment are paused.');if(current.cfg.applyFlowContext?.duplicate?.confirmed)throw new Error('ApplyFlow already has this application. Filling and attachment are paused.');if(item.source?.tabId!==current.tab.id||item.source?.contextKey!==key(current.c)||!await verifyPage(item.source?.url,current))throw new Error('This answer belongs to an earlier job context. Detect the current page again.');return current;}
+      async function verifyItem(item){const current=await context();if((await availability?.check(current.tab.id,current.cfg))?.blocking)throw new Error('This portal is unavailable or needs an access check. Filling and attachment are paused.');if(current.cfg.applyFlowContext?.duplicate?.confirmed)throw new Error('ApplyFlow already has this application. Filling and attachment are paused.');if(item.source?.tabId!==current.tab.id||![documentKey(current.c),key(current.c)].includes(item.source?.contextKey)||item.source?.jobSignature&&item.source.jobSignature!==jobSignature(current.cfg)||!await verifyPage(item.source?.url,current))throw new Error('This answer belongs to an earlier job context. Detect the current page again.');return current;}
       const apply=async(forms,item)=>{await verifyItem(item);return forms.apply(item);};
       const attach=async(forms,item,version)=>{
         const current=await context();

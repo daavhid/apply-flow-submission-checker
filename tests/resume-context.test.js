@@ -8,6 +8,11 @@ test('education is parsed from the resume with its own school, degree, major and
  assert.equal(facts.education.length,2);assert.equal(facts.education[0].graduationYear,'2017');assert.equal(facts.education[1].graduationYear,'2020');
  assert.equal(facts.education[0].major,'Computer Science');assert.equal(facts.education[0].city,undefined);assert.equal(facts.education[0].gpa,undefined);
 });
+
+test('structured skill objects become unique actual skill names rather than object strings',()=>{
+ const {skillNames}=require('../content/resume-context');
+ assert.deepEqual(skillNames([{name:'Python',years:8},{skill:'SQL'},{skillName:'Docker'},{name:'Languages',skills:[{label:'TypeScript'},'python']},{skill:{name:'PostgreSQL'}},{confidence:0.9},'[object Object]']),['Python','SQL','Docker','TypeScript','PostgreSQL']);
+});
 const resume=`Candidate One
 8 years of professional experience. 5 years of experience with Python.
 PROFESSIONAL EXPERIENCE

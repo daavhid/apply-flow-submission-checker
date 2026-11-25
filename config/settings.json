@@ -2,6 +2,7 @@
   "schemaVersion": 1,
   "resume": {
     "mode": "tailored",
+    "applyFlowFormat": "pdf",
     "allowUpload": true,
     "autoAttach": true,
     "closeAfterAttach": true,

@@ -108,10 +108,11 @@
     }
     async function resumeFile(auth, context, force) {
       const file = context.resume.file || {};
-      const key = [auth.sessionId, context.applicationSessionId, context.profile.id, context.resume.id, context.resume.version, file.url, file.sha256].join(':');
+      const key = [auth.sessionId, context.applicationSessionId, context.profile.id, context.resume.id, context.resume.version, file.url, file.sha256,file.mimeType,file.filename,file.requiredMimeType].join(':');
       if (!force && resumeFiles.has(key)) return resumeFiles.get(key);
       let controller, timer;
       try {
+        if(file.requiredMimeType==='application/pdf'&&(/\.(?:docx?|txt)$/i.test(file.filename||'')||file.mimeType&&file.mimeType!=='application/pdf'))throw new Error('ApplyFlow supplied a non-PDF resume and no PDF original. Sync its approved PDF from ApplyFlow or upload the original PDF; automatic DOCX attachment is paused.');
         let dataUrl = file.dataUrl || '';
         let bytes, mime = file.mimeType || '';
         if (!dataUrl && file.url) {
@@ -119,7 +120,7 @@
           if (url.origin !== auth.apiOrigin || url.username || url.password || url.hash) throw new Error('ApplyFlow must provide a resume download on its configured API origin.');
           controller = new AbortController(); timer = setTimeout(() => controller.abort(), 10000);
           const response = await fetch(url.href, { method: 'GET', credentials: 'include', cache: 'no-store', redirect: 'error',
-            signal: controller.signal, headers: { Accept: 'application/pdf, application/vnd.openxmlformats-officedocument.wordprocessingml.document, application/msword, text/plain', 'X-SQC-Extension-Id': chrome.runtime.id } });
+            signal: controller.signal, headers: { Accept: file.requiredMimeType||'application/pdf, application/vnd.openxmlformats-officedocument.wordprocessingml.document, application/msword, text/plain', 'X-SQC-Extension-Id': chrome.runtime.id } });
           if (response.status === 401) throw new Error('ApplyFlow denied access to the saved resume file (HTTP 401). Your account remains connected. Refresh the resume or upload its original file.');
           if (!response.ok) throw new Error('ApplyFlow could not deliver the generated resume file.');
           if (Number(response.headers?.get('content-length')) > maxResumeBytes) throw new Error('The generated resume exceeds the 10 MB file limit.');
@@ -137,6 +138,7 @@
           mime = match[1]; bytes = Uint8Array.from(atob(match[2]), char => char.charCodeAt(0));
         } else return {...file, dataUrl: '', error: ''};
         if (!bytes.length || bytes.length > maxResumeBytes) throw new Error('ApplyFlow returned an empty or oversized resume file.');
+        if(file.requiredMimeType==='application/pdf'&&(mime!=='application/pdf'||new TextDecoder().decode(bytes.slice(0,5))!=='%PDF-'))throw new Error('ApplyFlow did not return actual PDF bytes. Sync or upload the original PDF; DOCX files cannot be renamed into PDFs.');
         if (!['application/pdf','application/vnd.openxmlformats-officedocument.wordprocessingml.document','application/msword','text/plain'].includes(mime)) throw new Error('ApplyFlow must return a PDF, Word document, or text resume.');
         if (file.sha256) {
           const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), byte => byte.toString(16).padStart(2,'0')).join('');
@@ -255,7 +257,9 @@
       await chrome.storage.session.set({sqcTabBindings});
       delete sqcContexts[tab.id];
       await chrome.storage.session.set({ sqcContexts });
+      const preferredFormat=deployment?(await deployment.load()).resume.applyFlowFormat:'original';
       const body = { contractVersion: 2, url, trackingMode:'application-session',resumePolicy:'existing-only',allowResumeGeneration:false,
+        ...(preferredFormat==='pdf'?{preferredResumeFormat:'pdf'}:{}),
         duplicatePolicy:{scope:'profile',includeOtherAppliers:true,matchBy:['jobId','requisitionId','title','company','location']},
         ...(binding ? {applicationSessionId:binding.applicationSessionId,jobId:binding.jobId,profileId:binding.profileId} : {}),
         ...(compatible ? { applicationSessionId: previous.applicationSessionId } :
@@ -265,6 +269,11 @@
       try{data=await request(auth.apiOrigin, '/api/sqc/application-context', 'POST', body, auth.csrfToken);}
       catch(error){error.verificationRequest={tabId:tab.id,page:pageIdentity(url),applicationSessionId:body.applicationSessionId||null,jobId:body.jobId||null,profileId:body.profileId||null,previousApplicationSessionId:body.previousApplicationSessionId||null};throw error;}
       let c = data.context;
+      if(c?.resume&&preferredFormat==='pdf'){
+        const r=c.resume,variants=[r.pdfFile,...(Array.isArray(r.files)?r.files:Object.values(r.files||{})),...(Array.isArray(r.file?.variants)?r.file.variants:Object.values(r.file?.variants||{}))].filter(value=>value&&typeof value==='object');
+        const pdf=variants.find(value=>(value.mimeType==='application/pdf'||/\.pdf$/i.test(value.filename||''))&&(!value.profileId||value.profileId===c.profile?.id)&&(!value.jobId||value.jobId===c.job?.id)&&(!value.resumeId||value.resumeId===r.id));
+        c={...c,resume:{...r,file:{...(pdf||r.file||{}),requiredMimeType:'application/pdf'}}};
+      }
       if(c?.profile&&root.SQCCandidateReference){
         const reference=c.profile.baseContextText||c.profile.baseContext||'';
         const sessionFacts=auth.profile?.id===c.profile.id&&auth.profile?.version===c.profile.version?auth.profile.candidateReferenceFacts:null;
@@ -470,7 +479,7 @@
         if(root.SQCCandidateReference){const inherited=auth.profile?.id===context.profile.id&&auth.profile?.version===context.profile.version?auth.profile.candidateReferenceFacts:null;context={...context,profile:root.SQCCandidateReference.merge({...context.profile,...(!context.profile.candidateReferenceFacts&&inherited?{candidateReferenceFacts:inherited}:{})},'')};}
         settings.savedFormAnswers=journal?await journal.restore(auth,settings.verifiedContext,contextPageUrl,context.savedApplication):[];
         const parsedFacts=root.SQCResumeContext?.parse(context.resume.text);
-        const resumeFacts=context.resume.facts?{...context.resume.facts,education:context.resume.facts.education||parsedFacts?.education||[]}:parsedFacts||null;
+        const resumeFacts=context.resume.facts?{...context.resume.facts,workHistory:Array.isArray(context.resume.facts.workHistory)?context.resume.facts.workHistory:parsedFacts?.workHistory||[],education:context.resume.facts.education||parsedFacts?.education||[]}:parsedFacts||null;
         profile = { ...context.profile, resumeText: context.resume.text, baseResumeText: context.resume.text,
           resumeBase64: context.resume.file?.dataUrl || '',
           resumeFilename: context.resume.file?.filename || '',
@@ -485,7 +494,7 @@
           resumeContext:resumeFacts,
           resumeSha256: context.resume.file?.sha256 || '', resumeFileError: context.resume.file?.error || (context.resume.source==='sqc_upload'?'':context.resumeError) || '',
           resumeMimeType: context.resume.file?.mimeType || '',
-          primaryStackKeywords: (Array.isArray(context.resume.skills)&&context.resume.skills.length ? context.resume.skills : context.resume.skills?.primaryStackKeywords) || resumeFacts?.skills || [],
+          primaryStackKeywords: root.SQCResumeContext?.skillNames(context.resume.skills)?.length?root.SQCResumeContext.skillNames(context.resume.skills):root.SQCResumeContext?.skillNames(resumeFacts?.skills)||[],
           salaryFloor: context.profile.salaryFloor ?? context.profile.compensation?.salaryFloor,
           desiredSalary: context.profile.desiredSalary ?? context.profile.compensation?.desiredSalary };
       }

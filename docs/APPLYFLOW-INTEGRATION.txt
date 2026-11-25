@@ -1,4 +1,10 @@
-CURRENT BEHAVIOR (1.6.24)
+CURRENT BEHAVIOR (1.6.25)
+
+Deployed PDF delivery: settings.json resume.applyFlowFormat defaults to pdf (original preserves server format when explicitly configured). Application-context requests include preferredResumeFormat=pdf while allowResumeGeneration remains false. ApplyFlow should return the existing PDF in resume.file with filename, mimeType=application/pdf, same-origin url and its own sha256. Explicit variants under resume.pdfFile, resume.files (array or map) or resume.file.variants can also provide PDF metadata for this verified resume/candidate/job. A DOCX-only response cannot be silently attached under PDF policy. Missing PDF blocks automatic file attachment, not the already parsed text used for question context. Never rename DOCX bytes to .pdf or reconstruct an attachment from parsed text.
+
+Skill normalization: arrays of skill strings or structured entries using name/skillName/skill/label/technology/title/value are normalized to actual unique names. Nested skill collections are read without rendering object strings. Unsupported metadata is ignored rather than stringified. If facts omit workHistory, parsed resume records remain available.
+
+Answer review lifetime: progress-only jobVersion updates no longer discard an already validated answer batch in the sidebar or invalidate an unchanged DOM question binding. Application/candidate/profile/assignment/selected-resume versions remain bound, and visible job title/company changes invalidate the review. The backend screening request/response jobVersion and post-generation checks remain strict; this change does not bypass a provider/API VERSION_MISMATCH. The backend should provide a stable content version separately from progress timestamps to prevent spurious provider-version conflicts.
 
 Shared ZIP connection default: config/connection.js embeds https://applyflow-api.jhproit.com. A clean install initializes that saved endpoint in signed-out state and goes directly to email/password sign-in; there is no required API URL setup step. No credentials or provider secrets are bundled. An explicitly saved workspace remains selected for existing installations. Original endpoint selection cannot come from a job URL. Rebuild the ZIP after changing the release default.
 

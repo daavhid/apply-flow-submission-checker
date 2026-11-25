@@ -191,6 +191,29 @@ test('a wrong generated file or foreign-origin download cannot be attached, whil
   }
 });
 
+test('deployed PDF policy requests and selects an explicit verified PDF variant, preserving its original bytes',async()=>{
+ const managed=structuredClone(require('../config/runtime').defaults),f=fixture({load:async()=>managed});
+ f.mutate(c=>({...c,resume:{...c.resume,skills:[{name:'Python',years:8},{skill:'SQL'}],facts:{skills:[]},file:{filename:'Candidate.docx',mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',url:'/files/resume.docx'},files:{pdf:{filename:'Candidate.pdf',mimeType:'application/pdf',url:'/files/resume.pdf'}}}}));
+ const result=await f.service.handle({type:'GET_CONFIG'},f.sender(1));
+ assert.equal(result.activeProfile.resumeFilename,'Candidate.pdf');assert.equal(result.activeProfile.resumeMimeType,'application/pdf');assert.deepEqual(result.activeProfile.primaryStackKeywords,['Python','SQL']);
+ assert.equal(atob(result.activeProfile.resumeBase64.split(',')[1]),'%PDF-1.7\nVerified generated resume');
+ assert.equal(JSON.parse(f.calls.find(call=>call.url.endsWith('/application-context')).options.body).preferredResumeFormat,'pdf');
+ assert.equal(f.calls.some(call=>call.url.endsWith('/files/resume.docx')),false);
+});
+
+test('PDF policy blocks silent DOCX attachment without blocking resume text context or replacing uploaded originals',async()=>{
+ const managed=structuredClone(require('../config/runtime').defaults),f=fixture({load:async()=>managed});
+ f.mutate(c=>({...c,resume:{...c.resume,file:{filename:'Candidate.docx',mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',url:'/files/resume.docx'}}}));
+ const result=await f.service.handle({type:'GET_CONFIG'},f.sender(1));assert.equal(result.activeProfile.resumeBase64,'');assert.match(result.activeProfile.resumeFileError,/non-PDF/);assert.equal(result.activeProfile.resumeText,'Verified resume');
+ const uploaded=await uploadLocal(f);assert.equal(uploaded.activeProfile.resumeSource,'sqc_upload');assert.ok(uploaded.activeProfile.resumeBase64.startsWith('data:text/plain'));
+});
+
+test('a PDF filename cannot disguise non-PDF bytes',async()=>{
+ const managed=structuredClone(require('../config/runtime').defaults),f=fixture({load:async()=>managed});
+ f.mutate(c=>({...c,resume:{...c.resume,file:{filename:'Candidate.pdf',mimeType:'application/pdf',dataUrl:'data:application/pdf;base64,'+btoa('PK not a PDF')}}}));
+ const result=await f.service.handle({type:'GET_CONFIG'},f.sender(1));assert.equal(result.activeProfile.resumeBase64,'');assert.match(result.activeProfile.resumeFileError,/actual PDF bytes/);
+});
+
 test('a tailored resume for another job cannot establish a verified context', async () => {
   const f=fixture();f.mutate(c=>({...c,resume:{...c.resume,kind:'tailored',jobId:'other-job'}}));
   const result=await f.service.handle({type:'GET_CONFIG'},f.sender(1));

@@ -35,6 +35,12 @@ test('unified Q&A uses the assigned profile and resume, without exposing the ori
   const config=await f.scope.aiConfig();assert.equal(config.endpoint,'https://applyflow.test/api/ai/chat');assert.equal(config.credentials,'include');assert.equal(config.csrfToken,'test-token');
 });
 
+test('completed answer batches survive progress-only job version changes but reject changed material context',async()=>{
+ const f=fixture(),snapshot=await f.scope.snapshot();f.c.jobVersion='progress-update';await f.scope.assertCurrent(snapshot);
+ f.cfg.applyFlowContext.jobTitle='A different role';await assert.rejects(f.scope.assertCurrent(snapshot),/changed/);
+ f.cfg.applyFlowContext.jobTitle='Engineer';f.c.resumeVersion='new-document';await assert.rejects(f.scope.assertCurrent(snapshot),/changed/);
+});
+
 test('attachment re-detects the same original file control across status-only job versions',async()=>{
  const f=fixture(),source={tabId:7,documentId:'doc',url:'https://portal.test/jobs/1/apply',snapshot:'shape',contextKey:key(f.c)};
  const item={id:'resume-field',question:'Resume',source,manual:true};
@@ -75,10 +81,12 @@ test('a reconnecting account displays its profiles but does not start job or res
 });
 test('unified scan filters unauthorized frames and rejects stale answers after the job changes',async()=>{
   const f=fixture(),forms={scan:async()=>({questions:[{id:'ok',source:{tabId:7,url:'https://portal.test/jobs/1/apply'}},{id:'bad',source:{tabId:7,url:'https://third-party.test/frame'}}]}),apply:async()=>({success:true})};
-  const scanned=await f.scope.scan(forms);assert.equal(scanned.questions.length,1);assert.equal(scanned.questions[0].source.contextKey,key(f.c));
+  const scanned=await f.scope.scan(forms);assert.equal(scanned.questions.length,1);assert.equal(scanned.questions[0].source.contextKey,key({...f.c,jobVersion:undefined}));
   const coverage=await f.scope.scan({scan:async()=>({questions:[],fields:[{id:'ok',filled:true,source:{tabId:7,url:'https://portal.test/jobs/1/apply'}},{id:'bad',filled:true,source:{tabId:7,url:'https://third-party.test/frame'}}]})});
   assert.equal(coverage.fields.length,1);assert.equal(coverage.fields[0].id,'ok');
   assert.equal((await f.scope.apply(forms,scanned.questions[0])).success,true);
+  f.c.jobVersion='progress-update';assert.equal((await f.scope.apply(forms,scanned.questions[0])).success,true);
+  f.cfg.applyFlowContext.jobTitle='Changed title';await assert.rejects(f.scope.apply(forms,scanned.questions[0]),/earlier job context/);f.cfg.applyFlowContext.jobTitle='Engineer';
   f.c.jobId='j2';await assert.rejects(f.scope.apply(forms,scanned.questions[0]),/earlier job context/);
 });
 test('a sidebar upload is bound to the assigned candidate and job rather than a typed identity',async()=>{
