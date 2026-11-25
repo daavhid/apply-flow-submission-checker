@@ -10,7 +10,7 @@ require('../background/application-journal');
 const localResume = require('../background/local-resume');
 const { create } = require('../background/applyflow-session');
 
-function fixture(deployment) {
+function fixture(deployment,defaultApiOrigin='') {
   let clock = Date.parse('2026-11-11T12:00:00Z');
   const future = () => new Date(clock + 3600000).toISOString();
   function area(seed = {}) {
@@ -102,11 +102,11 @@ function fixture(deployment) {
     return { status: 200, ok: true, async json() { return data; } };
   };
   const localResumes = localResume.memoryStore();
-  const service = create({ chrome, fetch, policy, screening, localResume, localResumes,deployment, sleep:async()=>{}, now: () => clock });
+  const service = create({ chrome, fetch, policy, screening, localResume, localResumes,deployment,defaultApiOrigin,sleep:async()=>{}, now: () => clock });
   const sender = id => ({ url: tabs[id].url, tab: structuredClone(tabs[id]) });
   const ui = { url: 'chrome-extension://sqc/popup/popup.html' };
   return { service, chrome, calls, tabs, sender, ui, localResumes, now: () => clock,
-    restart() { return create({ chrome, fetch, policy, screening, localResume, localResumes,deployment, sleep:async()=>{}, now: () => clock }); },
+    restart() { return create({ chrome, fetch, policy, screening, localResume, localResumes,deployment,defaultApiOrigin,sleep:async()=>{}, now: () => clock }); },
     intercept(fn) {interceptFetch=fn;},
     advance(ms) { clock += ms; }, signOut() { signedIn = false; }, changeApplier() { applier = 'applier-2'; },
     requirePasswordChange() { passwordChangeRequired = true; }, unassign() { assigned = false; },
@@ -135,6 +135,23 @@ test('unconnected extension has no candidate fallback', async () => {
   const result = await f.service.handle({ type: 'GET_CONFIG' }, f.sender(1));
   assert.equal(result.integration.state, 'DISCONNECTED');
   assert.equal(result.activeProfile, null); assert.deepEqual(result.profiles, []); assert.equal(f.calls.length, 0);
+});
+
+test('a shared fresh install uses the bundled deployed API and goes directly to credential sign-in',async()=>{
+  const apiOrigin=require('../config/connection').apiOrigin,f=fixture(undefined,apiOrigin);await f.chrome.storage.local.remove('sqcConnection');
+  const initial=await f.service.handle({type:'GET_CONFIG'},f.ui);
+  assert.equal(initial.integration.apiOrigin,'https://applyflow-api.jhproit.com');assert.equal(initial.integration.state,'SIGNED_OUT');assert.equal(initial.activeProfile,null);assert.equal(f.calls.length,0);
+  const login=await f.service.handle({type:'SQC_LOGIN',email:'applier@example.com',password:'temporary-test-password'},f.ui);
+  assert.equal(login.integration.applier.email,'applier@example.com');assert.ok(f.calls.every(call=>call.url.startsWith(apiOrigin+'/')));
+  assert.equal((await f.restart().handle({type:'GET_CONFIG'},f.ui)).integration.apiOrigin,apiOrigin);
+  await f.service.handle({type:'SQC_LOGOUT'},f.ui);const signedOut=await f.service.handle({type:'GET_CONFIG'},f.ui);assert.equal(signedOut.integration.apiOrigin,apiOrigin);assert.equal(signedOut.integration.state,'SIGNED_OUT');
+});
+
+test('bundled API bootstraps direct sign-in while an explicitly saved workspace remains selected',async()=>{
+  const f=fixture(undefined,'https://applyflow-api.jhproit.com');
+  assert.equal((await f.service.handle({type:'GET_CONFIG'},f.ui)).integration.apiOrigin,'https://applyflow.example');
+  await f.chrome.storage.local.remove('sqcConnection');
+  const login=await f.service.handle({type:'SQC_LOGIN',email:'applier@example.com',password:'temporary-test-password'},f.ui);assert.equal(login.integration.apiOrigin,'https://applyflow-api.jhproit.com');
 });
 test('verified context locks identity, loads approved resume, and never exposes CSRF to content', async () => {
   const f = fixture();

@@ -41,8 +41,7 @@ chrome.runtime.onInstalled.addListener(async details => {
   for (const key of ['activeProfileId', 'applierId', 'applierName', 'adminPasskey', 'backendApiKey', 'webhooks']) delete settings[key];
   await chrome.storage.local.set({ settings: { ...settings, integrationMode: 'applyflow', isProfileLocked: true } });
   if (details.reason === 'install') {
-    const { sqcConnection } = await chrome.storage.local.get('sqcConnection');
-    if (!sqcConnection?.apiOrigin) await openSetup();
+    await openSetup();
   }
 });
 
@@ -72,7 +71,7 @@ async function openSettings(section) {
   return { success: true };
 }
 
-importScripts('../content/context-policy.js', '../content/screening-policy.js', '../content/resume-context.js','../content/candidate-reference.js','../content/portal-availability.js','../content/live-progress.js', 'local-resume.js', 'application-journal.js', 'applyflow-session.js','job-activation.js','portal-availability.js');
+importScripts('../config/connection.js','../content/context-policy.js', '../content/screening-policy.js', '../content/resume-context.js','../content/candidate-reference.js','../content/portal-availability.js','../content/live-progress.js', 'local-resume.js', 'application-journal.js', 'applyflow-session.js','job-activation.js','portal-availability.js');
 const sqcApplyFlow = SQCApplyFlowSession.create({ chrome, fetch: (...args) => fetch(...args), policy: SQCContextPolicy, defaults: DEFAULT_SETTINGS });
 const sqcAvailability=globalThis.SQCPortalAvailabilityService?.create({chrome,session:sqcApplyFlow});
 const sqcActivator=globalThis.SQCJobActivation?.create({chrome,session:sqcApplyFlow,policy:SQCContextPolicy,onVerified:(tabId,cfg)=>sqcAvailability?.check(tabId,cfg)});

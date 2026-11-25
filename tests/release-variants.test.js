@@ -12,6 +12,12 @@ test('release manifests retain full SQC and an independent standalone Q&A surfac
 test('both worker sources share one global scope without duplicate declarations',()=>{
   assert.doesNotThrow(()=>new vm.Script(fs.readFileSync('background/service-worker.js','utf8')+'\n'+fs.readFileSync('ai/worker.js','utf8')));
 });
+
+test('shared SQC package embeds the deployed connection default before the session service loads',()=>{
+  const source=fs.readFileSync('background/service-worker.js','utf8');assert.ok(source.includes('../config/connection.js'));
+  assert.equal(require('../config/connection').apiOrigin,'https://applyflow-api.jhproit.com');
+  assert.ok(require('../build-extension').PROFILES.sqc.files.includes('config'));
+});
 test('combined worker routes Q&A to its own listener and uses the unified SQC sidebar',async()=>{
   const listeners=[],imports=[],behaviors=[];let sqcCalls=0;
   const area={async setAccessLevel(){},async remove(){},async set(){},async get(){return {};}};

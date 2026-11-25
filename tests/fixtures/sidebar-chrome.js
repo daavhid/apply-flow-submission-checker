@@ -5,7 +5,7 @@ window.__page={success:true,context:__context,lifecycle:'IN_PROGRESS',hasFormDat
 window.__resume={source:'applyflow',text:'Candidate One\nSenior engineer building reliable Python and PostgreSQL systems.',filename:'Candidate One.pdf',candidateName:'Candidate One',version:'scope-one',ready:true,education:[{school:'Test University',degree:'Bachelor of Science',major:'Computer Science',graduationYear:'2017'}]};
 window.__events={activated:[],updated:[]};
 window.__policyPromise=fetch('/config/settings.json').then(response=>response.json());
-window.__accountStage='disconnected';window.__jobVisible=false;window.__snapshotGate=null;window.__snapshotWaiting=false;window.__offline=false;window.__duplicate=null;window.__duplicateAcknowledged=false;window.__jobFailure=null;window.__portalAvailability=null;
+window.__accountStage='signin';window.__jobVisible=false;window.__snapshotGate=null;window.__snapshotWaiting=false;window.__offline=false;window.__duplicate=null;window.__duplicateAcknowledged=false;window.__jobFailure=null;window.__portalAvailability=null;
 window.__integration=()=>({state:__accountStage==='disconnected'?'DISCONNECTED':__accountStage==='signin'?'SIGNED_OUT':'AUTHENTICATED',apiOrigin:__accountStage==='disconnected'?'':'https://applyflow.test',...(__accountStage==='connected'?{applier:{name:'Test applier',email:'applier@example.com'}}:{})});
 window.chrome={runtime:{id:'sidebar',getURL:p=>'/'+p,getManifest:()=>({side_panel:{default_path:'sidebar/sidebar.html'}}),onMessage:{addListener(){}},async sendMessage(message){
   __requests.push(message);

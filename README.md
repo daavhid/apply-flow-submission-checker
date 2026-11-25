@@ -1,5 +1,7 @@
 # Full SQC + AI Q&A releases
 
+The shareable SQC ZIP embeds `https://applyflow-api.jhproit.com` via [config/connection.js](config/connection.js). Fresh installs open email/password sign-in directly; appliers do not need to enter an API URL. Build with `npm.cmd run build:sqc` and share `dist/submission-checker-extension.zip`. Existing explicitly saved workspace selections are preserved.
+
 `main` uses one native Chrome sidebar with **Overview**, **Resume** and **Q&A** tabs. The toolbar opens sign-in directly for disconnected accounts. After login, Overview displays the account and assigned profiles without requiring a job. A verified job loads its status and approved resume automatically; missing resumes open the Resume tab. Uploads parse and save automatically, then close the editor. There is no floating HUD or manual completion button.
 
 Tracked job URLs activate from browser navigation/load events without depending on a detected form or an open sidebar. Job verification errors appear on every sidebar tab with the failing API/field and **Copy details**. Missing resume text does not deactivate an otherwise verified job. After reloading an extension update, refresh an already-open job tab once to load the new content scripts.

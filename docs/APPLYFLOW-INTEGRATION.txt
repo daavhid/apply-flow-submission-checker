@@ -1,4 +1,6 @@
-CURRENT BEHAVIOR (1.6.23)
+CURRENT BEHAVIOR (1.6.24)
+
+Shared ZIP connection default: config/connection.js embeds https://applyflow-api.jhproit.com. A clean install initializes that saved endpoint in signed-out state and goes directly to email/password sign-in; there is no required API URL setup step. No credentials or provider secrets are bundled. An explicitly saved workspace remains selected for existing installations. Original endpoint selection cannot come from a job URL. Rebuild the ZIP after changing the release default.
 
 Rippling CV-chip correction: use the multi-ID ARIA-labelled Resume/CV upload area and read clickable filename chips even when the text is a direct child of role=button. Prefer full filename metadata, otherwise retain the visible truncated filename as attachment evidence. The hidden native file input remains a valid upload target when associated with a visible CV label; unrelated hidden controls remain excluded. The resume_uploaded value and file audit entry both reflect that visible evidence. Sidebar snapshots re-check attachments and recompute cached validation only when the filename changes, clearing a stale missing-resume warning without requiring another edit. Public form inspection was read-only; server-side file acceptance is still distinct from visible attachment state.
 

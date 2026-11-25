@@ -2,7 +2,9 @@ async function runSidebarSmoke(){
   const check=(ok,message)=>{if(!ok)throw new Error(message);};
   const wait=async predicate=>{for(let i=0;i<120;i++){if(predicate())return;await new Promise(resolve=>setTimeout(resolve,25));}throw new Error('Unified sidebar did not reach the expected state.');};
   const node=id=>document.getElementById(id),update=()=>__events.updated.forEach(fn=>fn(7,{status:'complete'},{active:true,windowId:1}));
-  await wait(()=>!node('endpoint-form').hidden);
+  await wait(()=>!node('signin-form').hidden);
+  check(node('endpoint-form').hidden&&!__requests.some(message=>message.type==='SQC_CONNECT'),'A default workspace still required API URL configuration');
+  node('change-endpoint').click();await wait(()=>!node('endpoint-form').hidden);
   check(__visibilityReports.some(report=>report.windowId===1&&report.visible===true),'Visible sidebar did not announce its visibility');
   Object.defineProperty(document,'visibilityState',{configurable:true,value:'hidden'});document.dispatchEvent(new Event('visibilitychange'));
   check(__visibilityReports.at(-1).visible===false,'Hidden sidebar retained a visible report');delete document.visibilityState;document.dispatchEvent(new Event('visibilitychange'));

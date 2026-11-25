@@ -2,7 +2,13 @@
 (function (root) {
   'use strict';
   function create({ chrome, fetch, policy, screening = root.SQCScreeningPolicy, localResume = root.SQCLocalResume,
-    localResumes = localResume?.createStore({session:chrome.storage.session}), deployment=root.SQCDeployment, defaults = {}, now = Date.now, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)) }) {
+    localResumes = localResume?.createStore({session:chrome.storage.session}), deployment=root.SQCDeployment, defaultApiOrigin=root.SQCConnectionDefaults?.apiOrigin||'',defaults = {}, now = Date.now, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)) }) {
+    const bundledOrigin=defaultApiOrigin?policy.origin(defaultApiOrigin):'';
+    async function ensureDefaultConnection(){
+      if(!bundledOrigin)return;
+      const {sqcConnection}=await chrome.storage.local.get('sqcConnection');
+      if(!sqcConnection?.apiOrigin)await chrome.storage.local.set({sqcConnection:{apiOrigin:bundledOrigin,signedOut:true}});
+    }
     let revision = 0;
     let queue = Promise.resolve();
     const resumeFiles = new Map();
@@ -491,6 +497,7 @@
           currentStatus: context.status, applier: auth.applier, profileName: profile.fullName } : null };
     }
     async function handleInternal(message, sender) {
+      await ensureDefaultConnection();
       const action = message.action || message.type;
       if(action==='SQC_RECORD_PORTAL_NAVIGATION'){
         if(!sender.tab||privileged(sender)||(sender.frameId||0)!==0||message.frameOrigin!=='https://jobs.ashbyhq.com'||!['ATS_RESET_JOB_SELECTION','ATS_SET_JOB_SELECTION'].includes(message.kind))return {success:false};
