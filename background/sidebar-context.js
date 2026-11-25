@@ -166,9 +166,10 @@
         try{
           const result=await session.handle({type:'SQC_ANSWER_QUESTIONS',requestId,url:current.tab.url,context:current.c,
             questions:questions.map(q=>({...q,type:q.type==='yes_no'?'radio':['date','email','url','tel'].includes(q.type)?'text':q.type||'textarea'}))},sender);
-          if(!result?.success)throw new Error(result?.error||'ApplyFlow did not return screening answers.');
+          if(!result?.success)throw Object.assign(new Error(result?.error||'ApplyFlow did not return screening answers.'),{debug:result?.debug});
           signal?.throwIfAborted();return result.answers;
-        }finally{signal?.removeEventListener('abort',cancel);}
+        }catch(error){if(root.SQCQADiagnostics)error.debug=root.SQCQADiagnostics.from(error,{requestId,batchRequestId:requestId,stage:'applyflow_request',questionCount:questions.length});throw error;}
+        finally{signal?.removeEventListener('abort',cancel);}
       }
       async function aiConfig(){const current=await context(true);const {sqcAuth}=await chrome.storage.session.get('sqcAuth');return {endpoint:current.cfg.integration.apiOrigin+'/api/ai/chat',credentials:'include',csrfToken:sqcAuth?.csrfToken};}
       return {context,state,snapshot,save,clear,assertCurrent,attachment,scan,apply,attach,panel,action,aiConfig,answer,readUpload,normalizeUpload};

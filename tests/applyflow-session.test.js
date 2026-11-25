@@ -808,6 +808,17 @@ test('stale client assignments fail before the screening provider is called',asy
   await assert.rejects(f.service.handle(message,f.sender(1)),/changed before generation/);
   assert.equal(f.calls.some(call=>call.url.endsWith('/answer-questions')),false);
 });
+
+test('failed provider jobs preserve HTTP 200 transport, provider 429 and polling request details for Q&A debugging',async()=>{
+ require('../ai/diagnostics');const f=fixture(),message=await screeningMessage(f);let payload;
+ f.intercept((url,options)=>{
+   if(url.endsWith('/api/sqc/answer-questions')){payload=JSON.parse(options.body);return jsonResponse({...payload,success:true,status:'QUEUED',statusUrl:'/api/sqc/answer-questions/requests/run-test'});}
+   if(url.endsWith('/api/sqc/answer-questions/requests/run-test'))return jsonResponse({...payload,success:true,status:'FAILED',provider:'Codex',runId:'run-test',error:{status:429,code:'insufficient_quota',message:'429 You have no credits remaining'}});
+ });
+ await assert.rejects(f.service.handle(message,f.sender(1)),error=>{
+   assert.equal(error.debug.httpStatus,200);assert.equal(error.debug.providerStatus,429);assert.equal(error.debug.stage,'polling');assert.equal(error.debug.classification,'PROVIDER_QUOTA');assert.equal(error.debug.runId,'run-test');assert.equal(error.debug.path,'/api/sqc/answer-questions/requests/run-test');return true;
+ });
+});
 test('answer responses must echo the original request and all version identifiers',async()=>{
   const f=fixture(),message=await screeningMessage(f);
   f.intercept((url,options)=>url.endsWith('/answer-questions')?jsonResponse(answerResponse(JSON.parse(options.body),{resumeVersion:'different'})):undefined);

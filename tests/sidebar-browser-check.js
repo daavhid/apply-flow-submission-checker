@@ -191,6 +191,11 @@ async function runSidebarSmoke(){
   }
   cd.body.innerHTML='<h1>Review your application</h1><div style="opacity:0"><p>Your application has been received.</p></div><div class="sqc-root"><p>Thank you for applying.</p></div>';
   check(!cw.JobFormExtractor.detectSubmissionSuccess().is_success,'Hidden or extension-owned success text was accepted as employer proof');confirmation.remove();
+  acceptAnswers([{id:'debug-field',question:'Private question text',answer:'',needsInput:true,error:true,reason:'ApplyFlow HTTP 200 at /api/sqc/answer-questions/requests/run-one: 429 You have no credits remaining.',debug:{httpStatus:200,providerStatus:429,path:'/api/sqc/answer-questions/requests/run-one',requestId:'child-request',stage:'polling'}}],'parent-request');
+  const debugPanel=node('qa-debug');check(debugPanel?.open&&debugPanel.textContent.includes('credits or quota'),'Failed Q&A did not expose actionable error details');
+  const report=JSON.parse(node('qa-debug-report').textContent);check(report.errors[0].httpStatus===200&&report.errors[0].providerStatus===429&&report.errors[0].requestId==='parent-request','Debug lost transport/provider status or request correlation');
+  let copiedDebug='';const beforeDebugWrite=navigator.clipboard.writeText;navigator.clipboard.writeText=async value=>copiedDebug=value;node('copy-qa-debug').click();await wait(()=>copiedDebug.includes('SQC_QA_DEBUG'));navigator.clipboard.writeText=beforeDebugWrite;
+  check(!copiedDebug.includes('Private question text'),'Debug export included question content');node('clear-qa-debug').click();check(!node('qa-debug'),'Debug clear action did not remove the report');
   check(document.documentElement.scrollWidth<=window.innerWidth,'Unified sidebar overflows horizontally');
   document.activeElement?.blur();window.scrollTo(0,0);
   return 'Passed: unified SQC and Q&A, assigned context, no floating HUD, no manual completion, and visible-portal-only success detection.';

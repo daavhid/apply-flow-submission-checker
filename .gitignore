@@ -25,3 +25,4 @@ server/data/submissions.json
 dist/
 .test-artifacts/
 
+config.bat

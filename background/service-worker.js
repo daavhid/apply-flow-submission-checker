@@ -71,7 +71,7 @@ async function openSettings(section) {
   return { success: true };
 }
 
-importScripts('../config/connection.js','../content/context-policy.js', '../content/screening-policy.js', '../content/resume-context.js','../content/candidate-reference.js','../content/portal-availability.js','../content/live-progress.js', 'local-resume.js', 'application-journal.js', 'applyflow-session.js','job-activation.js','portal-availability.js');
+importScripts('../ai/diagnostics.js','../config/connection.js','../content/context-policy.js', '../content/screening-policy.js', '../content/resume-context.js','../content/candidate-reference.js','../content/portal-availability.js','../content/live-progress.js', 'local-resume.js', 'application-journal.js', 'applyflow-session.js','job-activation.js','portal-availability.js');
 const sqcApplyFlow = SQCApplyFlowSession.create({ chrome, fetch: (...args) => fetch(...args), policy: SQCContextPolicy, defaults: DEFAULT_SETTINGS });
 const sqcAvailability=globalThis.SQCPortalAvailabilityService?.create({chrome,session:sqcApplyFlow});
 const sqcActivator=globalThis.SQCJobActivation?.create({chrome,session:sqcApplyFlow,policy:SQCContextPolicy,onVerified:(tabId,cfg)=>sqcAvailability?.check(tabId,cfg)});

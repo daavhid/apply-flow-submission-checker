@@ -7,7 +7,7 @@
       while(next<chunks.length){
         signal.throwIfAborted();const chunk=chunks[next++];let answers;
         try{answers=await answer(chunk);signal.throwIfAborted();}
-        catch(error){if(signal.aborted)throw error;answers=chunk.map(q=>({...q,answer:'',needsInput:true,error:true,reason:error.message || 'This batch could not be answered.'}));}
+        catch(error){if(signal.aborted)throw error;const debug=root.SQCQADiagnostics?.from(error,{questionCount:chunk.length});answers=chunk.map(q=>({...q,answer:'',needsInput:true,error:true,reason:error.message || 'This batch could not be answered.',...(debug?{debug}:{})}));}
         for(const q of chunk)results.set(q.id,answers.find(a=>a.id===q.id)||{...q,answer:'',needsInput:true,reason:'ApplyFlow did not return this answer.'});
         completed+=chunk.length;onProgress({completed,total:questions.length,answers:chunk.map(q=>results.get(q.id))});
       }

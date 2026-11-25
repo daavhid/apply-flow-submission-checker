@@ -1,5 +1,25 @@
 'use strict';
 const $=selector=>document.querySelector(selector);
+const qaDebugEntries=[];
+function showQAError(error,context={}){
+  const entry=SQCQADiagnostics.from(error,{extensionVersion:chrome.runtime.getManifest?.().version,...context});
+  const signature=JSON.stringify([entry.requestId,entry.batchRequestId,entry.classification,entry.path,entry.code]);
+  if(qaDebugEntries.some(item=>item.signature===signature))return;
+  qaDebugEntries.push({signature,entry});if(qaDebugEntries.length>10)qaDebugEntries.shift();
+  let panel=document.getElementById('qa-debug');
+  if(!panel){
+    panel=document.createElement('details');panel.id='qa-debug';panel.className='qa-debug';
+    const summary=document.createElement('summary'),explanation=document.createElement('p'),pre=document.createElement('pre'),copyButton=document.createElement('button'),clearButton=document.createElement('button');
+    summary.textContent='Q&A error details';explanation.className='help';pre.id='qa-debug-report';copyButton.type=clearButton.type='button';copyButton.id='copy-qa-debug';copyButton.textContent='Copy error details';clearButton.id='clear-qa-debug';clearButton.textContent='Clear details';
+    copyButton.onclick=async()=>{try{await navigator.clipboard.writeText(pre.textContent);copyButton.textContent='Copied';}catch(_){copyButton.textContent='Copy failed — select the details manually';}};
+    clearButton.onclick=()=>{qaDebugEntries.length=0;panel.remove();};
+    panel.append(summary,explanation,copyButton,clearButton,pre);$('#status').after(panel);
+  }
+  panel.open=true;panel.querySelector('p').textContent=entry.summary+' '+entry.action;
+  panel.querySelector('summary').textContent='Q&A error details ('+qaDebugEntries.length+')';
+  panel.querySelector('pre').textContent=JSON.stringify({type:'SQC_QA_DEBUG',errors:qaDebugEntries.map(item=>item.entry)},null,2);
+  panel.querySelector('#copy-qa-debug').textContent='Copy error details';
+}
 let activeRequest=null, answers=[], selectedResume=null, resumeBusy=false, parsingResume=false, resumeDirty=false, resumeSequence=0;
 let queuedQuestions=[], resultRequestId=null, pendingOrder=[];
 const editedAnswers=new Map();
@@ -128,7 +148,7 @@ function renderAnswers(){
 function acceptAnswers(items,requestId){
   if(resultRequestId!==requestId){resultRequestId=requestId;answers=[];editedAnswers.clear();choiceStates.clear();$('#answers').replaceChildren();}
   const saved=new Map(answers.map(item=>[item.id,item]));
-  for(const item of items){if(editedAnswers.has(item.id))item.answer=editedAnswers.get(item.id);const existing=saved.get(item.id);if(existing)Object.assign(existing,item);else saved.set(item.id,item);}
+  for(const item of items){if(item.error)showQAError({message:item.reason,debug:item.debug},{requestId});if(editedAnswers.has(item.id))item.answer=editedAnswers.get(item.id);const existing=saved.get(item.id);if(existing)Object.assign(existing,item);else saved.set(item.id,item);}
   answers=Array.from(saved.values()).sort((a,b)=>pendingOrder.indexOf(a.id)-pendingOrder.indexOf(b.id));renderAnswers();
   for(const item of items)if(!item.needsInput&&!item.error&&(item.options?$('#apply-choices').checked:$('#apply-text').checked&&!item.draft))applyChoice(item);
 }
@@ -182,13 +202,13 @@ $('#questions-form').addEventListener('submit',async event=>{
     $('#progress-text').textContent='Processing '+questions.length+' questions…';status('Your questions have been sent.');
     const result=await sendToWorker({type:'QA_ANSWER',requestId,questions,environment:$('#environment').value});
     if(activeRequest!==requestId)return;
-    if(!result?.success)throw new Error(result?.error || 'The internal API did not return an answer.');
+    if(!result?.success)throw Object.assign(new Error(result?.error || 'The internal API did not return an answer.'),{debug:result?.debug});
     if(result.requestId!==requestId || !Array.isArray(result.answers))throw new Error('The returned answers did not match this request.');
     acceptAnswers(result.answers,requestId);
     const failed=answers.filter(item=>item.error).length,needsInput=answers.filter(item=>item.needsInput&&!item.error).length;
     status('Processed '+answers.length+' questions. '+(answers.length-failed-needsInput)+' answered; '+needsInput+' need your input; '+failed+' failed. Review and copy below.',failed>0);
     $('.results').scrollIntoView({block:'start'});
-  }catch(error){if(activeRequest===requestId)status(error.message,true);}
+  }catch(error){if(activeRequest===requestId){showQAError(error,{requestId,questionCount:questions.length});status(error.message,true);}}
   finally {if(activeRequest===requestId){activeRequest=null;busy(false);}}
 });
 $('#stop').addEventListener('click',async()=>{

@@ -1,5 +1,5 @@
 'use strict';
-importScripts(...['config.js','questions.js','client.js','resume-files.js','resume.js','defaults.js','batch.js','form-service.js'].map(file=>chrome.runtime.getURL('ai/'+file)));
+importScripts(...['config.js','diagnostics.js','questions.js','client.js','resume-files.js','resume.js','defaults.js','batch.js','form-service.js'].map(file=>chrome.runtime.getURL('ai/'+file)));
 const requests=new Map();
 const forms=SQCQAForms.create(chrome);
 chrome.storage.session.setAccessLevel({accessLevel:'TRUSTED_CONTEXTS'});
@@ -60,7 +60,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
 
     const request={id:message.requestId,environment,controller:new AbortController()};
     requests.set(key,request);
-    let timedOut=false;
+    let timedOut=false,generationStage='resume_context';
     const timer=setTimeout(()=>{timedOut=true;request.controller.abort();},SQC_AI_CONFIG.timeoutMs*Math.max(1,Math.ceil(questions.length/20)));
     try {
       await migration;
@@ -77,15 +77,16 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
         const generated=pending.length?await scope.answer(pending,{requestId:message.requestId+'_'+(++batchIndex),signal:request.controller.signal}):[];
         return SQCQuestionClient.normalize({answers:[...local.values(),...generated]},items);
       };
-      const answers=await SQCQABatch.run({questions,signal:request.controller.signal,answer:answerBatch,onProgress:progress=>{
+      generationStage='request';const answers=await SQCQABatch.run({questions,signal:request.controller.signal,answer:answerBatch,onProgress:progress=>{
         if(!request.controller.signal.aborted)chrome.runtime.sendMessage?.({type:'QA_BATCH_PROGRESS',requestId:message.requestId,...progress})?.catch(()=>{});
       }});
-      await resumeService.assertCurrent(snapshot);
+      generationStage='context_validation';await resumeService.assertCurrent(snapshot);
       await defaults.assertCurrent(answerDefaults,snapshot.version);
       request.controller.signal.throwIfAborted();
       return {success:true,requestId:message.requestId,answers};
     } catch(error) {
-      return {success:false,requestId:message.requestId,error:request.invalidated?'The resume or answer defaults changed. Request fresh answers.':request.controller.signal.aborted ? timedOut?'Answer generation timed out. Try again.':'Request stopped.':error.message || 'Could not reach the internal AI API.'};
+      error.state=timedOut?'TIMEOUT':request.invalidated?'VERSION_MISMATCH':request.controller.signal.aborted?'CANCELLED':error.state;
+      return {success:false,requestId:message.requestId,debug:SQCQADiagnostics.from(error,{requestId:message.requestId,stage:generationStage,extensionVersion:chrome.runtime.getManifest?.().version,questionCount:questions.length}),error:request.invalidated?'The resume or answer defaults changed. Request fresh answers.':request.controller.signal.aborted ? timedOut?'Answer generation timed out. Try again.':'Request stopped.':error.message || 'Could not reach the internal AI API.'};
     } finally {clearTimeout(timer);if(requests.get(key)===request)requests.delete(key);}
   };
   work().then(reply).catch(error=>reply({success:false,error:error.message || 'Answer generation failed.'}));

@@ -14,6 +14,7 @@
     const resumeFiles = new Map();
     const pendingAnswers = new Map();
     const contextConflicts=new Map();
+    const responseMetadata=new WeakMap();
     const maxResumeBytes = 10 * 1024 * 1024;
     const journal=root.SQCApplicationJournal?.create({store:chrome.storage.session,now});
     const forbidden = new Set(['SAVE_PROFILE', 'DELETE_PROFILE', 'ARCHIVE_PROFILE', 'TOGGLE_ARCHIVE_PROFILE',
@@ -89,7 +90,7 @@
               `ApplyFlow HTTP ${res.status} at ${path}${code?' ['+code+']':''}: ${String(reason).slice(0,800)}`,
             {status:res.status,path,backendCode:code});
         }
-        return data;
+        responseMetadata.set(data,{status:res.status,path});return data;
       } catch (error) {
         if (error.state) throw error;
         if (options.signal?.aborted) throw failure('CANCELLED', 'Answer generation was stopped.');
@@ -811,6 +812,7 @@
       const key = answerKey(sender);
       if (pendingAnswers.has(key)) return {success:false,error:'Questions are already being generated for this page.'};
       const operation = {controller:new AbortController(),requestId:message.requestId};
+      let diagnosticStage='context_validation';
       pendingAnswers.set(key,operation);
       try {
         const snapshot = await serialize(async () => {
@@ -846,6 +848,7 @@
         await assertCurrent();
         const options = () => ({timeoutMs:Math.max(1,Math.min(25000,deadline-now())),signal:operation.controller.signal});
         let result,answerPath;
+        diagnosticStage='request';
         for(answerPath of ['/api/sqc/answer-questions','/api/submissions/answer-questions','/api/ai/answer-questions']) {
           try {result=await request(snapshot.auth.apiOrigin,answerPath,'POST',payload,snapshot.auth.csrfToken,options());break;}
           catch(error){if(error.state!=='HTTP_ROUTE_MISSING'||answerPath==='/api/ai/answer-questions')throw error;}
@@ -857,7 +860,8 @@
         const checkGenerationFailure = value => {
           if (['FAILED','CANCELLED'].includes(String(value.status || '').toUpperCase())) {
             const reason=typeof value.error==='string'?value.error:value.error?.message || value.message || 'Ask the ApplyFlow administrator to check the configured AI provider, model, and credentials.';
-            throw failure('GENERATION_FAILED',`ApplyFlow AI generation failed at ${answerPath}: ${String(reason).slice(0,800)}`,{path:answerPath});
+            const transport=responseMetadata.get(value)||{};
+            throw failure('GENERATION_FAILED',`ApplyFlow AI generation failed at ${transport.path||answerPath}: ${String(reason).slice(0,800)}`,{path:transport.path||answerPath,status:transport.status,jobStatus:String(value.status).toUpperCase(),backendCode:value.error?.code||value.code,providerStatus:value.error?.status||value.error?.statusCode||value.providerStatus,provider:typeof value.provider==='string'?value.provider:value.provider?.name,runId:value.runId||value.run_id});
           }
         };
         checkGenerationFailure(result);validateEnvelope(result);
@@ -871,12 +875,12 @@
           if (url.origin !== snapshot.auth.apiOrigin || url.username || url.password || url.hash) throw failure('INVALID_RESPONSE','The answer-status URL must use your saved ApplyFlow server.');
           await sleep(3000); await assertCurrent();
           if (now() >= deadline) throw failure('TIMEOUT','Answer generation took too long. Please try again.');
-          result = await request(snapshot.auth.apiOrigin,url.pathname+url.search,'GET',undefined,undefined,options());
+          diagnosticStage='polling';result = await request(snapshot.auth.apiOrigin,url.pathname+url.search,'GET',undefined,undefined,options());
           checkGenerationFailure(result);
         }
         await assertCurrent();
         checkGenerationFailure(result);
-        const answers = screening.answers(result,expected,snapshot.questions);
+        diagnosticStage='response_validation';const answers = screening.answers(result,expected,snapshot.questions);
         return await serialize(async () => {
           await assertCurrent();
           const current = await config({force:true},sender,false);
@@ -885,7 +889,8 @@
           await assertCurrent();
           return {success:true,contractVersion:2,...expected,answers,meta:{questionsCount:snapshot.questions.length}};
         });
-      } finally { if (pendingAnswers.get(key) === operation) pendingAnswers.delete(key); }
+      } catch(error){if(root.SQCQADiagnostics)error.debug=root.SQCQADiagnostics.from(error,{requestId:message.requestId,stage:diagnosticStage,questionCount:message.questions?.length});throw error;}
+      finally { if (pendingAnswers.get(key) === operation) pendingAnswers.delete(key); }
     }
     function serialize(work) {
       const result = queue.then(work); queue = result.catch(() => {}); return result;

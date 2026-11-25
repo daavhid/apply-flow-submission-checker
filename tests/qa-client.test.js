@@ -60,7 +60,7 @@ function worker(){
     storage:{local:{setAccessLevel(){}},session:{setAccessLevel(){},async remove(){}}},
     sidePanel:{async setPanelBehavior(options){panelBehaviors.push(options);}},
     tabs:{create(){assert.fail('Q&A must not open a browser tab');},update(){assert.fail('Q&A must not change the active tab');}}};
-  const context=vm.createContext({chrome,AbortController,SQCQADefaults:{create:()=>({snapshot:async()=>null,assertCurrent:async()=>{}})},SQCQAQuestions:questionPolicy,SQCQABatch:batch,SQCQAForms:require('../ai/form-service'),SQCQAResume:{create:()=>({snapshot:async()=>({text:'A sufficiently detailed test resume for answering questions.',version:'1'}),assertCurrent:async()=>{}})},setTimeout,clearTimeout,Map,importScripts(){},SQC_AI_CONFIG:{...config,localEndpoint:'http://localhost:5000/api/ai/chat',timeoutMs:1000},SQCQuestionClient:client});
+  const context=vm.createContext({chrome,AbortController,SQCQADiagnostics:require('../ai/diagnostics'),SQCQADefaults:{create:()=>({snapshot:async()=>null,assertCurrent:async()=>{}})},SQCQAQuestions:questionPolicy,SQCQABatch:batch,SQCQAForms:require('../ai/form-service'),SQCQAResume:{create:()=>({snapshot:async()=>({text:'A sufficiently detailed test resume for answering questions.',version:'1'}),assertCurrent:async()=>{}})},setTimeout,clearTimeout,Map,importScripts(){},SQC_AI_CONFIG:{...config,localEndpoint:'http://localhost:5000/api/ai/chat',timeoutMs:1000},SQCQuestionClient:client});
   vm.runInContext(fs.readFileSync('ai/worker.js','utf8'),context);
   return {listeners,context,chrome,panelBehaviors,resumes:vm.runInContext('resumes',context)};
 }

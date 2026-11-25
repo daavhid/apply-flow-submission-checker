@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Apply-Flow Quality Gatekeeper",
-  "version": "1.6.25",
-  "version_name": "1.6.25 - PDF delivery, skill names and stable answer review",
-  "description": "An Apply-Flow Subsidiary Suite — Real-time ATS form extractor, submission quality validator, live HUD, and duplicate prevention gatekeeper.",
+  "version": "1.6.27",
+  "version_name": "1.6.27 - Q&A diagnostics",
+  "description": "An Apply-Flow Subsidiary Suite \u2014 Real-time ATS form extractor, submission quality validator, live HUD, and duplicate prevention gatekeeper.",
   "permissions": [
     "storage",
     "activeTab",
