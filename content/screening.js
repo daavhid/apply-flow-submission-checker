@@ -80,6 +80,7 @@
       const match=nodes.find(radio=>!radio.disabled && (labelFor(radio)||radio.value)===answer);
       if(!match)return false;match.click();if(!match.isConnected || !match.checked)return false;emit(match);return true;
     } else if(type==='checkbox') {
+      if(Array.isArray(answer)){if(answer.length>1)return false;answer=answer[0] || 'No';}
       if(!['Yes','No'].includes(answer))return false;
       if(node.checked !== (answer==='Yes'))node.click();if(node.checked !== (answer==='Yes'))return false;
     } else {

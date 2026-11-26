@@ -74,5 +74,10 @@ async function runFormBridgeSmoke(){
   document.body.appendChild(extra);const found=SQCQAFormBridge.scan(extra).questions;
   check(found.length===2&&found[0].options.length===2&&found[0].question==='Business domains'&&found[1].question==='Expected pay','Short labels or nested field headings were missed');
   fill(found[0],['Finance','Healthcare']);check(extra.querySelectorAll('input:checked').length===2,'Array multi-answer input was not applied');extra.remove();
+  const multiple=document.createElement('section');multiple.innerHTML='<label>Which databases have you used?<select multiple><option value="pg">PostgreSQL</option><option value="my">MySQL</option><option value="or">Oracle</option></select></label><div role="group" aria-label="Select all cloud platforms used"><div role="checkbox" aria-label="AWS" aria-checked="false" tabindex="0"></div><div role="checkbox" aria-label="Azure" aria-checked="false" tabindex="0"></div><div role="checkbox" aria-label="GCP" aria-checked="false" tabindex="0"></div></div>';
+  document.body.appendChild(multiple);multiple.querySelectorAll('[role=checkbox]').forEach(node=>node.addEventListener('click',()=>node.setAttribute('aria-checked',String(node.getAttribute('aria-checked')!=='true'))));
+  const multiFields=SQCQAFormBridge.scan(multiple).questions;check(multiFields.length===2&&multiFields.every(q=>q.type==='checkbox'),'Multi-select or ARIA checkbox group lost its multiple-choice type');
+  fill(multiFields[0],['PostgreSQL','Oracle']);check(Array.from(multiple.querySelector('select').selectedOptions).map(option=>option.value).join(',')==='pg,or','Multi-select did not select the exact returned set');
+  fill(multiFields[1],['AWS','Azure']);check(multiple.querySelectorAll('[aria-checked=true]').length===2&&multiple.querySelector('[aria-label=GCP]').getAttribute('aria-checked')==='false','ARIA checkbox group did not select the exact returned set');multiple.remove();
   return 'Passed: broader detection, individual multi-answer checkboxes, exact selection, preserved user edits and no automatic sending.';
 }

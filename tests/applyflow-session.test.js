@@ -740,6 +740,35 @@ const answerResponse = (payload, extra={}) => ({success:true,contractVersion:2,.
   answers:[{id:'why',status:'ANSWERED',answer:'My verified experience fits this role.'}],...extra});
 const jsonResponse = (data,status=200) => ({status,ok:status>=200&&status<300,async json(){return data;}});
 
+test('ApplyFlow mixed question batches preserve checkbox arrays, radio/dropdown options and numeric metadata',async()=>{
+ const f=fixture(),message=await screeningMessage(f);
+ message.questions=[
+  {id:'tools',question:'Select all tools used',type:'checkbox',options:['Python','SQL','Rust'],required:true},
+  {id:'level',question:'Choose experience level',type:'radio',options:['Junior','Senior']},
+  {id:'country',question:'Country',type:'select',options:['United States','Canada']},
+  {id:'years',question:'Years of experience?',type:'number',min:0,max:50,step:1,help:'Whole years only.'},
+  {id:'why',question:'Why this role?',type:'textarea',maxLength:1000}
+ ];
+ let posted;
+ f.intercept((url,options)=>{
+  if(!url.endsWith('/answer-questions'))return;
+  posted=JSON.parse(options.body);
+  return jsonResponse(answerResponse(posted,{answers:[
+   {id:'tools',status:'ANSWERED',answer:['Python','SQL']},
+   {id:'level',status:'ANSWERED',answer:'Senior',matchedOption:'Senior'},
+   {id:'country',status:'ANSWERED',answer:'United States',matchedOption:'United States'},
+   {id:'years',status:'ANSWERED',answer:'5'},
+   {id:'why',status:'ANSWERED',answer:'I build reliable Python services.'}
+  ]}));
+ });
+ const result=await f.service.handle(message,f.sender(1));assert.equal(result.success,true);
+ assert.deepEqual(posted.questions,message.questions.map(q=>({...q,required:q.required===true})));
+ assert.deepEqual(result.answers[0].answer,['Python','SQL']);
+ const normalized=require('../ai/client').normalize({answers:result.answers},message.questions);
+ assert.ok(normalized.every(answer=>!answer.needsInput));assert.equal(normalized[0].answer,'Python\nSQL');
+ assert.equal(normalized[1].answer,'Senior');assert.equal(normalized[2].answer,'United States');assert.equal(normalized[3].answer,'5');
+});
+
 test('context version conflicts refresh the session once and retry the same tracked job',async()=>{
  const f=fixture();let version='v1',contexts=0;
  f.tabs[1].url='https://www.mimica.ai/careers?ashby_jid=ashby-posting&src=jobright#application_session_id=application-1&sqc_job_id=job-1&sqc_profile_id=profile-1';

@@ -38,12 +38,13 @@
       const numbered=/^\d+[.)]\s+/.test(line),option=/^(?:[A-Za-z][.)]|[-•]|\[[ xX]?\]|[○◯●])\s*/.test(line);
       const simpleOption=/^(?:yes|no|prefer not to (?:say|answer)|not applicable)$/i.test(line);
       if(current && !numbered && (option || simpleOption)){
-        (current.options ||= []).push(line.replace(/^(?:[A-Za-z][.)]|[-•]|\[[ xX]?\]|[○◯●])\s*/,'').trim());current.type='radio';
+        (current.options ||= []).push(line.replace(/^(?:[A-Za-z][.)]|[-•]|\[[ xX]?\]|[○◯●])\s*/,'').trim());
+        current.type=current.type==='checkbox'||/^\[[ xX]?\]/.test(line)||/\b(?:select all|choose all|check all|all that apply|multiple selections)\b/i.test(current.question)?'checkbox':'radio';
       }else{
         current={question:line.replace(/^\d+[.)]\s+/,''),type:'textarea'};items.push(current);
       }
     }
-    for(const item of items)if(item.options?.length===2 && item.options[0]==='Yes' && item.options[1]==='No')item.type='yes_no';
+    for(const item of items)if(item.type!=='checkbox' && item.options?.length===2 && item.options[0]==='Yes' && item.options[1]==='No')item.type='yes_no';
     return items;
   }
   const api={types,choice,validate,parse};root.SQCQAQuestions=api;if(typeof module!=='undefined')module.exports=api;

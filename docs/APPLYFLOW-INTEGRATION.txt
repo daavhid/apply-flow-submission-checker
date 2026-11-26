@@ -1,4 +1,4 @@
-CURRENT BEHAVIOR (1.6.27)
+CURRENT BEHAVIOR (1.6.28)
 
 Q&A diagnostics: failed batches and failed whole requests expose an expandable Q&A error-details panel. It retains up to ten unique failures in sidebar memory and supports Copy error details/Clear details. The allowlisted report includes parent/batch request IDs, generation/polling/context stage, transport HTTP status, reported or inferred provider status, backend code, safe endpoint path and reported provider run ID. HTTP 200 status polling may still report a failed provider job (for example provider 429/quota exhaustion). Guidance distinguishes quota, authorization, timeout, cancellation and context changes. Raw request/response bodies, resume text, question/answer content, credentials and URL query strings are excluded from the copy report. Provider/model/run fields are available only when the backend reports them.
 
@@ -806,18 +806,29 @@ Completed response:
   "resumeId":"resume_123","resumeVersion":"2",
   "answers":[
     {"id":"stable_field_uuid","status":"NEEDS_INPUT","answer":"","reasoning":"Candidate facts do not support a grounded answer."},
-    {"id":"stable_choice_uuid","status":"ANSWERED","answer":"5+ years","matchedOption":"5+ years","confidence":0.98}
+    {"id":"stable_choice_uuid","status":"ANSWERED","answer":"5+ years","matchedOption":"5+ years","confidence":0.98},
+    {"id":"stable_checkbox_uuid","status":"ANSWERED","answer":["Python","SQL"]}
   ]
 }
 
 Echo contractVersion, requestId, and every application/job/profile/resume ID and
 version exactly, even when strings look numeric. Answer IDs must be unique and
-belong to the request. ANSWERED requires a nonempty string. For select/radio
+belong to the request. ANSWERED requires a nonempty string for scalar fields. For select/radio
 questions, answer and matchedOption must equal a literal supplied option. Never
 guess unknown employment, eligibility, clearance, demographic, or experience
 facts: return NEEDS_INPUT. Honor maxLength; SQC leaves overlong answers for review
 rather than silently truncating them. Supported types are text, textarea,
-number, select, radio, and checkbox (checkbox choices are Yes/No).
+number, select, radio, and checkbox. Checkbox groups and native multi-selects use
+answer as an array of exact supplied option labels, for example ["Python","SQL"].
+Return every supported selected option, without prose, numeric indexes or comma-separated
+serialization. A single exact checkbox label is accepted as a one-element array for
+compatibility. An empty array means no selections; unknown facts must use NEEDS_INPUT.
+Single checkboxes may expose their literal label; the older page HUD exposes Yes/No.
+The sidebar also detects date/email/url/tel fields (sent through the v2 text type),
+and preserves accessible help and numeric min/max/step metadata in API requests.
+Custom dropdowns can be filled only when their exact options are available in the DOM;
+otherwise SQC provides an answer for manual selection. Uploads use the original file
+attachment flow, not generated text. Consent/signature controls need explicit user action.
 
 The extension snapshots visible unanswered native controls and their stable
 IDs before dispatch. It verifies context again before filling, preserves edited

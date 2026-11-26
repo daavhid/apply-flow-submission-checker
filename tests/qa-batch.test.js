@@ -23,6 +23,21 @@ test('overlong answers request review instead of silently truncating',()=>{
   assert.equal(client.normalize({answers:[{id:'q1',answer:'Long answer'}]},questions)[0].needsInput,true);
 });
 
+test('single checkbox labels normalize to selections while concatenated or invented options require review',()=>{
+  const questions=policy.validate([{question:'Which tools?',type:'checkbox',options:['Python, SQL','Docker','Rust']}]);
+  const answer=value=>client.normalize({answers:[{id:'q1',status:'ANSWERED',answer:value}]},questions)[0];
+  assert.equal(answer('Python, SQL').answer,'Python, SQL');assert.equal(answer('Python, SQL').needsInput,false);
+  assert.equal(answer(['Python, SQL','Docker']).answer,'Python, SQL\nDocker');
+  for(const value of ['Docker, Rust','Docker\nRust',['Unknown'],['Docker','Docker']])assert.equal(answer(value).needsInput,true);
+  assert.equal(answer([]).needsInput,false);
+});
+
+test('pasted select-all questions and checkbox markers retain multiple-choice types',()=>{
+  const items=policy.validate(policy.parse('1. Which tools? Select all that apply.\n- Python\n- SQL\n2. Skills\n[ ] Docker\n[x] Rust\n3. Eligible?\nYes\nNo'));
+  assert.equal(items[0].type,'checkbox');assert.deepEqual(items[0].options,['Python','SQL']);
+  assert.equal(items[1].type,'checkbox');assert.deepEqual(items[1].options,['Docker','Rust']);assert.equal(items[2].type,'yes_no');
+});
+
 test('dates and contact fields do not display malformed model values as valid answers',()=>{
   const questions=policy.validate([{question:'Start date?',type:'date'},{question:'Email?',type:'email'},{question:'Portfolio?',type:'url'}]);
   const invalid=client.normalize({answers:[{id:'q1',answer:'2026-02-31'},{id:'q2',answer:'unknown'},{id:'q3',answer:'javascript:alert(1)'}]},questions);

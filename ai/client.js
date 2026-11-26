@@ -84,7 +84,9 @@ Return only JSON: {"answers":[{"id":"q1","status":"ANSWERED","answer":"...","dra
     }
     return requested.map(q=>{
       const item=result.answers.find(a=>a.id===q.id);
-      const value=item?.answer;
+      // Some v2 backends return a single checkbox choice as text. Only an exact
+      // literal option is unambiguous; never split prose or comma-delimited labels.
+      const value=q.type==='checkbox' && typeof item?.answer==='string' && q.options?.includes(item.answer)?[item.answer]:item?.answer;
       let invalid='';
       if(item && item.status!=='NEEDS_INPUT'){
         if(q.options && (q.type==='checkbox'? !Array.isArray(value) || value.some(v=>!q.options.includes(v)) || new Set(value).size!==value.length : !q.options.includes(value)))invalid='The returned answer did not match the supplied choices. Select the correct option manually.';

@@ -13,6 +13,14 @@
       if (typeof item.question !== 'string' || !item.question.trim() || item.question.length > 4000 ||
           !['text','textarea','number','select','radio','checkbox'].includes(item.type)) throw new Error('A screening question has invalid text or type.');
       const result = {id:item.id,question:item.question,type:item.type,required:item.required === true};
+      if (typeof item.help === 'string') result.help = item.help.slice(0,2000);
+      if (item.type === 'number') for (const name of ['min','max','step']) {
+        if (item[name] === undefined || item[name] === '') continue;
+        if (name === 'step' && item[name] === 'any') {result[name] = 'any';continue;}
+        const value = Number(item[name]);
+        if (!Number.isFinite(value) || name === 'step' && value <= 0) throw new Error('A question has an invalid numeric constraint.');
+        result[name] = value;
+      }
       if (item.options !== undefined) {
         if (!Array.isArray(item.options) || !item.options.length || item.options.length > 100 ||
             item.options.some(option => typeof option !== 'string' || !option || option.length > 1000) || new Set(item.options).size !== item.options.length) throw new Error('Question options must be unique literal choices.');
@@ -38,9 +46,10 @@
       if (!question || ids.has(answer.id) || !['ANSWERED','NEEDS_INPUT'].includes(answer.status)) throw new Error('ApplyFlow returned unknown, duplicate, or invalid question answers.');
       ids.add(answer.id);
       if (answer.status === 'NEEDS_INPUT') return {id:answer.id,status:'NEEDS_INPUT',answer:'',reason:String(answer.reason || answer.reasoning || 'This answer needs your input.').slice(0,1000)};
-      if(question.type==='checkbox'&&Array.isArray(answer.answer)){
-        if(new Set(answer.answer).size!==answer.answer.length||answer.answer.some(value=>!question.options.includes(value)))return {id:answer.id,status:'NEEDS_INPUT',answer:'',reason:'The checkbox answers did not match available options.'};
-        return {id:answer.id,status:'ANSWERED',answer:answer.answer};
+      if(question.type==='checkbox'){
+        const selected=typeof answer.answer==='string'&&question.options.includes(answer.answer)?[answer.answer]:answer.answer;
+        if(!Array.isArray(selected)||new Set(selected).size!==selected.length||selected.some(value=>!question.options.includes(value)))return {id:answer.id,status:'NEEDS_INPUT',answer:'',reason:'The checkbox answers did not match available options. Return an array of exact option labels.'};
+        return {id:answer.id,status:'ANSWERED',answer:[...selected]};
       }
       if (typeof answer.answer !== 'string' || !answer.answer.trim()) throw new Error('An answered question must contain a nonempty answer.');
       if (question.options && (!question.options.includes(answer.answer) ||

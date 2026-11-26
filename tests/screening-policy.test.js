@@ -29,3 +29,17 @@ test('unknown and omitted facts stay empty while exact literal options are prese
  const unknown=policy.answers(response([{id:'why',status:'NEEDS_INPUT',answer:'fabricated text',reasoning:'Unknown fact'}]),expected,questions);
  assert.equal(unknown[0].answer,'');
 });
+
+test('screening checkbox arrays and literal single choices stay typed for Q&A, with invalid choices flagged',()=>{
+ const requested=policy.questions([{id:'skills',question:'Which tools?',type:'checkbox',options:['Python, SQL','Docker','Rust']}]);
+ const answer=value=>policy.answers(response([{id:'skills',status:'ANSWERED',answer:value}]),expected,requested)[0];
+ assert.deepEqual(answer(['Python, SQL','Docker']).answer,['Python, SQL','Docker']);
+ assert.deepEqual(answer('Docker').answer,['Docker']);assert.deepEqual(answer([]).answer,[]);
+ for(const value of ['Docker, Rust',['Unknown'],['Docker','Docker']])assert.equal(answer(value).status,'NEEDS_INPUT');
+});
+
+test('screening requests preserve accessible help and numeric limits through ApplyFlow',()=>{
+ const [q]=policy.questions([{id:'years',question:'Years?',type:'number',help:'Whole years only.',min:'0',max:'30',step:'1'}]);
+ assert.equal(q.help,'Whole years only.');assert.equal(q.min,0);assert.equal(q.max,30);assert.equal(q.step,1);
+ assert.throws(()=>policy.questions([{...q,step:0}]),/numeric constraint/);
+});
