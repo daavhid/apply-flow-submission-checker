@@ -54,13 +54,13 @@ test('the Q&A package uses temporary detection access without persistent all-sit
   assert.equal(manifest.side_panel.default_path,'ai/app.html');
   const build=fs.readFileSync('build-extension.js','utf8');assert.match(build,/qa:\{manifest:'manifests\/qa.json',files:\['ai','icons'\]/);
 });
-function worker(){
+function worker(scope){
   const listeners={},panelBehaviors=[];
   const chrome={runtime:{id:'test',getURL:path=>'chrome-extension://test/'+path,onMessage:{addListener:fn=>listeners.message=fn}},
     storage:{local:{setAccessLevel(){}},session:{setAccessLevel(){},async remove(){}}},
     sidePanel:{async setPanelBehavior(options){panelBehaviors.push(options);}},
     tabs:{create(){assert.fail('Q&A must not open a browser tab');},update(){assert.fail('Q&A must not change the active tab');}}};
-  const context=vm.createContext({chrome,AbortController,SQCQADiagnostics:require('../ai/diagnostics'),SQCQADefaults:{create:()=>({snapshot:async()=>null,assertCurrent:async()=>{}})},SQCQAQuestions:questionPolicy,SQCQABatch:batch,SQCQAForms:require('../ai/form-service'),SQCQAResume:{create:()=>({snapshot:async()=>({text:'A sufficiently detailed test resume for answering questions.',version:'1'}),assertCurrent:async()=>{}})},setTimeout,clearTimeout,Map,importScripts(){},SQC_AI_CONFIG:{...config,localEndpoint:'http://localhost:5000/api/ai/chat',timeoutMs:1000},SQCQuestionClient:client});
+  const context=vm.createContext({chrome,AbortController,SQCQADiagnostics:require('../ai/diagnostics'),SQCQADefaults:{create:()=>({snapshot:async()=>null,assertCurrent:async()=>{}})},SQCQAQuestions:questionPolicy,SQCQABatch:batch,SQCQAForms:require('../ai/form-service'),SQCQAResume:{create:()=>({snapshot:async()=>({text:'A sufficiently detailed test resume for answering questions.',version:'1'}),assertCurrent:async()=>{}})},setTimeout,clearTimeout,Map,importScripts(){},SQC_AI_CONFIG:{...config,localEndpoint:'http://localhost:5000/api/ai/chat',timeoutMs:1000},SQCQuestionClient:client,SQCIntegrated:scope?{forWindow:()=>scope}:undefined});
   vm.runInContext(fs.readFileSync('ai/worker.js','utf8'),context);
   return {listeners,context,chrome,panelBehaviors,resumes:vm.runInContext('resumes',context)};
 }
@@ -173,4 +173,16 @@ test('a refusal returned as answer text is retried, but legal missing facts are 
     return response({answers:[{id:'q1',answer:'I raised an architecture trade-off during review. I proposed a small comparison and used the findings to help the team agree on an approach.'}]});
   }});
   assert.equal(calls,2);assert.equal(answers[0].draft,true);assert.equal(answers[1].needsInput,true);
+});
+
+test('integrated sidebar queues every question batch instead of colliding with the tab generation guard',async()=>{
+ let active=0,peak=0;const seen=[];
+ const scope={snapshot:async()=>({ready:true,version:'1'}),assertCurrent:async()=>{},answer:async(items,{requestId})=>{
+  active++;peak=Math.max(peak,active);assert.equal(active,1,'only one generation may run for a tab');
+  await new Promise(resolve=>setTimeout(resolve,5));seen.push(requestId);active--;
+  return items.map(q=>({...q,answer:'Verified answer',needsInput:false}));
+ }};
+ const w=worker(scope),questions=Array.from({length:25},(_,i)=>({id:'q'+i,question:'Question '+i,type:'text'}));
+ const result=await new Promise(resolve=>w.listeners.message({type:'QA_ANSWER',requestId:'integrated-batches',questions},{id:'test',url:'chrome-extension://test/ai/app.html'},resolve));
+ assert.equal(result.success,true);assert.equal(peak,1);assert.equal(seen.length,3);assert.equal(result.answers.length,25);assert.ok(result.answers.every(a=>a.answer==='Verified answer'));
 });

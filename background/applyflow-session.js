@@ -81,7 +81,8 @@
             {status:409,path,backendCode:code,validationFields:Array.isArray(fields)?fields.map(field=>typeof field==='string'?field:field?.field||field?.path).filter(value=>typeof value==='string').slice(0,30):[],
               expectedVersions:versions(detail.expectedVersions||detail.details?.expectedVersions||data.expectedVersions),currentVersions:versions(detail.currentVersions||detail.details?.currentVersions||data.currentVersions)});
         }
-        if (!res.ok || data.success !== true && !(options.allowWithoutSuccess && data.success === undefined)) {
+        if (!res.ok || data.success !== true && !(options.allowWithoutSuccess && data.success === undefined) &&
+            !(options.allowGenerationFailure && ['FAILED','CANCELLED'].includes(String(data.status || '').toUpperCase()))) {
           const reason=typeof data.error==='string'?data.error:data.error?.message || data.message || 'The backend did not complete this request.';
           const code=data.error?.code || data.code;
           const missing=[404,405].includes(res.status) && (!code || ['NOT_FOUND','ROUTE_NOT_FOUND','METHOD_NOT_ALLOWED'].includes(code));
@@ -840,18 +841,27 @@
           ...(snapshot.resumeContext ? {resumeContext:snapshot.resumeContext} : {}),
           questions:snapshot.questions,customInstructions:typeof message.customInstructions==='string' ? message.customInstructions.slice(0,4000) : ''};
         const expected = {...screening.stamp(snapshot.c),requestId:payload.requestId};
-        const deadline = now() + 120000;
+        // Allow asynchronous generation and queue overhead for up to ten minutes per batch.
+        const deadline = now() + 600000;
         const assertCurrent = async () => {
           if (operation.controller.signal.aborted || revision !== snapshot.revision) throw failure('CANCELLED','The account or application changed. Answers were discarded.');
           if ((await chrome.tabs.get(sender.tab.id)).url !== snapshot.topUrl) throw failure('STALE_CONTEXT','The application page changed. Answers were discarded.');
         };
         await assertCurrent();
-        const options = () => ({timeoutMs:Math.max(1,Math.min(25000,deadline-now())),signal:operation.controller.signal});
+        const options = () => ({timeoutMs:Math.max(1,Math.min(25000,deadline-now())),signal:operation.controller.signal,allowGenerationFailure:true});
         let result,answerPath;
         diagnosticStage='request';
         for(answerPath of ['/api/sqc/answer-questions','/api/submissions/answer-questions','/api/ai/answer-questions']) {
           try {result=await request(snapshot.auth.apiOrigin,answerPath,'POST',payload,snapshot.auth.csrfToken,options());break;}
-          catch(error){if(error.state!=='HTTP_ROUTE_MISSING'||answerPath==='/api/ai/answer-questions')throw error;}
+          catch(error){
+            if(answerPath==='/api/sqc/answer-questions' && ['TIMEOUT','UNAVAILABLE'].includes(error.state)) {
+              // Recover an accepted POST by ID instead of enqueueing another generation.
+              diagnosticStage='recovery';
+              try { result=await request(snapshot.auth.apiOrigin,answerPath+'/requests/'+encodeURIComponent(payload.requestId),'GET',undefined,undefined,options());break; }
+              catch (recoveryError) { if(recoveryError.state==='CANCELLED')throw recoveryError;throw error; }
+            }
+            if(error.state!=='HTTP_ROUTE_MISSING'||answerPath==='/api/ai/answer-questions')throw error;
+          }
         }
         const validateEnvelope = value => {
           try {screening.envelope(value,expected);}
@@ -866,16 +876,23 @@
         };
         checkGenerationFailure(result);validateEnvelope(result);
         let statusUrl;
-        for (let poll=0; ['PENDING','QUEUED','RUNNING'].includes(String(result.status || '').toUpperCase()); poll++) {
+        while (['PENDING','QUEUED','RUNNING'].includes(String(result.status || '').toUpperCase())) {
           validateEnvelope(result);
-          if (poll >= 40 || now() >= deadline) throw failure('TIMEOUT','Answer generation took too long. Please try again.');
+          if (now() >= deadline) throw failure('TIMEOUT','Answer generation took too long. Please try again.');
           statusUrl = result.statusUrl || statusUrl;
           if (typeof statusUrl !== 'string') throw failure('INVALID_RESPONSE','ApplyFlow did not supply an answer-status URL.');
           const url = new URL(statusUrl,snapshot.auth.apiOrigin);
           if (url.origin !== snapshot.auth.apiOrigin || url.username || url.password || url.hash) throw failure('INVALID_RESPONSE','The answer-status URL must use your saved ApplyFlow server.');
           await sleep(3000); await assertCurrent();
           if (now() >= deadline) throw failure('TIMEOUT','Answer generation took too long. Please try again.');
-          diagnosticStage='polling';result = await request(snapshot.auth.apiOrigin,url.pathname+url.search,'GET',undefined,undefined,options());
+          diagnosticStage='polling';
+          try {
+            result = await request(snapshot.auth.apiOrigin,url.pathname+url.search,'GET',undefined,undefined,options());
+          } catch (error) {
+            // Retry safe status reads only, retaining the same generation request.
+            if (['TIMEOUT','UNAVAILABLE'].includes(error.state) || [429,502,503,504].includes(error.status)) continue;
+            throw error;
+          }
           checkGenerationFailure(result);
         }
         await assertCurrent();

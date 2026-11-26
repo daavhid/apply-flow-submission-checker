@@ -1271,3 +1271,47 @@ test('a correlated committed APPLIED acknowledgement completes immediately even 
   assert.equal(f.calls.filter(call=>call.url.endsWith('/api/sqc/application-context')).length,2,'Only initial and final verification should run, without a post-ack refresh');
   assert.equal(f.chrome.storage.session.data.sqcContexts[1].status,'APPLIED');
 });
+
+// The extension must wait for the asynchronous provider instead of abandoning
+// its request at the old two-minute/40-poll limits.
+test('Codex answers arriving after eight minutes are retained without re-enqueueing',async()=>{
+ const f=fixture(),message=await screeningMessage(f);let payload,polls=0,posts=0;
+ f.intercept((url,options)=>{
+  if(url.endsWith('/answer-questions')){posts++;payload=JSON.parse(options.body);return jsonResponse(answerResponse(payload,{status:'PENDING',answers:undefined,statusUrl:'/api/sqc/answer-questions/requests/slow'}),202);}
+  if(url.endsWith('/requests/slow')){f.advance(3000);polls++;return jsonResponse(answerResponse(payload,polls<170?{status:'RUNNING',answers:undefined}:{}),polls<170?202:200);}
+ });
+ const result=await f.service.handle(message,f.sender(1));assert.equal(result.success,true);assert.equal(posts,1);assert.equal(polls,170);assert.equal(result.requestId,message.requestId);
+});
+test('a transient status timeout is retried with the original request, without duplicate generation',async()=>{
+ const f=fixture(),message=await screeningMessage(f);let payload,polls=0,posts=0;
+ f.intercept((url,options)=>{
+  if(url.endsWith('/answer-questions')){posts++;payload=JSON.parse(options.body);return jsonResponse(answerResponse(payload,{status:'PENDING',answers:undefined,statusUrl:'/api/sqc/answer-questions/requests/retry'}),202);}
+  if(url.endsWith('/requests/retry')){polls++;if(polls===1)throw Object.assign(new Error('temporary timeout'),{state:'TIMEOUT'});if(polls===2)return jsonResponse({success:false,error:'temporary proxy failure'},503);return jsonResponse(answerResponse(payload));}
+ });
+ const result=await f.service.handle(message,f.sender(1));assert.equal(result.success,true);assert.equal(posts,1);assert.equal(polls,3);
+});
+test('generation remains bounded by the ten-minute client deadline',async()=>{
+ const f=fixture(),message=await screeningMessage(f);let payload,posts=0;
+ f.intercept((url,options)=>{
+  if(url.endsWith('/answer-questions')){posts++;payload=JSON.parse(options.body);return jsonResponse(answerResponse(payload,{status:'PENDING',answers:undefined,statusUrl:'/api/sqc/answer-questions/requests/never'}),202);}
+  if(url.endsWith('/requests/never')){f.advance(60000);return jsonResponse(answerResponse(payload,{status:'RUNNING',answers:undefined}),202);}
+ });
+ await assert.rejects(f.service.handle(message,f.sender(1)),e=>e.state==='TIMEOUT');assert.equal(posts,1);
+});
+
+test('a lost POST response recovers the accepted request by ID instead of generating twice',async()=>{
+ const f=fixture(),message=await screeningMessage(f);let payload,posts=0,recovered=false;
+ f.intercept((url,options)=>{
+  if(url.endsWith('/answer-questions')){posts++;payload=JSON.parse(options.body);throw Object.assign(new Error('lost POST response'),{state:'TIMEOUT'});}
+  if(url.endsWith('/requests/'+message.requestId)){recovered=true;return jsonResponse(answerResponse(payload));}
+ });
+ const result=await f.service.handle(message,f.sender(1));assert.equal(result.success,true);assert.equal(posts,1);assert.equal(recovered,true);
+});
+test('asynchronous provider failures display the actual generation error',async()=>{
+ const f=fixture(),message=await screeningMessage(f);let payload;
+ f.intercept((url,options)=>{
+  if(url.endsWith('/answer-questions')){payload=JSON.parse(options.body);return jsonResponse(answerResponse(payload,{status:'PENDING',answers:undefined,statusUrl:'/api/sqc/answer-questions/requests/failed'}),202);}
+  if(url.endsWith('/requests/failed'))return jsonResponse(answerResponse(payload,{success:false,status:'FAILED',error:'Provider is temporarily unavailable',answers:undefined}));
+ });
+ await assert.rejects(f.service.handle(message,f.sender(1)),e=>e.state==='GENERATION_FAILED'&&e.message.includes('Provider is temporarily unavailable'));
+});
